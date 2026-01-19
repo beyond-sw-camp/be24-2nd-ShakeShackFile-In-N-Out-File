@@ -8,7 +8,7 @@ FileInNOut - README (Premium Style)
 </div>
 
 <div align="center">
-<h3>📁 파일 관리와 📝 실시간 문서 협업의 경계를 허무는
+<h3> 파일 관리와 실시간 문서 협업의 경계를 허무는
 
 
 
@@ -19,7 +19,7 @@ FileInNOut - README (Premium Style)
 
 
 
-클라우드 스토리지의 안정성과 Notion 스타일의 협업 경험을 동시에 제공합니다. 🚀
+클라우드 스토리지의 안정성과 Notion 스타일의 협업 경험을 동시에 제공합니다. 
 </p>
 </div>
 
@@ -199,7 +199,7 @@ graph TD
     end
 
 
-💡 아키텍처 특징
+아키텍처 특징
 
 Traffic Distribution: Nginx와 HAProxy를 이중으로 배치하여 정적 리소스 처리와 동적 API 요청을 효율적으로 분산합니다.
 
@@ -258,6 +258,7 @@ Real-time Processing: 문서 동시 편집과 같은 실시간성이 중요한 �
 <div align="center">
 Copyright © 2026 FileInNOut Team. All rights reserved.
 </div>
+
 
 
 
