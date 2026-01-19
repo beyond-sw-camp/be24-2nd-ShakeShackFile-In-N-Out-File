@@ -132,7 +132,8 @@ FileInNOut은 단순한 클라우드 저장소를 넘어, **파일 관리 시스
 </p>
 
 <p align="center">
-  <img src="images/TeamFileInNOut.png" width="800"/>
+  <img src="Image/FileInNOut.png" alt="FileInNOut Typing" width="850" height="850"/>
 </p>
+
 
 
