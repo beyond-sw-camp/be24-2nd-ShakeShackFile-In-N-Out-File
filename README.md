@@ -4,7 +4,7 @@ FileInNOut - README (Premium Style)
 
 <div align="center">
 <!-- 타이틀 타이핑 효과 -->
-<img src="Image/MainImg.png" alt="FileInNOut Typing" />
+<img src="Image/mainimage.png" alt="FileInNOut Typing" />
 </div>
 
 <div align="center">
