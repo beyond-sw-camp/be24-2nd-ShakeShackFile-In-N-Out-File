@@ -1,0 +1,201 @@
+/* 라이트 모드 (기본) */
+:root {
+  /* 배경색 */
+  --bg-main: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-input: #f3f4f6;
+  
+  /* 텍스트 색상 */
+  --text-main: #111827;
+  --text-secondary: #374151;
+  --text-muted: #6b7280;
+  
+  /* 테두리 */
+  --border-color: #e5e7eb;
+  
+  /* 악센트 */
+  --accent: #1cacff;
+  --accent-hover: #003cff;
+  
+  /* 그림자 */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+/* 다크 모드 */
+.dark {
+  /* 배경색 */
+  --bg-main: #1f2937;
+  --bg-secondary: #111827;
+  --bg-input: #374151;
+  
+  /* 텍스트 색상 */
+  --text-main: #f9fafb;
+  --text-secondary: #e5e7eb;
+  --text-muted: #9ca3af;
+  
+  /* 테두리 */
+  --border-color: #4b5563;
+  
+  /* 악센트 */
+  --accent: #1cacff;
+  --accent-hover: #003cff;
+  
+  /* 그림자 */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.7);
+}
+
+/* 전역 적용 */
+body {
+  background-color: var(--bg-secondary);
+  color: var(--text-main);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* 다크모드 전환 애니메이션 */
+* {
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+
+/* 다크모드 스크롤바 */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* 다크모드 입력 필드 */
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: var(--bg-input);
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* 다크모드 버튼 */
+.dark button {
+  color: var(--text-main);
+}
+
+.dark button:hover {
+  background-color: var(--bg-input);
+}
+
+/* 다크모드 테이블 */
+.dark table {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+}
+
+.dark th {
+  background-color: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.dark td {
+  border-color: var(--border-color);
+}
+
+.dark tr:hover {
+  background-color: var(--bg-input);
+}
+
+/* 다크모드 카드/패널 */
+.dark .card,
+.dark .panel {
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+/* 다크모드 모달 */
+.dark .modal-overlay {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.dark .modal-content {
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+}
+
+/* ============================================
+   Tailwind 색상 클래스 오버라이드 (다크모드)
+   ============================================ */
+
+/* 배경색 오버라이드 */
+.dark .bg-white {
+  background-color: var(--bg-main) !important;
+}
+
+.dark .bg-gray-50 {
+  background-color: var(--bg-secondary) !important;
+}
+
+.dark .bg-gray-100 {
+  background-color: var(--bg-input) !important;
+}
+
+.dark .bg-gray-200 {
+  background-color: var(--border-color) !important;
+}
+
+/* 텍스트 색상 오버라이드 */
+.dark .text-gray-800,
+.dark .text-gray-900 {
+  color: var(--text-main) !important;
+}
+
+.dark .text-gray-600,
+.dark .text-gray-700 {
+  color: var(--text-secondary) !important;
+}
+
+.dark .text-gray-400,
+.dark .text-gray-500 {
+  color: var(--text-muted) !important;
+}
+
+.dark .text-black {
+  color: var(--text-main) !important;
+}
+
+/* 테두리 색상 오버라이드 */
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: var(--border-color) !important;
+}
+
+/* 호버 상태 오버라이드 */
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-100:hover {
+  background-color: var(--bg-input) !important;
+}
+
+.dark .hover\:text-gray-700:hover,
+.dark .hover\:text-gray-800:hover,
+.dark .hover\:text-gray-900:hover {
+  color: var(--text-main) !important;
+}
