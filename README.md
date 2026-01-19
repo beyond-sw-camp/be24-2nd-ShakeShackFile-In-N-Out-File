@@ -1,1 +1,35 @@
-<p align="center"> <h1>📂 FileInNOut</h1> <p align="center"><sub>파일 관리 시스템 + 실시간 문서 협업 기능을 통합한 하이브리드 워크스페이스 플랫폼</sub></p> </p> <p align="center"> <img src="images/mainimage.png" alt="FileInNOut Main Image" width="600"> </p> <p align="center"> <b>파일 저장 · 공유 · 권한 관리 · 실시간 편집 · 협업 워크스페이스</b><br/> <sub>전환 비용을 없애고, 팀 단위 생산성을 극대화합니다 🚀</sub> </p> <p align="center"> <img src="https://img.shields.io/badge/Project-FileInNOut-2ea44f?style=for-the-badge" /> <img src="https://img.shields.io/badge/Platform-Web%20(Responsive)-blue?style=for-the-badge" /> <img src="https://img.shields.io/badge/Status-Developing-orange?style=for-the-badge" /> </p>
+﻿# 프로젝트 명: FileInNOut
+
+> **파일 관리 시스템**과 **실시간 문서 협업 기능**을 통합한 하이브리드 워크스페이스 플랫폼입니다.
+
+---
+
+## 1. 프로젝트 개요
+
+- **목적**: 클라우드 저장소와 문서 편집 도구 사이의 전환 비용을 최소화하고 통합된 협업 환경 제공.
+- **주요 가치**: 효율적인 권한 관리 기반의 파일 공유 및 블록 단위의 실시간 협업 페이지 운영.
+
+## 2. 주요 기능 (Key Features)
+
+### File Management 
+
+- **파일 저장 및 공유**: 폴더 트리 구조 기반의 파일 업로드/다운로드 및 이동.
+- **권한 제어**: 링크 공유, 사용자별 읽기/쓰기 권한 설정.
+- **검색 및 필터링**: 파일명, 확장자, 업로드 날짜 기반 검색.
+
+### Collaborative Workspace 
+
+- **실시간 편집**: 다중 사용자가 동시에 편집 가능한 [FILL_IN: 예 - Block-based] 에디터.
+- **페이지 계층 구조**: 무한 중첩 가능한 페이지 생성 및 관리.
+- **컴포넌트 삽입**: 이미지, 코드 블록, 체크리스트 등 다양한 미디어 타입 지원.
+
+## 3. 기술 스택 (Tech Stack)
+
+### Frontend
+
+- **Framework**: Vue.js 
+- **Communication**: Axios, FILL_IN: WebSocket
+
+## 4. 시스템 아키텍처 (Architecture)
+
+## 5. 데이터베이스 설계 (ERD)
