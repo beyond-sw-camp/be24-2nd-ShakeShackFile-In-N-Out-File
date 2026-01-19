@@ -125,5 +125,14 @@ FileInNOut은 단순한 클라우드 저장소를 넘어, **파일 관리 시스
 </table>
 
 
+<p align="center">
+  <a href="https://www.figma.com/proto/K8oFcphOgrW7w1iWJxIdtH/%ED%8C%80-FileInNOut?node-id=0-1&t=w4Zkr2hu29DYfQZg-1">
+    <img src="https://img.shields.io/badge/Figma-View%20Prototype-F24E1E?style=for-the-badge&logo=figma&logoColor=white"/>
+  </a>
+</p>
+
+<p align="center">
+  <img src="images/TeamFileInNOut.png" width="800"/>
+</p>
 
 
