@@ -4,7 +4,7 @@ FileInNOut - README (Premium Style)
 
 <div align="center">
 <!-- 타이틀 타이핑 효과 -->
-<img src="MainImg.png" alt="FileInNOut Typing" />
+<img src="Image/MainImg.png" alt="FileInNOut Typing" />
 </div>
 
 <div align="center">
@@ -273,5 +273,6 @@ Real-time Processing: 문서 동시 편집과 같은 실시간성이 중요한 �
 <div align="center">
 Copyright © 2026 FileInNOut Team. All rights reserved.
 </div>
+
 
 
