@@ -4,7 +4,7 @@ FileInNOut - README (Premium Style)
 
 <div align="center">
 <!-- 타이틀 타이핑 효과 -->
-<img src="https://www.google.com/search?q=https://readme-typing-svg.demolab.com%3Ffont%3DFira%2BCode%26weight%3D800%26size%3D40%26pause%3D1000%26color%3D2563EB%26center%3Dtrue%26vCenter%3Dtrue%26repeat%3Dtrue%26width%3D820%26lines%3DFileInNOut%3BHybrid%2BWorkspace%3BFile%2BSystem%2B%252B%2BReal-time%2BCollab" alt="FileInNOut Typing" />
+<img src="/MainImg.png" alt="FileInNOut Typing" />
 </div>
 
 <div align="center">
@@ -273,3 +273,4 @@ Real-time Processing: 문서 동시 편집과 같은 실시간성이 중요한 �
 <div align="center">
 Copyright © 2026 FileInNOut Team. All rights reserved.
 </div>
+
