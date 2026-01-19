@@ -43,7 +43,7 @@ FileInNOut - README (Premium Style)
 
 
 <span style="font-size:18px; font-weight:700;">
-[팀원 성함 입력]
+김주형, 이선엽, 범윤준, 최재원
 </span>
 </td>
 </tr>
@@ -273,6 +273,7 @@ Real-time Processing: 문서 동시 편집과 같은 실시간성이 중요한 �
 <div align="center">
 Copyright © 2026 FileInNOut Team. All rights reserved.
 </div>
+
 
 
 
