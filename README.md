@@ -28,7 +28,10 @@
 
 
 <span style="font-size:18px; font-weight:700;">
-김주형, 범윤준, 이선엽, 최재원
+<a href="https://www.google.com/search?q=https://github.com/%EC%82%AC%EC%9A%A9%EC%9E%90ID1">김주형</a>,
+<a href="https://www.google.com/search?q=https://github.com/%EC%82%AC%EC%9A%A9%EC%9E%90ID2">범윤준</a>,
+<a href="https://www.google.com/search?q=https://github.com/%EC%82%AC%EC%9A%A9%EC%9E%90ID3">이선엽</a>,
+<a href="https://www.google.com/search?q=https://github.com/%EC%82%AC%EC%9A%A9%EC%9E%90ID4">최재원</a>
 </span>
 </td>
 </tr>
