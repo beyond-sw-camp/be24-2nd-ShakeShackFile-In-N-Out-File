@@ -8,7 +8,7 @@ export const useFileStore = defineStore('file', () => {
   // 데이터 로드
   const fetchFiles = async () => {
     try {
-      const response = await api.api.get('/json/files/fileList.json')
+      const response = await api.api.get('/json/files/fileList')
       allFiles.value = response.data
     } catch (error) {
       console.error("파일 로드 실패:", error)

@@ -14,7 +14,7 @@ let websocket = null
 const fetchHistory = async () => {
   try {
     // 톰캣ROOT/api/chatHistory.json 에 파일이 있다면:
-    const response = await api.api.get('/json/chat/chathistory.json')
+    const response = await api.api.get('/json/chat/chathistory')
 
     // axios는 데이터를 response.data에 담아줍니다.
     const allData = response.data
