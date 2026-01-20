@@ -45,7 +45,7 @@ export function useEditorSocket() {
 
     ydoc = new Y.Doc()
     provider = new WebsocketProvider(
-      'wss://cheeseduck.kro.kr:1234', 
+      'wss://cheeseduck.kro.kr/room-demo', 
       roomName,
       ydoc,
     )
