@@ -127,7 +127,7 @@ Problem → Solution
 <hr/>
 
 ##  요구사항 정의서 (Requirement Specification)
-**[요구사항 정의서 상세 보기 (PDF)](./DOCS/요구사항_정의서.pdf)**
+**[요구사항 정의서 상세 보기 (PDF)](./docs/요구사항 정의서.pdf)**
 <hr/>
 <p align="center">
   <a href="https://www.figma.com/proto/K8oFcphOgrW7w1iWJxIdtH/%ED%8C%80-FileInNOut?node-id=0-1&t=w4Zkr2hu29DYfQZg-1">
