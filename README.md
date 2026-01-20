@@ -21,26 +21,42 @@
 <tr>
 <td align="center" width="25%">
 <a href="https://github.com/Joohyeng">
-  <img src="https://github.com/Joohyeng.png" width="100"/><br/>
-  김주형
+<img src="https://github.com/Joohyeng.png" width="100"/>
+
+
+
+
+김주형
 </a>
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/Yoonjoon13">
-  <img src="https://github.com/Yoonjoon13.png" width="100"/><br/>
-  범윤준
+<img src="https://github.com/Yoonjoon13.png" width="100"/>
+
+
+
+
+범윤준
 </a>
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/sunyeoplee0">
-  <img src="https://github.com/sunyeoplee0.png" width="100"/><br/>
-  이선엽
+<img src="https://github.com/sunyeoplee0.png" width="100"/>
+
+
+
+
+이선엽
 </a>
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/Lumisia">
-  <img src="https://github.com/Lumisia.png" width="100"/><br/>
-  최재원
+<img src="https://github.com/Lumisia.png" width="100"/>
+
+
+
+
+최재원
 </a>
 </td>
 </tr>
@@ -53,7 +69,8 @@
 <a href="#요구사항-정의">요구사항</a> &nbsp;|&nbsp;
 <a href="#피그마-프로토타입">피그마</a> &nbsp;|&nbsp;
 <a href="#시스템-아키텍처">아키텍처</a> &nbsp;|&nbsp;
-<a href="#데이터베이스-설계">ERD</a>
+<a href="#데이터베이스-설계">ERD</a> &nbsp;|&nbsp;
+<a href="#서비스-도메인">도메인</a>
 </div>
 
 <hr/>
@@ -156,6 +173,14 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <details>
 <summary>데이터베이스 설계도(ERD) 상세 보기</summary>
 
-<img src="Image/DB.png" alt="FileInNOut DB ERD" width="850"/>
+<img src="Image/DB.png" alt="FileInNOut DB ERD" width="850"/> </details>
 
-</details>
+<hr/>
+
+<h2 id="서비스-도메인">서비스 도메인</h2>
+<div align="center">
+<p>현재 배포된 서비스의 접속 주소입니다.</p>
+<a href="https://www.google.com/url?sa=E&source=gmail&q=https://www.innoutfile.kro.kr/">
+<img src="https://www.google.com/search?q=https://img.shields.io/badge/URL-innoutfile.kro.kr-2563EB%3Fstyle%3Dfor-the-badge%26logo%3Dgooglechrome%26logoColor%3Dwhite" alt="Service URL"/>
+</a>
+</div>
