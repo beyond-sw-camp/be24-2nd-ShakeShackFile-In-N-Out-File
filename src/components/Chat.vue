@@ -9,11 +9,48 @@ import api from '@/plugins/axiosinterceptor.js' // axios 인스턴스 임포트
 const props = defineProps({ isOpen: Boolean })
 const emit = defineEmits(['close'])
 
+// 너비 조절을 위한 상태값
+const DEFAULT_WIDTH = 320; // 처음 크기 (20rem)
+const chatWidth = ref(320) // 기본값 20rem (320px)
+const isResizing = ref(false)
+
+// 드래그 시작 함수
+const startResizing = (event) => {
+  isResizing.value = true
+  // 마우스 이동 및 버튼 뗌 감지 이벤트 등록
+  window.addEventListener('mousemove', handleMouseMove)
+  window.addEventListener('mouseup', stopResizing)
+  // 드래그 중 텍스트 선택 방지
+  document.body.style.userSelect = 'none'
+}
+
+// 마우스 이동 시 너비 계산
+const handleMouseMove = (event) => {
+  if (!isResizing.value) return
+
+  // 오른쪽 사이드바인 경우: 브라우저 전체 너비 - 마우스 X 좌표
+  // (마우스를 왼쪽으로 끌수록 너비가 커짐)
+  const newWidth = window.innerWidth - event.clientX
+  
+  // 최소/최대 너비 제한 (250px ~ 600px)
+  if (newWidth > 80 && newWidth < 600) {
+    chatWidth.value = newWidth
+  }
+}
+
+// 드래그 종료 함수
+const stopResizing = () => {
+  isResizing.value = false
+  window.removeEventListener('mousemove', handleMouseMove)
+  window.removeEventListener('mouseup', stopResizing)
+  document.body.style.userSelect = 'auto'
+}
+
 const viewMode = ref('list')
 const selectedRoom = ref(null)
 const authStore = useAuthStore()
 
-const currentUser = computed(() => ({
+const currentUser = computed(() => ({ 
   name: authStore.user?.userName || 'Guest',
 }))
 
@@ -53,7 +90,17 @@ const handleSelectRoom = (room) => {
 </script>
 
 <template>
-  <aside class="chat-panel" :class="isOpen ? 'chat-panel-open' : 'chat-panel-closed'">
+  <aside 
+    class="chat-panel" 
+    :class="isOpen ? 'chat-panel-open' : 'chat-panel-closed'"
+    :style="isOpen ? { width: chatWidth + 'px' } : {}"
+  >
+    <div 
+      v-if="isOpen"
+      class="resizer" 
+      @mousedown="startResizing"
+      :class="{ 'is-resizing': isResizing }"
+    ></div>
     <div class="chat-header">
       <div class="flex items-center gap-2">
         <button
@@ -79,21 +126,39 @@ const handleSelectRoom = (room) => {
 
 <style scoped>
 .chat-panel {
+  position: relative; /* 핸들 배치를 위해 필수 */
   background-color: var(--bg-main);
   border-left: 1px solid var(--border-color);
-  transition: all 0.3s ease;
-  overflow: hidden;
+  transition: width 0.3s ease; /* 너비 조절 시 부드럽게 (단, 드래그 중에는 transition을 끄는 게 좋습니다) */
+  overflow: visible; /* 핸들이 밖으로 살짝 나가야 하므로 visible */
   display: flex;
   flex-direction: column;
   z-index: 40;
 }
 
-.chat-panel-open {
-  width: 20rem;
+.chat-panel[style*="width"] {
+  transition: none;
 }
 
 .chat-panel-closed {
-  width: 0;
+  width: 0 !important;
+  border-left: none;
+}
+
+/* 리사이저 핸들 스타일 */
+.resizer {
+  position: absolute;
+  left: -3px; /* 사이드바 왼쪽 경계선에 걸치게 배치 */
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 50;
+  transition: background-color 0.2s;
+}
+
+.resizer:hover, .is-resizing {
+  background-color: var(--accent); /* 호버하거나 드래그 중일 때 강조색상 */
 }
 
 .chat-header {
