@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import ChatRoom from './ChatRoom.vue'
 import ChatList from './Chatlist.vue'
 import {useAuthStore} from '@/stores/useAuthStore'
@@ -11,8 +11,26 @@ const emit = defineEmits(['close'])
 
 // 너비 조절을 위한 상태값
 const DEFAULT_WIDTH = 320; // 처음 크기 (20rem)
+const MIN_THRESHOLD = 60; // 이 너비보다 작아지면 닫힘
+const MAX_WIDTH = 600
 const chatWidth = ref(320) // 기본값 20rem (320px)
+const lastWidth = ref(DEFAULT_WIDTH) // 마지막으로 사용자가 조절한 너비를 기억하는 변수
+const isForcedClosed = ref(false) // 강제로 밀어서 닫혔는지 여부
 const isResizing = ref(false)
+// 열릴 때마다 크기 초기화
+watch(() => props.isOpen, (newVal) => {
+  if (newVal) {
+    if (isForcedClosed.value) {
+      // 강제로 밀어서 닫혔던 경우 -> 기본 크기로 복구
+      chatWidth.value = DEFAULT_WIDTH
+      lastWidth.value = DEFAULT_WIDTH
+      isForcedClosed.value = false // 상태 초기화
+    } else {
+      // X 버튼 등으로 일반 종료된 경우 -> 기존 크기 유지
+      chatWidth.value = lastWidth.value
+    }
+  }
+})
 
 // 드래그 시작 함수
 const startResizing = (event) => {
@@ -24,17 +42,23 @@ const startResizing = (event) => {
   document.body.style.userSelect = 'none'
 }
 
-// 마우스 이동 시 너비 계산
 const handleMouseMove = (event) => {
   if (!isResizing.value) return
-
-  // 오른쪽 사이드바인 경우: 브라우저 전체 너비 - 마우스 X 좌표
-  // (마우스를 왼쪽으로 끌수록 너비가 커짐)
+  
   const newWidth = window.innerWidth - event.clientX
   
-  // 최소/최대 너비 제한 (250px ~ 600px)
-  if (newWidth > 80 && newWidth < 600) {
+  // 최소 임계값보다 작아졌을 때 처리
+  if (newWidth < MIN_THRESHOLD) {
+    isForcedClosed.value = true // 강제 종료 상태 기록
+    stopResizing()
+    emit('close')
+    return
+  }
+
+  if (newWidth < MAX_WIDTH) {
     chatWidth.value = newWidth
+    lastWidth.value = newWidth
+    isForcedClosed.value = false // 적절한 크기라면 강제 종료 상태 해제
   }
 }
 
@@ -126,11 +150,14 @@ const handleSelectRoom = (room) => {
 
 <style scoped>
 .chat-panel {
-  position: relative; /* 핸들 배치를 위해 필수 */
+  position: relative;
   background-color: var(--bg-main);
   border-left: 1px solid var(--border-color);
-  transition: width 0.3s ease; /* 너비 조절 시 부드럽게 (단, 드래그 중에는 transition을 끄는 게 좋습니다) */
-  overflow: visible; /* 핸들이 밖으로 살짝 나가야 하므로 visible */
+  transition: 
+    width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+    opacity 0.2s ease,
+    transform 0.3s ease;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   z-index: 40;
@@ -142,23 +169,28 @@ const handleSelectRoom = (room) => {
 
 .chat-panel-closed {
   width: 0 !important;
+  opacity: 0;
   border-left: none;
+  pointer-events: none; /* 닫혔을 때 클릭 방지 */
+}
+.chat-panel-open {
+  opacity: 1;
 }
 
-/* 리사이저 핸들 스타일 */
+/* 리사이저 핸들 가독성 */
 .resizer {
   position: absolute;
-  left: -3px; /* 사이드바 왼쪽 경계선에 걸치게 배치 */
+  left: 0;
   top: 0;
-  width: 6px;
+  width: 6px; /* 조금 더 넓게 설정해서 잡기 편하게 함 */
   height: 100%;
   cursor: col-resize;
   z-index: 50;
-  transition: background-color 0.2s;
+  background-color: transparent;
 }
 
-.resizer:hover, .is-resizing {
-  background-color: var(--accent); /* 호버하거나 드래그 중일 때 강조색상 */
+.resizer:hover {
+  background-color: rgba(59, 130, 246, 0.2); /* 호버 시 피드백 */
 }
 
 .chat-header {
