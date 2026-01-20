@@ -9,6 +9,7 @@ const isSidebarOpen = ref(true) // 사이드바 토글 상태
 const personalItems = ['SSL 인증서', '포트폴리오', 'Vue 학습']
 const sharedItems = ['한화 부트캠프 24기', '프로젝트 팀A']
 
+
 const scrollToTop = () => {
   window.scrollTo({
     top: 0,
