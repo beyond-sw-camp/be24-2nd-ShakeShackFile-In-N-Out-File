@@ -43,7 +43,7 @@ FileInNOut - README (Premium Style)
 
 
 <span style="font-size:18px; font-weight:700;">
-김주형, 이선엽, 범윤준, 최재원
+김주형, 범윤준, 이선엽, 최재원
 </span>
 </td>
 </tr>
@@ -60,7 +60,7 @@ FileInNOut - README (Premium Style)
 
 <hr/>
 
-🧰 기술 스택
+- 기술 스택
 
 <div align="center">
 <!-- Backend -->
@@ -94,19 +94,19 @@ FileInNOut - README (Premium Style)
 <img src="https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white" alt="Git">
 </div>
 
-✨ 프로젝트 소개
+- 프로젝트 소개
 
 "전환 비용(Switching Cost)을 0으로 만드는 통합 환경"
 
-FileInNOut은 단순한 클라우드 저장소를 넘어, **파일 관리 시스템(File System)**과 실시간 문서 협업(Real-time Collaboration) 기능을 완벽하게 통합한 차세대 워크스페이스입니다.
+FileInNOut은 단순한 클라우드 저장소를 넘어, **파일 관리 시스템(File System)**과 실시간 문서 협업(Real-time Collaboration) 기능을 통합한 워크스페이스입니다.
 파일을 다운로드해서 수정하고 다시 올리는 번거로움 없이, 웹상에서 팀원들과 동시에 문서를 작성하고 파일을 관리하세요.
 
-🎯 Problem → Solution
+Problem → Solution
 
 <table width="100%">
 <tr>
 <td width="50%" valign="top">
-<h3>😵 Problem (Pain Points)</h3>
+<h3> Problem (Pain Points)</h3>
 <ul>
 <li><b>데이터 파편화</b>: 파일 저장소(Google Drive)와 문서 툴(Notion)의 분리로 인한 업무 비효율</li>
 <li><b>협업의 단절</b>: 폴더 구조 내에서 실시간 편집 중인 문서를 직관적으로 찾기 어려움</li>
@@ -114,7 +114,7 @@ FileInNOut은 단순한 클라우드 저장소를 넘어, **파일 관리 시스
 </ul>
 </td>
 <td width="50%" valign="top">
-<h3>😎 Solution (Key Values)</h3>
+<h3> Solution (Key Values)</h3>
 <ul>
 <li><b>MinIO 오브젝트 스토리지</b>: 대용량 파일의 안정적인 저장 및 관리</li>
 <li><b>Node.js & WebSocket</b>: 지연(Latency) 없는 실시간 동시 편집 에디터 구현</li>
@@ -134,6 +134,7 @@ FileInNOut은 단순한 클라우드 저장소를 넘어, **파일 관리 시스
 <p align="center">
   <img src="Image/FileInNOut.png" alt="FileInNOut Typing" width="850" height="850"/>
 </p>
+
 
 
 
