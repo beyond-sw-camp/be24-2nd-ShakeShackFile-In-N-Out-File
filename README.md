@@ -171,4 +171,7 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 
 <h2 id="서비스-도메인">서비스 도메인</h2>
 <div align="left">
-<a href="http://www.innoutfile.kro.kr"><p>www.innoutfile.kro.kr</p></a></div>
+<a href="http://www.innoutfile.kro.kr" target="_blank" rel="noopener noreferrer">
+<p>www.innoutfile.kro.kr</p>
+</a>
+</div>
