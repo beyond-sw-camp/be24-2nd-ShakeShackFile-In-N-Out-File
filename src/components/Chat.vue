@@ -81,7 +81,7 @@ const currentUser = computed(() => ({
 const chatRooms = ref([])
 const fetchRooms = async () => {
   try {
-    const response = await api.api.get('/json/chat/chathistory.json')
+    const response = await api.api.get('/json/chat/chathistory')
     const allData = response.data 
 
     // JSON의 Key(room-1, room-2 등)를 순회
