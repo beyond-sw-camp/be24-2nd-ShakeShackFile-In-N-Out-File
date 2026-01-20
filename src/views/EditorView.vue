@@ -9,7 +9,7 @@ const { isFormValid, savePost } = save()
 
 onMounted(() => {
   // 실제 DOM이 렌더링된 후 에디터 초기화
-  initEditor('#editor', 'room-demo')
+  initEditor('#editor', 'ws')
 })
 </script>
 
