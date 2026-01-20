@@ -4,43 +4,34 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/useAuthStore'
 import ProfileModal from './ProfileModal.vue'
 
-
 const emit = defineEmits(['toggle-chat', 'toggle-theme', 'switch-view'])
 const router = useRouter()
 const authStore = useAuthStore()
-// authStore.user 안의 name(또는 userName)을 실시간으로 가져옵니다.
-// 서버 응답 필드명이 'name'인지 'userName'인지 확인하여 맞춰주세요.
+
 const userName = computed(() => {
   return authStore.user?.userName || authStore.user?.name || '사용자'
 })
 const userEmail = computed(() => {
-  // 서버 응답 필드명에 따라 user.email 또는 user.userEmail 등을 확인하세요
   return authStore.user?.email || authStore.user?.userEmail || '이메일 정보 없음'
 })
+
 onMounted(() => {
   initTheme()
-  authStore.checkLogin() // 저장된 정보가 있다면 불러오기
+  authStore.checkLogin()
   document.addEventListener('click', handleClickOutside)
 })
 
-// 드롭다운 상태
 const showNotifDropdown = ref(false)  
 const showProfileDropdown = ref(false)
-
-// 모달 상태
 const isProfileModalOpen = ref(false)
-
-// 테마 상태
 const isDarkMode = ref(false)
 const themeIcon = ref('fa-solid fa-moon')
 
-// 채팅 토글
 const handleToggleChat = () => {
   console.log('채팅 버튼 클릭됨')
   emit('toggle-chat')
 }
 
-// 테마 초기화 및 적용
 const initTheme = () => {
   const savedTheme = localStorage.getItem('theme')
   if (savedTheme === 'dark') {
@@ -54,19 +45,16 @@ const initTheme = () => {
   }
 }
 
-// 알림 메뉴 토글
 const toggleNotifMenu = () => {
   showNotifDropdown.value = !showNotifDropdown.value
   showProfileDropdown.value = false
 }
 
-// 프로필 메뉴 토글
 const toggleProfileMenu = () => {
   showProfileDropdown.value = !showProfileDropdown.value
   showNotifDropdown.value = false
 }
 
-// 테마 토글
 const handleToggleTheme = () => {
   isDarkMode.value = !isDarkMode.value
 
@@ -83,52 +71,35 @@ const handleToggleTheme = () => {
   emit('toggle-theme', isDarkMode.value)
 }
 
-// 프로필 모달 열기
 const handleOpenProfileModal = () => {
   showProfileDropdown.value = false
   isProfileModalOpen.value = true
 }
 
-// 프로필 모달 닫기
 const handleCloseProfileModal = () => {
   isProfileModalOpen.value = false
 }
 
-// 프로필 저장
 const handleSaveProfile = () => {
   console.log('프로필 저장됨')
-  // 여기에 실제 저장 로직 추가
   setTimeout(() => {
     isProfileModalOpen.value = false
   }, 1000)
 }
 
-// 로그아웃
 const handleLogout = () => {
   if (confirm("로그아웃 하시겠습니까?")) {
-    authStore.logout() // 스토어에서 만든 logout 함수 호출 (이전 가이드 참고)
-    router.push('/login') // 로그인 페이지로 이동
+    authStore.logout()
+    router.push('/login')
   }
 }
 
-// 외부 클릭 감지
 const handleClickOutside = (event) => {
   if (!event.target.closest('#profile-container') && !event.target.closest('#notif-container')) {
     showNotifDropdown.value = false
     showProfileDropdown.value = false
   }
 }
-
-
-onMounted(() => {
-  // 테마 초기화
-  initTheme()
-
-  if (authStore.data && authStore.data.userName) {
-    userName.value = authStore.data.userName
-  }
-  document.addEventListener('click', handleClickOutside)
-})
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
@@ -137,7 +108,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <!-- Profile Modal -->
     <ProfileModal :isOpen="isProfileModalOpen" @close="handleCloseProfileModal" @save="handleSaveProfile" />
 
     <header class="header-container">
@@ -151,7 +121,7 @@ onBeforeUnmount(() => {
       <div class="flex items-center gap-5 ml-6">
         <!-- 알림 버튼 -->
         <div class="relative" id="notif-container">
-          <button @click="toggleNotifMenu" class="icon-button">
+          <button @click="toggleNotifMenu" class="icon-button bell-button">
             <i class="fa-solid fa-bell"></i>
           </button>
 
@@ -170,7 +140,7 @@ onBeforeUnmount(() => {
         <!-- 테마 토글 버튼 -->
         <button @click="handleToggleTheme" class="icon-button theme-button"
           :title="isDarkMode ? '라이트 모드로 변경' : '다크 모드로 변경'">
-          <i :class="themeIcon"></i>
+          <i :class="themeIcon" class="theme-icon"></i>
         </button>
 
         <!-- 채팅 버튼 -->
@@ -186,10 +156,10 @@ onBeforeUnmount(() => {
               <p class="text-[10px] text-[#190094] dark:text-[#44dff4] font-bold">비싼 요금제 오너</p>
             </div>
             <img 
-      :src="`https://ui-avatars.com/api/?name=${userName}&background=190094&color=fff&bold=true`" 
-      class="profile-avatar"
-      :alt="userName"
-    >
+              :src="`https://ui-avatars.com/api/?name=${userName}&background=190094&color=fff&bold=true`" 
+              class="profile-avatar"
+              :alt="userName"
+            >
           </div>
 
           <div v-if="showProfileDropdown" class="dropdown-container active">
@@ -262,7 +232,7 @@ onBeforeUnmount(() => {
 /* 아이콘 버튼 */
 .icon-button {
   color: var(--text-muted);
-  transition: color 0.2s ease, transform 0.2s ease;
+  transition: color 0.2s ease;
   background: none;
   border: none;
   cursor: pointer;
@@ -271,20 +241,89 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.icon-button:hover {
-  color: var(--text-main);
+/* 종 흔들림 애니메이션 */
+@keyframes bell-swing {
+  0%, 100% { transform: rotate(0deg); }
+  10% { transform: rotate(15deg); }
+  20% { transform: rotate(-12deg); }
+  30% { transform: rotate(10deg); }
+  40% { transform: rotate(-8deg); }
+  50% { transform: rotate(6deg); }
+  60% { transform: rotate(-4deg); }
+  70% { transform: rotate(2deg); }
+  80% { transform: rotate(-1deg); }
+  90% { transform: rotate(0deg); }
+}
+
+.bell-button:hover {
   background-color: var(--bg-input);
-  transform: rotate(180deg);
+}
+
+.bell-button:hover i {
+  color: var(--text-main);
+  animation: bell-swing 0.8s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+/* 테마 버튼 - 반대 아이콘 표시 효과 */
+.theme-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.theme-button .theme-icon {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.theme-button::before {
+  content: '\f185'; /* fa-sun */
+  font-family: 'Font Awesome 6 Free';
+  font-weight: 900;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+.dark .theme-button::before {
+  content: '\f186'; /* fa-moon */
+}
+
+.theme-button:hover .theme-icon {
+  opacity: 0;
+  transform: scale(0);
+}
+
+.theme-button:hover::before {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .theme-button:hover {
   color: var(--accent);
-  transform: rotate(180deg);
+  background-color: var(--bg-input);
+}
+
+/* 채팅 버튼 - 노란색 깜빡임 효과 */
+@keyframes chat-blink {
+  0%, 100% { 
+    color: #6366f1;
+    text-shadow: 0 0 5px rgba(252, 211, 77, 0);
+  }
+  50% { 
+    color: #fcd34d;
+    text-shadow: 0 0 10px rgba(252, 211, 77, 0.6);
+  }
 }
 
 .chat-button:hover {
-  color: #6366f1;
-  transform: rotate(180deg);
+  background-color: var(--bg-input);
+}
+
+.chat-button:hover i {
+  animation: chat-blink 1s ease-in-out infinite;
 }
 
 /* 프로필 아바타 */
@@ -368,20 +407,5 @@ onBeforeUnmount(() => {
 /* 다크모드 전환 애니메이션 */
 .dark .header-container {
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
-}
-
-/* 테마 버튼 특별 효과 */
-@keyframes rotate-sun {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.theme-button:active i {
-  animation: rotate-sun 0.5s ease;
 }
 </style>
