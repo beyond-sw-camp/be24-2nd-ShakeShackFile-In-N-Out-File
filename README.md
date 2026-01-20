@@ -202,7 +202,7 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 
 
 
-<video src="video/user_auth.mp4" width="850" controls>
+<video src="https://github.com/beyond-sw-camp/be24-2nd-ShakeShackFile-In-N-Out-File/blob/main/video/file_docs.mp4" width="850" controls>
 Your browser does not support the video tag.
 </video>
 <p>계정 생성 및 보안 인증을 통한 사용자 접속 프로세스</p>
