@@ -12,27 +12,36 @@
 </div>
 
 <div align="center">
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/Project-FileInNOut-2563EB%3Fstyle%3Dfor-the-badge%26logo%3Dgithub%26logoColor%3Dwhite" />
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/Platform-Web-2ea44f%3Fstyle%3Dfor-the-badge%26logo%3Dgooglechrome%26logoColor%3Dwhite" />
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/Status-Developing-F7DF1E%3Fstyle%3Dfor-the-badge" />
-</div>
-
-<div align="center">
 <table border="0" width="80%">
 <tr>
-<td align="center">
+<td align="center" colspan="4">
 <b>TEAM MEMBER</b>
-
-
-
-
-
-<span style="font-size:18px; font-weight:700;">
-<a href="https://www.google.com/search?q=https://github.com/%EC%82%AC%EC%9A%A9%EC%9E%90ID1">김주형</a>,
-<a href="https://www.google.com/search?q=https://github.com/%EC%82%AC%EC%9A%A9%EC%9E%90ID2">범윤준</a>,
-<a href="https://github.com/sunyeoplee0">이선엽</a>,
-<a href="https://www.google.com/search?q=https://github.com/%EC%82%AC%EC%9A%A9%EC%9E%90ID4">최재원</a>
-</span>
+</td>
+</tr>
+<tr>
+<td align="center" width="25%">
+<a href="https://github.com/Joohyeng">
+  <img src="https://github.com/Joohyeng.png" width="100"/><br/>
+  김주형
+</a>
+</td>
+<td align="center" width="25%">
+<a href="https://github.com/Yoonjoon13">
+  <img src="https://github.com/Yoonjoon13.png" width="100"/><br/>
+  범윤준
+</a>
+</td>
+<td align="center" width="25%">
+<a href="https://github.com/sunyeoplee0">
+  <img src="https://github.com/sunyeoplee0.png" width="100"/><br/>
+  이선엽
+</a>
+</td>
+<td align="center" width="25%">
+<a href="https://github.com/Lumisia">
+  <img src="https://github.com/Lumisia.png" width="100"/><br/>
+  최재원
+</a>
 </td>
 </tr>
 </table>
@@ -55,10 +64,6 @@
 <p><b>"전환 비용(Switching Cost)을 0으로 만드는 통합 환경"</b></p>
 <p>
 FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합한 워크스페이스입니다.
-
-
-
-
 웹상에서 팀원들과 동시에 문서를 작성하고 파일을 관리할 수 있는 환경을 제공합니다.
 </p>
 </div>
@@ -94,11 +99,9 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <h3>Backend & Storage</h3>
 <img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java">
 <img src="https://img.shields.io/badge/Spring_Boot-6DB33F?style=for-the-badge&logo=springboot&logoColor=white" alt="Spring Boot">
-<!-- <img src="https://img.shields.io/badge/Spring_Security-6DB33F?style=for-the-badge&logo=spring-security&logoColor=white" alt="Spring Security"> -->
 <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js">
 <img src="https://img.shields.io/badge/WebSocket-010101?style=for-the-badge&logo=websocket&logoColor=white" alt="WebSocket">
 <img src="https://img.shields.io/badge/MariaDB-003545?style=for-the-badge&logo=mariadb&logoColor=white" alt="MariaDB">
-<!-- <img src="https://img.shields.io/badge/MinIO-C72E49?style=for-the-badge&logo=minio&logoColor=white" alt="MinIO"> -->
 
 <h3>Frontend</h3>
 <img src="https://img.shields.io/badge/Vue.js-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white" alt="Vue.js">
@@ -108,7 +111,6 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <img src="https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white" alt="CSS3">
 
 <h3>Infrastructure</h3>
-<!-- <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"> -->
 <img src="https://img.shields.io/badge/Nginx-009639?style=for-the-badge&logo=nginx&logoColor=white" alt="Nginx">
 <img src="https://img.shields.io/badge/HAProxy-1E90FF?style=for-the-badge&logo=haproxy&logoColor=white" alt="HAProxy">
 <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
@@ -121,10 +123,6 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <details>
 <summary>요구사항 정의서 상세 보기</summary>
 
-
-
-
-
 <p><a href="./docs/요구사항%20정의서.pdf">요구사항 정의서 다운로드 (PDF)</a></p>
 <img src="Image/Requirements.png" alt="FileInNOut Requirements" width="850"/>
 </details>
@@ -134,10 +132,6 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <h2 id="피그마-프로토타입">피그마 프로토타입</h2>
 <details>
 <summary>피그마 프로토타입 상세 보기</summary>
-
-
-
-
 
 <p>
 <a href="https://www.figma.com/proto/K8oFcphOgrW7w1iWJxIdtH/%ED%8C%80-FileInNOut?node-id=0-1&t=w4Zkr2hu29DYfQZg-1">
@@ -153,10 +147,6 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <details>
 <summary>시스템 아키텍처 상세 보기</summary>
 
-
-
-
-
 <img src="Image/Systemarchitecture_ver01.png" alt="FileInNOut System Architecture" width="850"/>
 </details>
 
@@ -166,9 +156,6 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <details>
 <summary>데이터베이스 설계도(ERD) 상세 보기</summary>
 
-
-
-
-
 <img src="Image/DB.png" alt="FileInNOut DB ERD" width="850"/>
+
 </details>
