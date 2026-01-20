@@ -53,7 +53,7 @@ FileInNOut - README (Premium Style)
 
 <hr/>
 
-- 기술 스택
+🛠️ 기술 스택
 
 <div align="center">
 <!-- Backend -->
@@ -85,9 +85,9 @@ FileInNOut - README (Premium Style)
 <img src="https://img.shields.io/badge/HAProxy-1E90FF?style=for-the-badge&logo=haproxy&logoColor=white" alt="HAProxy">
 <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
 <img src="https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white" alt="Git">
-</div>
+</div><br><br>
 
-- 프로젝트 소개
+✨ 프로젝트 소개
 
 "전환 비용(Switching Cost)을 0으로 만드는 통합 환경"
 
@@ -122,7 +122,7 @@ Problem → Solution
 <details>
 <summary>📄 요구사항 정의서 PDF 보기</summary>
 
-- [요구사항 정의서 다운로드 (PDF)](./docs/요구사항%20정의서.pdf)
+[요구사항 정의서 다운로드 (PDF)](./docs/요구사항%20정의서.pdf)
 <p align="center">
   <p align="center">
   <img src="Image/ERD.png" alt="FileInNOut Typing" width="850"/>
@@ -159,6 +159,7 @@ Problem → Solution
 
 
 </details>
+
 
 
 
