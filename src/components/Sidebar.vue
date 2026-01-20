@@ -24,18 +24,17 @@ const toggleSidebar = () => {
 </script>
 
 <template>
-  <!-- Wrapper for sidebar and toggle button -->
   <div class="relative">
-    <!-- Sidebar -->
     <aside 
       class="bg-[var(--bg-main)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300"
-      :class="isSidebarOpen ? 'w-64' : 'w-0 border-r-0'"
+      :class="[
+        isSidebarOpen ? 'w-64 overflow-visible' : 'w-0 border-r-0 overflow-hidden'
+      ]"
     >
-      <div :class="isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'" class="transition-opacity duration-300">
-        <!-- Logo -->
+      <div :class="isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'" class="transition-opacity duration-300 h-full flex flex-col">
         <RouterLink 
           :to="{ name: 'home' }" 
-          class="py-6 px-6 pb-4 flex items-center gap-3 no-underline cursor-pointer transition-opacity duration-200 hover:opacity-80"
+          class="py-6 px-6 pb-4 flex items-center gap-3 no-underline cursor-pointer transition-opacity duration-200 hover:opacity-80 flex-shrink-0"
           @click="scrollToTop"
         >
           <div class="w-9 h-9 bg-blue-600 rounded-lg shadow-lg shadow-blue-200 flex items-center justify-center flex-shrink-0">
@@ -46,15 +45,12 @@ const toggleSidebar = () => {
           <span class="font-bold text-lg text-[var(--text-main)] tracking-tight no-underline">FileInNOut</span>
         </RouterLink>
 
-        <!-- Navigation -->
+        <div class="px-6 mb-4 overflow-visible relative z-[100]">
+          <FileUpload />
+        </div>
+
         <nav class="flex-1 px-3 overflow-y-auto">
           <div class="mb-6">
-            <!-- Upload Button -->
-            <FileUpload class="w-full flex items-center gap-3 px-4 py-2 text-sm font-bold text-blue-700 bg-sky-200 rounded-xl transition-all duration-150 hover:bg-sky-300 active:bg-sky-400">
-            </FileUpload>
-            <br>
-
-            <!-- Navigation Links -->
             <RouterLink
               :to="{ name: 'home' }"
               class="w-full flex items-center gap-3.5 px-3 py-2.5 text-sm text-[var(--text-secondary)] rounded-xl transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline"
@@ -92,10 +88,8 @@ const toggleSidebar = () => {
             </RouterLink>
           </div>
 
-          <!-- Divider -->
           <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
 
-          <!-- Personal Section -->
           <div>
             <div
               @click="isPersonalOpen = !isPersonalOpen"
@@ -122,7 +116,6 @@ const toggleSidebar = () => {
             </div>
           </div>
 
-          <!-- Shared Section -->
           <div>
             <div
               @click="isSharedOpen = !isSharedOpen"
@@ -148,10 +141,8 @@ const toggleSidebar = () => {
               </div>
             </div>
             
-            <!-- Divider -->
             <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
             
-            <!-- Trash -->
             <RouterLink
               :to="{ name: 'trash' }"
               class="w-full flex items-center gap-3.5 px-3 py-2.5 text-sm text-[var(--text-secondary)] rounded-xl transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline"
@@ -160,7 +151,6 @@ const toggleSidebar = () => {
               <span>휴지통</span>
             </RouterLink>
 
-            <!-- Storage Section -->
             <div class="p-3 pt-2">
               <RouterLink 
                 :to="{ name: 'storage' }" 
@@ -170,14 +160,12 @@ const toggleSidebar = () => {
                 <span class="text-sm">저장용량</span>
               </RouterLink>
 
-              <!-- Storage Bar -->
               <div class="w-full bg-[var(--bg-input)] rounded-full h-1.5 mb-2 overflow-hidden">
                 <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300" style="width: 45%"></div>
               </div>
 
               <p class="text-xs text-[var(--text-muted)] mb-4">15GB 중 6.75GB 사용</p>
 
-              <!-- Upgrade Button -->
               <RouterLink
                 :to="{ name: 'payment' }"
                 class="block w-full text-center border border-[var(--border-color)] px-2 py-2 rounded-full text-sm font-semibold text-blue-600 dark:text-blue-400 bg-[var(--bg-main)] transition-all duration-200 hover:bg-blue-500/10 dark:hover:bg-blue-400/10"
@@ -190,7 +178,6 @@ const toggleSidebar = () => {
       </div>
     </aside>
 
-    <!-- Toggle Button -->
     <button
       @click="toggleSidebar"
       class="absolute top-4 z-50 w-8 h-8 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded-lg flex items-center justify-center text-[var(--text-main)] shadow-lg transition-all duration-300 hover:bg-[var(--bg-input)] hover:scale-110"
@@ -219,5 +206,9 @@ nav::-webkit-scrollbar-thumb {
 
 nav::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+.overflow-visible {
+  /* 가로 넘침이 잘리지 않도록 설정 */
+  overflow: visible !important; 
 }
 </style>
