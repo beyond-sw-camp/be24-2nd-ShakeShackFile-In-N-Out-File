@@ -21,13 +21,6 @@ FileInNOut - README (Premium Style)
 
 클라우드 스토리지의 안정성과 Notion 스타일의 협업 경험을 동시에 제공합니다. 
 </p>
-</div>
-
-<div align="center">
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/Project-FileInNOut-2563EB%3Fstyle%3Dfor-the-badge%26logo%3Dgithub%26logoColor%3Dwhite" />
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/Platform-Web-2ea44f%3Fstyle%3Dfor-the-badge%26logo%3Dgooglechrome%26logoColor%3Dwhite" />
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/Status-Developing-F7DF1E%3Fstyle%3Dfor-the-badge" />
-</div>
 
 <!-- ✅ 팀원 소개 -->
 
@@ -67,11 +60,11 @@ FileInNOut - README (Premium Style)
 <h3>Backend & Storage</h3>
 <img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java">
 <img src="https://img.shields.io/badge/Spring_Boot-6DB33F?style=for-the-badge&logo=springboot&logoColor=white" alt="Spring Boot">
-<img src="https://img.shields.io/badge/Spring_Security-6DB33F?style=for-the-badge&logo=spring-security&logoColor=white" alt="Spring Security">
+<!-- <img src="https://img.shields.io/badge/Spring_Security-6DB33F?style=for-the-badge&logo=spring-security&logoColor=white" alt="Spring Security"> -->
 <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js">
 <img src="https://img.shields.io/badge/WebSocket-010101?style=for-the-badge&logo=websocket&logoColor=white" alt="WebSocket">
 <img src="https://img.shields.io/badge/MariaDB-003545?style=for-the-badge&logo=mariadb&logoColor=white" alt="MariaDB">
-<img src="https://img.shields.io/badge/MinIO-C72E49?style=for-the-badge&logo=minio&logoColor=white" alt="MinIO">
+<!-- <img src="https://img.shields.io/badge/MinIO-C72E49?style=for-the-badge&logo=minio&logoColor=white" alt="MinIO"> -->
 </div>
 
 <div align="center">
@@ -87,7 +80,7 @@ FileInNOut - README (Premium Style)
 
 <div align="center">
 <!-- Infrastructure -->
-<img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+<!-- <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"> -->
 <img src="https://img.shields.io/badge/Nginx-009639?style=for-the-badge&logo=nginx&logoColor=white" alt="Nginx">
 <img src="https://img.shields.io/badge/HAProxy-1E90FF?style=for-the-badge&logo=haproxy&logoColor=white" alt="HAProxy">
 <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
@@ -126,18 +119,48 @@ Problem → Solution
 
 <hr/>
 
-##  요구사항 정의서 (Requirement Specification)
-**[요구사항 정의서 상세 보기 (PDF)](./docs/요구사항%20정의서.pdf)**
-<hr/>
+<details>
+<summary>📄 요구사항 정의서 PDF 보기</summary>
+
+- [요구사항 정의서 다운로드 (PDF)](./docs/요구사항%20정의서.pdf)
+<p align="center">
+  <p align="center">
+  <img src="Image/ERD.png" alt="FileInNOut Typing" width="850"/>
+</p>
+</p>
+
+</details>
+
+<details>
+<summary>🎨 Figma 프로토타입 보기</summary>
+
+<br>
+
 <p align="center">
   <a href="https://www.figma.com/proto/K8oFcphOgrW7w1iWJxIdtH/%ED%8C%80-FileInNOut?node-id=0-1&t=w4Zkr2hu29DYfQZg-1">
     <img src="https://img.shields.io/badge/Figma-View%20Prototype-F24E1E?style=for-the-badge&logo=figma&logoColor=white"/>
   </a>
+  <p align="center">
+  <img src="Image/FileInNOut.png" alt="FileInNOut Typing" width="850"/>
+</p>
 </p>
 
+</details>
+
+<details>
+<summary> FileInNOut 시스템 아키텍처</summary>
+
 <p align="center">
-  <img src="Image/FileInNOut.png" alt="FileInNOut Typing" width="850" height="850"/>
+  <p align="center">
+  <img src="Image/Systemarchitecture_ver01.png" alt="FileInNOut Typing" width="850"/>
 </p>
+</p>
+
+
+
+</details>
+
+
 
 
 
