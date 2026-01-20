@@ -167,5 +167,5 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 
 
 
-<img src="Image/db.png" alt="FileInNOut DB ERD" width="850"/>
+<img src="Image/DB.png" alt="FileInNOut DB ERD" width="850"/>
 </details>
