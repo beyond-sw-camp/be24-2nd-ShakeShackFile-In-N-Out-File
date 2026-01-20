@@ -198,12 +198,8 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <summary>1. 사용자 인증 (회원가입 및 로그인)</summary>
 <div align="center">
 
+<video src="https://drive.google.com/file/d/125UsLv2-4X1H93HHC4GNKJPWlm1mihlg/view?usp=sharing" width="850" controls>
 
-
-
-
-<video src="https://github.com/beyond-sw-camp/be24-2nd-ShakeShackFile-In-N-Out-File/blob/main/video/file_docs.mp4" width="850" controls>
-Your browser does not support the video tag.
 </video>
 <p>계정 생성 및 보안 인증을 통한 사용자 접속 프로세스</p>
 </div>
@@ -213,12 +209,7 @@ Your browser does not support the video tag.
 <summary>2. 파일 및 문서 관리</summary>
 <div align="center">
 
-
-
-
-
-<video src="video/file_docs.mp4" width="850" controls>
-Your browser does not support the video tag.
+<video src="https://drive.google.com/file/d/104J-p2jzRx0r_4k15Hj43t5bDU5g2uWq/view?usp=sharing" width="850" controls>
 </video>
 <p>파일 트리 구조 내 폴더/파일 업로드 및 문서(Page) 생성 관리</p>
 </div>
@@ -227,13 +218,17 @@ Your browser does not support the video tag.
 <details>
 <summary>3. 채팅 기능</summary>
 <div align="center">
-<p>협업 중인 팀원들과의 실시간 소통 기능 (준비 중)</p>
+
+<video src="https://drive.google.com/file/d/1m9JCvtN5tYP0tyfqwk3lIBKmp2sgsufD/view?usp=sharing" width="850" controls>
+<p>협업 중인 팀원들과의 실시간 소통 기능</p>
 </div>
 </details>
 
 <details>
 <summary>4. 문서 편집기</summary>
 <div align="center">
-<p>블록 기반의 실시간 동시 편집 에디터 (준비 중)</p>
+
+<video src="https://drive.google.com/file/d/1nuOKbl4H0Ze3yYerwForh2JFt_EKHB0D/view?usp=sharing" width="850" controls>
+<p>블록 기반의 실시간 동시 편집 에디터</p>
 </div>
 </details>
