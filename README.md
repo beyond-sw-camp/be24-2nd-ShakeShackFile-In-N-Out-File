@@ -23,41 +23,33 @@
 <a href="https://github.com/Joohyeng">
 <img src="https://github.com/Joohyeng.png" width="100"/>
 
-
-
-
 김주형
 </a>
+
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/Yoonjoon13">
 <img src="https://github.com/Yoonjoon13.png" width="100"/>
 
-
-
-
 범윤준
 </a>
+
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/sunyeoplee0">
 <img src="https://github.com/sunyeoplee0.png" width="100"/>
 
-
-
-
 이선엽
 </a>
+
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/Lumisia">
 <img src="https://github.com/Lumisia.png" width="100"/>
 
-
-
-
 최재원
 </a>
+
 </td>
 </tr>
 </table>
@@ -177,3 +169,6 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 
 <hr/>
 
+<h2 id="서비스-도메인">서비스 도메인</h2>
+<div align="left">
+<a href="http://www.innoutfile.kro.kr"><p>www.innoutfile.kro.kr</p></a></div>
