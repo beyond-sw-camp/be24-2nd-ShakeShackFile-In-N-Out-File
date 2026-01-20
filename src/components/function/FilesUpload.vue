@@ -52,7 +52,7 @@ import { uploadFiles } from "@/api/filesApi.js";
 
 const fileInput = ref(null);
 const uploadedFiles = ref([]);
-const serverUrl = "http://www.cheeseduck.kro.kr:8080";
+const serverUrl = "http://www.innoutfile.kro.kr:8080";
 
 const triggerFileInput = () => {
   fileInput.value.click();
