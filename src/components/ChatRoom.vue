@@ -41,7 +41,7 @@ const scrollToBottom = () => {
 
 const initChat = () => {
   if (websocket) websocket.close()
-  websocket = new WebSocket(`ws://127.0.0.1:8080/ws/chat`)
+  websocket = new WebSocket(`wss://127.0.0.1:8080/ws/chat`)
 
   websocket.onopen = () => {
     isConnected.value = true
