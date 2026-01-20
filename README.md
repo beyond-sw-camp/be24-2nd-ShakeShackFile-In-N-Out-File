@@ -177,10 +177,3 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 
 <hr/>
 
-<h2 id="서비스-도메인">서비스 도메인</h2>
-<div align="center">
-<p>현재 배포된 서비스의 접속 주소입니다.</p>
-<a href="https://www.google.com/url?sa=E&source=gmail&q=https://www.innoutfile.kro.kr/">
-<img src="https://www.google.com/search?q=https://img.shields.io/badge/URL-innoutfile.kro.kr-2563EB%3Fstyle%3Dfor-the-badge%26logo%3Dgooglechrome%26logoColor%3Dwhite" alt="Service URL"/>
-</a>
-</div>
