@@ -23,33 +23,45 @@
 <a href="https://github.com/Joohyeng">
 <img src="https://github.com/Joohyeng.png" width="100"/>
 
+
+
+
+
 김주형
 </a>
-
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/Yoonjoon13">
 <img src="https://github.com/Yoonjoon13.png" width="100"/>
 
+
+
+
+
 범윤준
 </a>
-
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/sunyeoplee0">
 <img src="https://github.com/sunyeoplee0.png" width="100"/>
 
+
+
+
+
 이선엽
 </a>
-
 </td>
 <td align="center" width="25%">
 <a href="https://github.com/Lumisia">
 <img src="https://github.com/Lumisia.png" width="100"/>
 
+
+
+
+
 최재원
 </a>
-
 </td>
 </tr>
 </table>
@@ -175,3 +187,53 @@ FileInNOut은 클라우드 저장소와 실시간 문서 협업 기능을 통합
 <p>www.innoutfile.kro.kr</p>
 </a>
 </div>
+
+<hr/>
+
+<h2 id="서비스-시나리오">서비스 시나리오 및 기능 데모</h2>
+
+<p>FileInNOut의 주요 핵심 기능을 시나리오별로 정리하였습니다. 각 항목을 클릭하여 상세 동작 과정과 데모 영상을 확인할 수 있습니다.</p>
+
+<details>
+<summary>1. 사용자 인증 (회원가입 및 로그인)</summary>
+<div align="center">
+
+
+
+
+
+<video src="video/user_auth.mp4" width="850" controls>
+Your browser does not support the video tag.
+</video>
+<p>계정 생성 및 보안 인증을 통한 사용자 접속 프로세스</p>
+</div>
+</details>
+
+<details>
+<summary>2. 파일 및 문서 관리</summary>
+<div align="center">
+
+
+
+
+
+<video src="video/file_docs.mp4" width="850" controls>
+Your browser does not support the video tag.
+</video>
+<p>파일 트리 구조 내 폴더/파일 업로드 및 문서(Page) 생성 관리</p>
+</div>
+</details>
+
+<details>
+<summary>3. 채팅 기능</summary>
+<div align="center">
+<p>협업 중인 팀원들과의 실시간 소통 기능 (준비 중)</p>
+</div>
+</details>
+
+<details>
+<summary>4. 문서 편집기</summary>
+<div align="center">
+<p>블록 기반의 실시간 동시 편집 에디터 (준비 중)</p>
+</div>
+</details>
