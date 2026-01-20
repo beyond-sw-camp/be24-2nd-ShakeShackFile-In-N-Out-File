@@ -24,16 +24,7 @@ const downloadFile = (filename) => {
   >
     <template #header-bottom>
       <div class="mb-10">
-        <h3 
-          @click="isRecommendedOpen = !isRecommendedOpen" 
-          class="text-sm font-medium text-gray-500 mb-4 flex items-center gap-2 cursor-pointer w-fit p-1 hover:bg-gray-50 rounded transition-colors"
-        >
-          <span 
-            class="transition-transform duration-200 inline-block text-[10px]"
-            :class="{ '-rotate-90': !isRecommendedOpen }"
-          >▼</span>
-          추천 파일
-        </h3>
+        
         
         <div v-show="isRecommendedOpen">
           <div v-if="recommendedFiles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
@@ -56,7 +47,7 @@ const downloadFile = (filename) => {
               </div>
             </div>
           </div>
-          <div v-else class="text-sm text-gray-400 mb-10">추천할 파일이 없습니다.</div>
+          
         </div>
       </div>
     </template>

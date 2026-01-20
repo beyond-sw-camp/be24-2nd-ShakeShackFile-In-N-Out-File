@@ -20,14 +20,8 @@ const olderFiles = computed(() =>
 <template>
   <div class="space-y-10">
     <BaseFileView 
-      title="최근 문서함 (지난달)" 
+      title="최근 문서함" 
       :files="recentFilesMonth" 
-      @delete="fileStore.moveToTrash" 
-    />
-
-    <BaseFileView 
-      title="예전" 
-      :files="olderFiles" 
       @delete="fileStore.moveToTrash" 
     />
   </div>
