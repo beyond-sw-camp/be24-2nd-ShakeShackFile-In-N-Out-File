@@ -107,17 +107,17 @@ const router = createRouter({
   ],
 })
 
-// router.beforeEach((to, from, next) => {
-//   console.log('vue에서 링크를 이동할 때 매번 실행되는 함수')
+router.beforeEach((to, from, next) => {
+  console.log('vue에서 링크를 이동할 때 매번 실행되는 함수')
 
-//   document.title = to.meta.title || 'FileInNOut'
+  document.title = to.meta.title || 'FileInNOut'
 
-//   if (to.meta.requiresAuth) {
-//     if (localStorage.getItem('USERINFO') === null) {
-//       next({ name: 'login' })
-//     }
-//   }
-//   next() 
-// })
+  if (to.meta.requiresAuth) {
+    if (localStorage.getItem('USERINFO') === null) {
+      next({ name: 'login' })
+    }
+  }
+  next() 
+})
 
 export default router
