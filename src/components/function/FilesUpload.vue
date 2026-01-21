@@ -24,8 +24,9 @@
         </div>
 
         <div class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block">
-          <div @click="createNewFile" class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl">파일 생성하기</div>
-          <div @click="createNewFolder" class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl">폴더 생성하기</div>
+          <RouterLink :to="{ name: 'editor' }" >
+          <div class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-200">파일 생성하기</div></RouterLink>
+          <div @click="createNewFolder" class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl text-gray-200">폴더 생성하기</div>
         </div>
       </div>
 
@@ -41,11 +42,11 @@
         </div>
 
         <div class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block">
-          <label class="block px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl">
+          <label class="block px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-200">
             파일 업로드
             <input type="file" multiple hidden @change="handleFileChange" />
           </label>
-          <label class="block px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl">
+          <label class="block px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl text-gray-200">
             폴더 업로드
             <input type="file" webkitdirectory directory multiple hidden @change="handleFolderChange" />
           </label>
