@@ -7,8 +7,8 @@ export const useAuthStore = defineStore('auth', () => {
   const login = (userInfo) => {
     isLogin.value = true
     const userData = typeof userInfo === 'string' ? JSON.parse(userInfo) : userInfo
-    user.value = userData
-    localStorage.setItem('USERINFO', userInfo)
+    user.value = userData.result
+    localStorage.setItem('USERINFO', JSON.stringify(user.value))
   }
 
   const checkLogin = () => {
