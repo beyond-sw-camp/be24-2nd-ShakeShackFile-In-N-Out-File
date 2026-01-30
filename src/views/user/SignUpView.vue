@@ -111,10 +111,11 @@ const isFormValid = computed(() => {
 
 const handleSignup = async () => {
   if (!isFormValid.value) return
-
+  
   isLoading.value = true
   try {
-    const res = await api.signup(signupForm)
+    const { passwordConfirm, ...payload } = signupForm;
+    const res = await api.signup(payload)
     signupSuccess.value = true
     setTimeout(() => {
       router.push({ name: 'login' })
