@@ -1,30 +1,15 @@
 <script setup>
 import { ref } from 'vue'
+import PortOne from '@portone/browser-sdk/v2'
 import IntrodHeader from '@/components/IntrodHeader.vue'
 import { useRouter } from 'vue-router'
+import { api } from '@/plugins/axiosinterceptor'
 
 const router = useRouter()
 const isYearly = ref(false)
 const selectedPlan = ref('Professional') // 기본 선택값
 
 // Pay.vue로 이동하며 데이터 전달
-const goToPay = (plan) => {
-  // 무료 플랜(Starter)은 결제 페이지로 가지 않음
-  if (plan.monthlyPrice === 0) {
-    alert('이미 사용 중인 플랜입니다.')
-    return
-  }
-  
-  router.push({
-    name: 'pay',
-    query: { 
-      plan: plan.name, 
-      price: isYearly.value ? plan.yearlyPrice : plan.monthlyPrice,
-      period: isYearly.value ? '연간' : '월간'
-    }
-  })
-}
-
 const plans = [
   {
     name: 'Starter',
@@ -48,6 +33,90 @@ const plans = [
     features: ['저장소 용량 무제한', '엔터프라이즈급 SSO 보안', '전담 계정 관리자 배정', '커스텀 API 통합 지원'],
   },
 ]
+
+// 결제 상태
+const paymentStatus = ref({
+  status: '',
+  message: '',
+})
+
+const randomId = () => {
+  const id = [...crypto.getRandomValues(new Uint32Array(2))]
+    .map((word) => word.toString(16).padStart(8, '0'))
+    .join('')
+
+  return id
+}
+
+/**
+ * 결제하기
+ */
+const ordersPayment = async (req) => {
+  //결과
+  let data = {}
+
+  // 결제 ID
+  const paymentId = randomId()
+
+  await PortOne.requestPayment({
+    storeId: 'store-445d1c07-f501-4e52-bd21-62fc568b3de3',
+    channelKey: 'channel-key-b36de3d5-a4c9-4d4b-9240-df360144f8d4',
+    paymentId,
+    orderName: req.orderName,
+    totalAmount: req.totalAmount,
+    currency: 'KRW',
+    payMethod: 'CARD',
+    customData: req.customData,
+  })
+    .then((res) => {
+      //성공
+      data = res
+    })
+    .catch((error) => {
+      //실패
+      data = error.data
+    })
+
+  return data
+}
+
+const onPayment = async () => {
+
+  try {
+    paymentStatus.value = { status: 'IDLE', message: '결제 진행 중' }
+    const ordersIdx = 1
+
+    // 결제 요청
+    const payment = await ordersPayment({
+      orderName: '상품01',
+      totalAmount: 1000,
+      customData: { ordersIdx, productIdx: 10 },
+    })
+
+    if (payment.code) {
+      paymentStatus.value = { status: 'FAILED', message: payment.pgMessage }
+      await ordersApi.ordersCancel(ordersIdx)
+      return
+    }
+
+    // 결제 검증
+    const verifyResponse = api.post('/orders/verify', { paymentId: payment.paymentId })
+
+    if (verifyResponse.success && verifyResponse.results) {
+      paymentStatus.value = { status: 'SUCCESS', message: '결제가 정상적으로 완료되었습니다.' }
+      router.push({ name: 'courseDetail', params: { courseIdx: courseIdx } })
+    }
+  } catch (error) {
+    console.error('결제 중 오류 발생:', error)
+    paymentStatus.value = {
+      status: 'FAILED',
+      message: '결제 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
+    }
+  }
+}
+
+
+
 </script>
 
 <template>
@@ -60,15 +129,10 @@ const plans = [
 
       <div class="flex items-center justify-center gap-4 mt-10">
         <span :class="!isYearly ? 'text-gray-900 font-bold' : 'text-gray-400'">월간 결제</span>
-        <button
-          @click="isYearly = !isYearly"
-          class="w-14 h-7 rounded-full relative p-1 transition-colors duration-300"
-          :class="isYearly ? 'bg-blue-600' : 'bg-gray-200'"
-        >
-          <div
-            class="w-5 h-5 bg-white rounded-full shadow transition-transform duration-300 absolute top-1 left-1"
-            :class="{ 'translate-x-7': isYearly }"
-          ></div>
+        <button @click="isYearly = !isYearly" class="w-14 h-7 rounded-full relative p-1 transition-colors duration-300"
+          :class="isYearly ? 'bg-blue-600' : 'bg-gray-200'">
+          <div class="w-5 h-5 bg-white rounded-full shadow transition-transform duration-300 absolute top-1 left-1"
+            :class="{ 'translate-x-7': isYearly }"></div>
         </button>
         <span :class="isYearly ? 'text-gray-900 font-bold' : 'text-gray-400'">연간 결제</span>
         <span class="bg-blue-100 text-blue-600 text-[10px] font-bold px-2 py-1 rounded-full ml-2">2개월 무료 혜택</span>
@@ -76,29 +140,20 @@ const plans = [
     </header>
 
     <section class="max-w-6xl mx-auto px-6 grid md:grid-cols-3 gap-8">
-      <div
-        v-for="plan in plans"
-        :key="plan.name"
-        @click="selectedPlan = plan.name" 
+      <div v-for="plan in plans" :key="plan.name" @click="selectedPlan = plan.name"
         class="bg-white rounded-3xl border p-8 flex flex-col transition-all duration-300 relative cursor-pointer"
-        :class="
-          selectedPlan === plan.name
-            ? 'border-blue-500 shadow-xl shadow-blue-100 scale-105 z-10'
-            : 'border-gray-200 shadow-sm hover:-translate-y-2'
-        "
-      >
-        <div
-          v-if="selectedPlan === plan.name"
-          class="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] font-black px-4 py-1.5 rounded-full tracking-tighter"
-        >
+        :class="selectedPlan === plan.name
+          ? 'border-blue-500 shadow-xl shadow-blue-100 scale-105 z-10'
+          : 'border-gray-200 shadow-sm hover:-translate-y-2'
+          ">
+        <div v-if="selectedPlan === plan.name"
+          class="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] font-black px-4 py-1.5 rounded-full tracking-tighter">
           SELECTED PLAN
         </div>
 
         <div class="mb-8">
-          <h3
-            class="text-sm font-bold uppercase mb-2"
-            :class="selectedPlan === plan.name ? 'text-blue-600' : 'text-gray-400'"
-          >
+          <h3 class="text-sm font-bold uppercase mb-2"
+            :class="selectedPlan === plan.name ? 'text-blue-600' : 'text-gray-400'">
             {{ plan.name }}
           </h3>
           <div class="flex items-baseline gap-1">
@@ -117,15 +172,10 @@ const plans = [
           </li>
         </ul>
 
-        <button
-          @click.stop="goToPay(plan)"
-          class="w-full py-4 rounded-xl font-bold text-sm transition-all"
-          :class="
-            selectedPlan === plan.name
-              ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          "
-        >
+        <button @click="onPayment" class="w-full py-4 rounded-xl font-bold text-sm transition-all" :class="selectedPlan === plan.name
+          ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'
+          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          ">
           {{ plan.name === 'Starter' ? '현재 플랜' : '플랜 업그레이드' }}
         </button>
       </div>

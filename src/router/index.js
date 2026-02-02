@@ -113,8 +113,14 @@ router.beforeEach((to, from, next) => {
   document.title = to.meta.title || 'FileInNOut'
 
   if (to.meta.requiresAuth) {
-    if (localStorage.getItem('USERINFO') === null) {
+    const userInfo = localStorage.getItem('USERINFO')
+    // 쿠키가 존재하는지 확인하는 로직 추가
+    const hasToken = document.cookie.includes('ATOKEN')
+
+    // 정보도 없고, 쿠키도 없다면 그때만 로그인으로 보냄
+    if (userInfo === null && !hasToken) {
       next({ name: 'login' })
+      return
     }
   }
   next() 
