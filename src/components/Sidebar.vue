@@ -17,6 +17,17 @@ const scrollToTop = () => {
   });
 }
 
+// 새 페이지 추가 함수
+const addPersonalPage = () => {
+  const newPageName = prompt("새로운 페이지 이름을 입력하세요:");
+  if (newPageName && newPageName.trim()) {
+    personalItems.value.push(newPageName.trim());
+    // 페이지 추가 후 목록이 닫혀있다면 자동으로 열어줌
+    isPersonalOpen.value = true;
+  }
+}
+
+
 // 사이드바 토글 함수
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value
@@ -26,7 +37,7 @@ const toggleSidebar = () => {
 <template>
   <div class="relative">
     <aside 
-      class="bg-[var(--bg-main)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300"
+      class="bg-[var(--bg-main)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
       :class="[
         isSidebarOpen ? 'w-64 overflow-visible' : 'w-0 border-r-0 overflow-hidden'
       ]"
@@ -49,7 +60,7 @@ const toggleSidebar = () => {
           <FileUpload />
         </div>
 
-        <nav class="flex-1 px-3 overflow-y-auto">
+        <nav class="flex-1 px-3 overflow-y-auto custom-scrollbar">
           <div class="mb-6">
             <RouterLink
               :to="{ name: 'home' }"
@@ -91,11 +102,24 @@ const toggleSidebar = () => {
           <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
 
           <div>
-            <div
-              @click="isPersonalOpen = !isPersonalOpen"
-              class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)]"
-            >
-              <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">개인 페이지</h3>
+            <div>
+    <div
+      @click="isPersonalOpen = !isPersonalOpen"
+      class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)] group"
+    >
+      <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
+        개인 페이지
+      </h3>
+
+            <div class="flex items-center gap-2">
+              <button 
+                @click.stop="addPersonalPage"
+                class="p-1 rounded hover:bg-gray-200 gray:hover:bg-gray-700 text-[var(--text-muted)] hover:text-blue-500 transition-colors"
+                title="페이지 추가"
+              >
+                <i class="fa-solid fa-plus text-[10px]"></i>
+              </button>
+
               <span
                 class="text-xs text-[var(--text-muted)] transition-transform duration-200"
                 :class="{ 'rotate-180': !isPersonalOpen }"
@@ -103,15 +127,21 @@ const toggleSidebar = () => {
                 ▼
               </span>
             </div>
+          </div>
 
-            <div v-show="isPersonalOpen" class="mt-1 space-y-1">
-              <div
-                v-for="item in personalItems"
-                :key="item"
-                class="px-3 py-2.5 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center gap-3.5 transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline"
-              >
-                <i class="fa-solid fa-file-lines w-5 text-center flex-shrink-0 text-lg"></i>
-                <span>{{ item }}</span>
+              <div v-show="isPersonalOpen" class="mt-1 space-y-1 px-2">
+                <div
+                  v-for="item in personalItems"
+                  :key="item"
+                  class="px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center gap-3 transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]"
+                >
+                  <i class="fa-solid fa-file-lines w-4 text-center opacity-70"></i>
+                  <span>{{ item }}</span>
+                </div>
+                
+                <div v-if="personalItems.length === 0" class="px-3 py-2 text-xs text-[var(--text-muted)] italic">
+                  생성된 페이지가 없습니다.
+                </div>
               </div>
             </div>
           </div>
