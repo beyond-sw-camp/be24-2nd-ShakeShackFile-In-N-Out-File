@@ -7,7 +7,7 @@ const signup = async (req) => {
 }
 
 const login = async (req) => {
-  const res = await api.post('/user/login', req)
+  const res = await api.post('/login', req)
 
   return res
 }

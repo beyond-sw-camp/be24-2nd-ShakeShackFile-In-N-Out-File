@@ -10,7 +10,7 @@ export default defineConfig({
   base:'/',
   plugins: [vue(), vueDevTools(), tailwindcss()],
   server: {
-    // host: '0.0.0.0',
+    host: '0.0.0.0',
     proxy: {
       '/api': {
         target: 'http://localhost:8080',

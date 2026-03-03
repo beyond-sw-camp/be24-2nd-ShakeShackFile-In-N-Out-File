@@ -26,26 +26,21 @@ import { ref, reactive } from 'vue'
 
 /**
  * initEditor(holderElement, room = 'default-room')
- * - holderElement: HTMLElement (div) where Editor.js will mount
- * - room: y-websocket room name
- *
- * Returns a Promise resolving to:
- * { editor, destroy, remoteCursorsRef, bindTitleRef, savePost }
  */
 export async function initEditor(holderElement, room = 'default-room') {
   if (!holderElement) throw new Error('holderElement is required')
 
   // Yjs setup
   const ydoc = new Y.Doc()
-  const provider = new WebsocketProvider('wss://demos.yjs.dev', room, ydoc)
-  const yText = ydoc.getText('contents')   // store Editor.js JSON as string
-  const yTitle = ydoc.getText('title')    // store title string
+  const provider = new WebsocketProvider('ws://10.10.10.100:8080', room, ydoc)
+  const yText = ydoc.getText('contents')
+  const yTitle = ydoc.getText('title')
 
-  // awareness presence for mouse & selection
+  // awareness presence
   const awareness = provider.awareness
 
   // remote cursors reactive store
-  const remoteCursorsRef = ref({}) // maps clientId -> { name, color, style }
+  const remoteCursorsRef = ref({})
 
   // local user identity
   const colors = ['#FF6B6B','#6BCB77','#4D96FF','#FF7BD1','#FFD93D','#8E6BFF']
@@ -53,10 +48,8 @@ export async function initEditor(holderElement, room = 'default-room') {
   const myColor = colors[myId]
   const myName = `사용자 ${myId + 1}`
 
-  // set initial local presence
   awareness.setLocalState({ user: { name: myName, color: myColor } })
 
-  // Alignment tune config tool will add `data-align` to block
   const tools = {
     header: {
       class: Header,
@@ -83,24 +76,28 @@ export async function initEditor(holderElement, room = 'default-room') {
     }
   }
 
-  // EditorJS instance
   let editor = null
   let suppressLocal = false
 
-  // helper: render incoming Yjs content into Editor.js without loops
+  // ⭐ 수정된 renderFromY: 안전장치 추가
   async function renderFromY(yval) {
     if (!editor) return
-    if (!yval) return
+    if (!yval || yval === "") return // 빈 데이터면 렌더링 스킵
+    
     try {
+      // 에디터가 준비될 때까지 기다림 (TypeError: render of undefined 방지)
+      await editor.isReady; 
+      
       const parsed = JSON.parse(yval)
-      // render blocks (if content was saved as Editor.js JSON)
-      if (parsed && parsed.blocks) {
+      // blocks가 유효한 배열인지 확인 (Incorrect data 방지)
+      if (parsed && Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
         suppressLocal = true
         await editor.blocks.render(parsed.blocks)
         suppressLocal = false
       }
     } catch (e) {
       console.warn('failed to parse yval', e)
+      suppressLocal = false
     }
   }
 
@@ -110,7 +107,6 @@ export async function initEditor(holderElement, room = 'default-room') {
     placeholder: '명령어 "/" 로 블록 추가',
     tools,
     onReady: async () => {
-      // load initial content from yText
       const initial = yText.toString()
       if (initial) {
         await renderFromY(initial)
@@ -120,20 +116,21 @@ export async function initEditor(holderElement, room = 'default-room') {
       if (suppressLocal) return
       try {
         const saved = await editor.save()
-        suppressLocal = true
-        // store JSON as string to yText
+        const newString = JSON.stringify(saved)
+        
+        if (yText.toString() === newString) return
+
         ydoc.transact(() => {
           yText.delete(0, yText.length)
-          yText.insert(0, JSON.stringify(saved))
+          yText.insert(0, newString)
         })
-        suppressLocal = false
       } catch (err) {
         console.error('editor save failed', err)
       }
     }
   })
 
-  // sync title from yTitle -> caller can bind a local ref via bindTitleRef()
+  // bindTitleRef (그대로 유지)
   function bindTitleRef(titleRef) {
     if (!titleRef) return
     const t0 = yTitle.toString()
@@ -155,68 +152,29 @@ export async function initEditor(holderElement, room = 'default-room') {
     }
   }
 
-  /** 수정된 savePost 함수 **/
+  // savePost (그대로 유지)
   async function savePost() {
-    // 1. 에디터 인스턴스 존재 여부 확인
-    if (!editor) {
-      console.error('에디터 인스턴스가 존재하지 않습니다.');
-      return;
-    }
-
+    if (!editor) return;
     try {
-      // 2. 에디터가 완전히 로드될 때까지 대기
       await editor.isReady;
-
-      // 3. Editor.js 데이터 추출
       const savedData = await editor.save(); 
-      
-      // 4. yTitle 안전하게 가져오기
-      // 만약 yTitle이 유효하지 않으면 '제목 없음'으로 대체
-      const postTitle = (typeof yTitle !== 'undefined' && yTitle !== null) 
-                        ? yTitle.toString() 
-                        : '제목 없음';
-
-      // 5. 백엔드 전송용 페이로드 구성
-      // const payload = {
-      //   title: postTitle,
-      //   contents: savedData,
-      //   updatedAt: new Date().toISOString()
-      // };
-
-      // console.log('보내는 데이터:', payload);
-
-      // 6. 백엔드 API 호출
-      // ⚠️ 주의: 실제 백엔드 주소가 없다면 이 부분에서 404 에러가 날 수 있습니다.
-      // 테스트 중이라면 이 fetch 블록을 주석 처리하고 console.log만 확인하세요.
-      // const token = localStorage.getItem('token');
       const formdata = new FormData();
       formdata.append('title', yTitle.toString());
       formdata.append('contents', JSON.stringify(savedData));
 
       const response = await fetch('/api/workspace/save', {
         method: 'POST',
-        // headers: {
-        //   'Authorization': `Bearer ${token}`
-        // },
         body: formdata
       });
 
-      if (!response.ok) {
-        throw new Error(`서버 응답 오류: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      console.log('저장 성공!', result);
-      return result;
-
+      if (!response.ok) throw new Error(`Status: ${response.status}`);
+      return await response.json();
     } catch (e) {
-      // 여기서 에러를 잡아서 콘솔에 출력하므로 [Vue warn]이 더 이상 발생하지 않습니다.
-      console.error('savePost 실행 중 예외 발생:', e);
-      // 사용자에게 알림을 띄우는 로직을 추가하면 더 좋습니다 (예: alert)
+      console.error('savePost error:', e);
     }
   }
 
-  // awareness listeners (remote cursors / selections)
+  // awareness listeners (그대로 유지)
   awareness.on('update', () => {
     const states = awareness.getStates()
     const remotes = {}
@@ -239,8 +197,9 @@ export async function initEditor(holderElement, room = 'default-room') {
     remoteCursorsRef.value = remotes
   })
 
+  // yText observe (그대로 유지)
   yText.observe(event => {
-    if (suppressLocal) return
+    if (event.transaction.local) return 
     const val = yText.toString()
     renderFromY(val)
   })
@@ -272,9 +231,9 @@ export async function initEditor(holderElement, room = 'default-room') {
   function destroy() {
     window.removeEventListener('mousemove', handleMouseMove)
     document.removeEventListener('selectionchange', reportSelection)
-    try { editor?.destroy && editor.destroy() } catch (e) {}
-    try { provider?.destroy && provider.destroy() } catch (e) {}
-    try { ydoc && ydoc.destroy && ydoc.destroy() } catch (e) {}
+    try { editor?.destroy() } catch (e) {}
+    try { provider?.destroy() } catch (e) {}
+    try { ydoc?.destroy() } catch (e) {}
   }
 
   function updateTitleFromLocal(val) {
