@@ -26,14 +26,14 @@
         <div class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block">
           <RouterLink :to="{ name: 'editor' }">
             <div class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-800 dark:text-gray-200">
-              새 문서 만들기
+              문서 만들기
             </div>
           </RouterLink>
           <div
             @click="createNewFolder"
             class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl text-gray-800 dark:text-gray-200"
           >
-            새 폴더 만들기
+            폴더 만들기
           </div>
         </div>
       </div>
@@ -84,7 +84,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from "vue"
 import axios from "axios"
-import { uploadFiles, parseUploadResponse } from "@/api/filesApi.js"
+import { completePartitionUpload, parseUploadResponse, uploadFiles } from "@/api/filesApi.js"
 
 const isDropdownOpen = ref(false)
 const uploadedFiles = ref([])
@@ -92,7 +92,9 @@ const isUploading = ref(false)
 const uploadError = ref("")
 
 const emit = defineEmits(["upload-complete", "upload-fail"])
-const MAX_UPLOAD_COUNT = 10
+const MAX_UPLOAD_COUNT = 1000
+const PARTITION_SIZE_BYTES = 100 * 1024 * 1024
+const CHUNK_SIZE_BYTES = 80 * 1024 * 1024
 
 const toggleDropdown = () => {
   if (isUploading.value) return
@@ -104,22 +106,88 @@ const closeDropdown = () => {
 }
 
 const createNewFolder = () => {
-  const folderName = prompt("폴더 이름을 입력하세요")
+  const folderName = prompt("폴더 이름을 입력해주세요.")
   if (folderName) {
     console.log("폴더 생성:", folderName)
   }
   closeDropdown()
 }
 
-const uploadToPresignedUrl = async (file, presignedUploadUrl) => {
+const getFileFormat = (file) => {
+  if (typeof file?.name !== "string") return ""
+
+  const lastDot = file.name.lastIndexOf(".")
+  if (lastDot < 0 || lastDot === file.name.length - 1) {
+    return ""
+  }
+
+  return file.name
+    .slice(lastDot + 1)
+    .trim()
+    .replace(/^\.+/, "")
+    .toLowerCase()
+}
+
+const uploadToPresignedUrl = async (payload, presignedUploadUrl, contentType = "application/octet-stream") => {
   if (!presignedUploadUrl) {
     throw new Error("업로드 URL이 없습니다.")
   }
 
-  await axios.put(presignedUploadUrl, file, {
+  await axios.put(presignedUploadUrl, payload, {
     headers: {
-      "Content-Type": file.type || "application/octet-stream",
+      "Content-Type": contentType || "application/octet-stream",
     },
+  })
+}
+
+const getExpectedUploadCount = (file) => {
+  if (!file?.size || file.size <= PARTITION_SIZE_BYTES) {
+    return 1
+  }
+
+  return Math.ceil(file.size / CHUNK_SIZE_BYTES)
+}
+
+const uploadFileByChunks = async (file, uploadMetas) => {
+  const expectedUploadCount = getExpectedUploadCount(file)
+
+  if (!Array.isArray(uploadMetas) || uploadMetas.length !== expectedUploadCount) {
+    throw new Error(`${file?.name || "unknown-file"}의 업로드 메타데이터 개수가 맞지 않습니다.`)
+  }
+
+  if (expectedUploadCount === 1) {
+    await uploadToPresignedUrl(file, uploadMetas[0]?.presignedUploadUrl, file.type)
+    return
+  }
+
+  for (let chunkIndex = 0; chunkIndex < expectedUploadCount; chunkIndex++) {
+    const start = chunkIndex * CHUNK_SIZE_BYTES
+    const end = Math.min(start + CHUNK_SIZE_BYTES, file.size)
+    const chunkBlob = file.slice(start, end, file.type || "application/octet-stream")
+
+    await uploadToPresignedUrl(
+      chunkBlob,
+      uploadMetas[chunkIndex]?.presignedUploadUrl,
+      file.type,
+    )
+  }
+}
+
+const completeChunkUpload = async (file, uploadMetas) => {
+  const firstMeta = uploadMetas[0]
+  const finalObjectKey = firstMeta?.finalObjectKey
+  const chunkObjectKeys = uploadMetas.map((meta) => meta?.objectKey).filter(Boolean)
+
+  if (!finalObjectKey || chunkObjectKeys.length !== uploadMetas.length) {
+    throw new Error(`${file.name}의 완료 요청 정보가 부족합니다.`)
+  }
+
+  await completePartitionUpload({
+    fileOriginName: file.name,
+    fileFormat: getFileFormat(file),
+    fileSize: file.size,
+    finalObjectKey,
+    chunkObjectKeys,
   })
 }
 
@@ -147,7 +215,7 @@ const handleUpload = async (event, uploadTypeLabel) => {
 
   try {
     if (selectedFiles.length > MAX_UPLOAD_COUNT) {
-      throw new Error(`한 번에 최대 ${MAX_UPLOAD_COUNT}개까지만 업로드할 수 있습니다.`)
+      throw new Error(`한 번에 최대 ${MAX_UPLOAD_COUNT}개까지 업로드할 수 있습니다.`)
     }
 
     const invalidName = selectedFiles.find((file) => !file?.name || typeof file.name !== "string")
@@ -171,14 +239,24 @@ const handleUpload = async (event, uploadTypeLabel) => {
     }
 
     const successList = []
-    const count = Math.min(selectedFiles.length, presignedResponses.length)
+    let responseIndex = 0
 
-    for (let index = 0; index < count; index++) {
-      const targetFile = selectedFiles[index]
-      const meta = presignedResponses[index]
+    for (const targetFile of selectedFiles) {
+      const expectedUploadCount = getExpectedUploadCount(targetFile)
+      const uploadMetas = presignedResponses.slice(responseIndex, responseIndex + expectedUploadCount)
 
-      await uploadToPresignedUrl(targetFile, meta?.presignedUploadUrl)
-      successList.push(meta?.fileOriginName || targetFile.name)
+      await uploadFileByChunks(targetFile, uploadMetas)
+
+      if (expectedUploadCount > 1) {
+        await completeChunkUpload(targetFile, uploadMetas)
+      }
+
+      responseIndex += expectedUploadCount
+      successList.push(targetFile.name)
+    }
+
+    if (responseIndex !== presignedResponses.length) {
+      throw new Error("업로드 응답 개수가 선택한 파일과 일치하지 않습니다.")
     }
 
     uploadedFiles.value = successList
