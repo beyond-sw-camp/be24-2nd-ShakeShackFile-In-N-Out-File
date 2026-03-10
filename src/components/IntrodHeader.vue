@@ -6,8 +6,13 @@ const authStore = useAuthStore();
 const router = useRouter();
 
 // 로그인 여부 및 사용자 정보
-const isLoggedIn = computed(() => !!authStore.user);
-const userName = computed(() => authStore.user?.userName || authStore.user?.name || '사용자');
+const isLoggedIn = computed(() => !!authStore.token);
+const userName = computed(() => {
+  if (authStore.user) {
+    return authStore.user.userName || authStore.user.name || authStore.user.nickname;
+  }
+  return '사용자';
+});
 
 // 드롭다운 상태 관리
 const showProfileDropdown = ref(false);
@@ -33,9 +38,7 @@ const handleClickOutside = (event) => {
 onMounted(() => {
   document.documentElement.classList.remove('dark');
   document.addEventListener('click', handleClickOutside);
-  if (!authStore.user) {
-    authStore.checkLogin();
-  }
+  authStore.checkLogin();
 });
 
 onBeforeUnmount(() => {

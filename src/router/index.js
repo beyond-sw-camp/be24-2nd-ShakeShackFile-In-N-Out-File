@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '@/stores/useAuthStore'
 import NotFound from '@/views/NotFound.vue'
 
 const router = createRouter({
@@ -108,22 +109,31 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  console.log('vue에서 링크를 이동할 때 매번 실행되는 함수')
-
-  document.title = to.meta.title || 'FileInNOut'
-
-  if (to.meta.requiresAuth) {
-    const userInfo = localStorage.getItem('USERINFO')
-    // 쿠키가 존재하는지 확인하는 로직 추가
-    const hasToken = document.cookie.includes('ATOKEN')
-
-    // 정보도 없고, 쿠키도 없다면 그때만 로그인으로 보냄
-    if (userInfo === null && !hasToken) {
-      next({ name: 'login' })
-      return
-    }
+  const authStore = useAuthStore()
+  
+  // 1. 초기화: 로컬 스토리지 데이터 복구
+  if (!authStore.token) {
+    authStore.checkLogin()
   }
-  next() 
+
+  // 2. URL 파라미터에 accessToken이 있는지 확인 (소셜 로그인용)
+  // to.query는 라우터가 분석한 URL 쿼리 파라미터입니다.
+  const hasTokenInUrl = to.query.accessToken || to.query.token
+
+  const isAuthenticated = !!authStore.token
+
+  // 3. 네비게이션 가드 로직
+  if (to.meta.requiresAuth) {
+    // 인증이 필요한데 토큰이 없고, URL에도 토큰이 없다면 튕김
+    if (!isAuthenticated && !hasTokenInUrl) {
+      next({ name: 'login' })
+    } else {
+      // 토큰이 있거나, 지금 막 URL을 통해 토큰을 가지고 들어오는 중이라면 허용
+      next()
+    }
+  } else {
+    next()
+  }
 })
 
 export default router

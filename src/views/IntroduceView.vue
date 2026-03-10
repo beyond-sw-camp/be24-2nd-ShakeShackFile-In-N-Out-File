@@ -1,5 +1,13 @@
 <script setup>
 import IntrodHeader from '@/components/IntrodHeader.vue';
+import { computed } from 'vue';
+import { useAuthStore } from '@/stores/useAuthStore';
+
+// 스토어에서 로그인 상태(토큰 유무) 감지
+const authStore = useAuthStore();
+const isLoggedIn = computed(() => !!authStore.token);
+
+
 </script>
 
 <template>
@@ -14,11 +22,16 @@ import IntrodHeader from '@/components/IntrodHeader.vue';
         강력한 클라우드 드라이브와 실시간 문서 협업 도구의 결합.<br>
         FileInNOut으로 흩어진 도구들을 하나로 모으고 스마트한 워크플로우를 경험하세요.
       </p>
+      
       <div class="flex justify-center gap-4 mb-16">
-        <RouterLink to="/signup" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold text-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200">
+        <RouterLink v-if="!isLoggedIn" to="/signup" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold text-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200">
           지금 시작하기 <i class="fa-solid fa-arrow-right ml-2 text-sm"></i>
         </RouterLink>
+        <RouterLink v-else to="/main" class="bg-indigo-600 text-white px-6 py-3 rounded-lg font-bold text-lg hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+          대시보드로 가기 <i class="fa-solid fa-arrow-right ml-2 text-sm"></i>
+        </RouterLink>
       </div>
+      
       <div class="max-w-5xl mx-auto p-2 bg-slate-100 rounded-2xl shadow-xl overflow-hidden">
         <img src="@/assets/images/Dashboard.png" alt="FileInNOut Dashboard Preview" class="w-full rounded-xl border border-slate-200/50">
       </div>
@@ -105,8 +118,12 @@ import IntrodHeader from '@/components/IntrodHeader.vue';
           <p class="text-lg text-slate-300 mb-10 leading-relaxed">
               FileInNOut 하나로 파일 관리와 팀 협업을 통합하고,<br class="hidden md:block"> 가장 생산적인 업무 환경을 경험해보세요.
           </p>
-          <RouterLink to="/signup" class="bg-blue-500 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-blue-400 transition-all shadow-lg shadow-blue-500/20 active:scale-95">
+
+          <RouterLink v-if="!isLoggedIn" to="/signup" class="bg-blue-500 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-blue-400 transition-all shadow-lg shadow-blue-500/20 active:scale-95">
               지금 무료로 시작하기
+          </RouterLink>
+          <RouterLink v-else to="/main" class="bg-indigo-500 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20 active:scale-95">
+              워크스페이스로 이동하기
           </RouterLink>
         </div>
     </section>
