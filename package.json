@@ -44,13 +44,7 @@
     "tailwindcss": "^4.1.18",
     "vue": "^3.5.26",
     "vue-router": "^4.6.4",
-<<<<<<< HEAD
     "y-websocket": "^3.0.0"
-=======
-    "y-prosemirror": "^1.2.12",
-    "y-websocket": "^2.0.4",
-    "yjs": "^13.6.0"
->>>>>>> c94f56c7cde95f2c0e37906797fd1269397e8edf
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.3",

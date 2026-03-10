@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
-import { initEditor } from '@/components/editor' // logic file
+import { initEditor } from '@/components/workspace/editor' // logic file
+import loadpost from '@/components/workspace/loadpost'
 
 // 로컬 상태
 const editorHolder = ref(null)
@@ -39,6 +40,18 @@ watch(title, (newVal) => {
     editorApi.value.updateTitleFromLocal(newVal)
   }
 })
+watch(() => loadpost.currentPost.value, (newPost) => {
+  if (newPost) {
+    // 1. 제목 바인딩 (yTitle이 ref라면)
+    yTitle.value = newPost.title;
+    
+    // 2. 에디터 데이터 렌더링
+    // editor.js에 renderData(data) 같은 함수가 있다면 호출
+    if (editor && newPost.contents) {
+        editor.render(newPost.contents);
+    }
+  }
+}, { deep: true });
 
 onMounted(async () => {
   // 초기 테마 설정 확인

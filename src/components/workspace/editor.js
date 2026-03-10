@@ -23,10 +23,37 @@ import { WebsocketProvider } from 'y-websocket'
 
 // Vue reactivity helpers
 import { ref, reactive } from 'vue'
+import postApi from '@/api/postApi'
+import loadpost from './loadpost'
 
 /**
  * initEditor(holderElement, room = 'default-room')
  */
+
+
+// // 커스텀 명령어 확장 생성
+// const Commands = Extension.create({
+//   name: 'mention',
+//   addOptions() {
+//     return {
+//       suggestion: {
+//         char: '/',
+//         command: ({ editor, range, props }) => {
+//           props.command({ editor, range })
+//         },
+//       },
+//     }
+//   },
+//   addProseMirrorPlugins() {
+//     return [
+//       Suggestion({
+//         editor: this.editor,
+//         ...this.options.suggestion,
+//       }),
+//     ]
+//   },
+// })
+
 export async function initEditor(holderElement, room = 'default-room') {
   if (!holderElement) throw new Error('holderElement is required')
 
@@ -154,25 +181,33 @@ export async function initEditor(holderElement, room = 'default-room') {
 
   // savePost (그대로 유지)
   async function savePost() {
-    if (!editor) return;
-    try {
-      await editor.isReady;
-      const savedData = await editor.save(); 
-      const formdata = new FormData();
-      formdata.append('title', yTitle.toString());
-      formdata.append('contents', JSON.stringify(savedData));
+  if (!editor) return;
+  try {
+    await editor.isReady;
+    const savedData = await editor.save(); 
 
-      const response = await fetch('/api/workspace/save', {
-        method: 'POST',
-        body: formdata
-      });
+    // FormData 대신 일반 객체(JSON) 생성
+    const postData = {
+      title: yTitle.toString(),
+      contents: JSON.stringify(savedData)
+    };
 
-      if (!response.ok) throw new Error(`Status: ${response.status}`);
-      return await response.json();
-    } catch (e) {
-      console.error('savePost error:', e);
-    }
+    /**
+     * 수정 포인트:
+     * 1. 토큰을 여기서 직접 가져올 필요가 없습니다. (인터셉터가 Pinia에서 꺼내서 넣어줌)
+     * 2. fetch 문법({method, body}) 대신 위에서 정의한 서비스 함수를 사용합니다.
+     */
+    const response = await postApi.savePost(postData);
+    await loadpost.side_list();
+
+    // axios는 성공 시 데이터 자체를 반환하므로 바로 사용 가능합니다.
+    console.log('저장 성공:', response);
+    return response;
+    
+  } catch (e) {
+    console.error('savePost error:', e);
   }
+}
 
   // awareness listeners (그대로 유지)
   awareness.on('update', () => {

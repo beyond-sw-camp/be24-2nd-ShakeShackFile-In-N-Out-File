@@ -1,14 +1,18 @@
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import FileUpload from '@/components/function/FilesUpload.vue';
+import loadpost from '@/components/workspace/loadpost';
 
-const isPersonalOpen = ref(true)
-const isSharedOpen = ref(true)
 const isSidebarOpen = ref(true) // 사이드바 토글 상태
 
-const personalItems = ['SSL 인증서', '포트폴리오', 'Vue 학습']
-const sharedItems = ['한화 부트캠프 24기', '프로젝트 팀A']
-
+// 1. loadpost에서 정의된 상태와 함수를 가져옵니다.
+const { 
+  personalItems, 
+  sharedItems, 
+  isPersonalOpen, 
+  isSharedOpen, 
+  side_list 
+} = loadpost;
 
 const scrollToTop = () => {
   window.scrollTo({
@@ -17,17 +21,10 @@ const scrollToTop = () => {
   });
 }
 
-// 새 페이지 추가 함수
-const addPersonalPage = () => {
-  const newPageName = prompt("새로운 페이지 이름을 입력하세요:");
-  if (newPageName && newPageName.trim()) {
-    personalItems.value.push(newPageName.trim());
-    // 페이지 추가 후 목록이 닫혀있다면 자동으로 열어줌
-    isPersonalOpen.value = true;
-  }
-}
-
-
+onMounted(() => {
+  side_list();
+})
+ 
 // 사이드바 토글 함수
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value
@@ -104,72 +101,75 @@ const toggleSidebar = () => {
           <div>
             <div>
     <div
-      @click="isPersonalOpen = !isPersonalOpen"
-      class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)] group"
-    >
-      <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
-        개인 페이지
-      </h3>
+        @click="isPersonalOpen = !isPersonalOpen"
+        class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)] group"
+      >
+        <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
+          개인 페이지
+        </h3>
+        <div class="flex items-center gap-2">
+          <RouterLink :to="{ name: 'workspace' }" @click.stop>
+          <button 
+            class="p-1 rounded hover:bg-gray-200 text-[var(--text-muted)] hover:text-blue-500 transition-colors"
+          >
+            <i class="fa-solid fa-plus text-[10px]"></i>
+          </button>
+        </RouterLink>
+          <span
+            class="text-xs text-[var(--text-muted)] transition-transform duration-200"
+            :class="{ 'rotate-180': !isPersonalOpen }"
+          >▼</span>
+        </div>
+      </div>
 
-            <div class="flex items-center gap-2">
-              <button 
-                @click.stop="addPersonalPage"
-                class="p-1 rounded hover:bg-gray-200 gray:hover:bg-gray-700 text-[var(--text-muted)] hover:text-blue-500 transition-colors"
-                title="페이지 추가"
-              >
-                <i class="fa-solid fa-plus text-[10px]"></i>
-              </button>
-
-              <span
-                class="text-xs text-[var(--text-muted)] transition-transform duration-200"
-                :class="{ 'rotate-180': !isPersonalOpen }"
-              >
-                ▼
-              </span>
-            </div>
+      <div v-show="isPersonalOpen" class="mt-1 space-y-1 px-2">
+        <template v-if="personalItems.length > 0">
+          <div
+            v-for="item in personalItems"
+            :key="item.post_idx"
+            @click="loadpost.read_post(item.post_idx)"
+            class="px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center gap-3 transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]"
+          >
+            <i class="fa-solid fa-file-lines w-4 text-center opacity-70"></i>
+            <span>{{ item.title }}</span>
           </div>
+        </template>
+        
+        <div v-else class="px-3 py-4 text-xs text-[var(--text-muted)] italic text-center border border-dashed border-gray-200 rounded-lg mx-2">
+          생성된 페이지가 없습니다.
+        </div>
+      </div>
+    </div>
 
-              <div v-show="isPersonalOpen" class="mt-1 space-y-1 px-2">
-                <div
-                  v-for="item in personalItems"
-                  :key="item"
-                  class="px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center gap-3 transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]"
-                >
-                  <i class="fa-solid fa-file-lines w-4 text-center opacity-70"></i>
-                  <span>{{ item }}</span>
-                </div>
-                
-                <div v-if="personalItems.length === 0" class="px-3 py-2 text-xs text-[var(--text-muted)] italic">
-                  생성된 페이지가 없습니다.
-                </div>
-              </div>
-            </div>
+    <div>
+      <div
+        @click="isSharedOpen = !isSharedOpen"
+        class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)]"
+      >
+        <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">협업 페이지</h3>
+        <span
+          class="text-xs text-[var(--text-muted)] transition-transform duration-200"
+          :class="{ 'rotate-180': !isSharedOpen }"
+        >▼</span>
+      </div>
+
+      <div v-show="isSharedOpen" class="mt-1 space-y-1 px-2">
+        <template v-if="sharedItems.length > 0">
+          <div
+            v-for="team in sharedItems"
+            :key="team.post_idx"
+            @click="loadpost.read_post(item.post_idx)"
+            class="px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center gap-3 transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]"
+          >
+            <i class="fa-solid fa-file-lines w-4 text-center opacity-70"></i>
+            <span>{{ team.title }}</span>
           </div>
-
-          <div>
-            <div
-              @click="isSharedOpen = !isSharedOpen"
-              class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)]"
-            >
-              <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">협업 페이지</h3>
-              <span
-                class="text-xs text-[var(--text-muted)] transition-transform duration-200"
-                :class="{ 'rotate-180': !isSharedOpen }"
-              >
-                ▼
-              </span>
-            </div>
-
-            <div v-show="isSharedOpen" class="mt-1 space-y-1">
-              <div
-                v-for="team in sharedItems"
-                :key="team"
-                class="px-3 py-2.5 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center gap-3.5 transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline"
-              >
-                <i class="fa-solid fa-file-lines w-5 text-center flex-shrink-0 text-lg"></i>
-                <span>{{ team }}</span>
-              </div>
-            </div>
+        </template>
+        <div v-else class="px-3 py-4 text-xs text-[var(--text-muted)] italic text-center border border-dashed border-gray-200 rounded-lg mx-2">
+          생성된 페이지가 없습니다.
+        </div>
+      </div>
+    </div>
             
             <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
             
