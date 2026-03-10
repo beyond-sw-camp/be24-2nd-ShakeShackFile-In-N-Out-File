@@ -103,7 +103,7 @@ const onPayment = async () => {
     const verifyResponse = api.post('/orders/verify', { paymentId: payment.paymentId })
 
     if (verifyResponse.success && verifyResponse.results) {
-      paymentStatus.value = { status: 'SUCCESS', message: '결제가 정상적으로 완료되었습니다.' }
+      paymentStatus.value = { status: 'SUCCESS', message: '결제가 정상적으로   완료되었습니다.' }
       router.push({ name: 'courseDetail', params: { courseIdx: courseIdx } })
     }
   } catch (error) {
