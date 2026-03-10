@@ -24,7 +24,7 @@
         </div>
 
         <div class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block">
-          <RouterLink :to="{ name: 'editor' }">
+          <RouterLink :to="{ name: 'workspace' }">
             <div class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-800 dark:text-gray-200">
               새 문서 만들기
             </div>

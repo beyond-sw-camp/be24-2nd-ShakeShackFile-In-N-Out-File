@@ -5,7 +5,7 @@ const posts = postApi.postApi
 // 게시글 저장 / 불러오기 / 모두 불러오기
 const savePost = async (postData) => {
   try {
-    const post = await posts.post('user/posts', postData)
+    const post = await posts.post('api/workspace/save', postData)
     console.log(post)
     return post
   } catch (error) {
@@ -15,7 +15,7 @@ const savePost = async (postData) => {
 }
 const getPost = async (idx) => {
   try {
-    const post = await posts.get(`user/posts/${idx}`)
+    const post = await posts.get(`api/workspace/read/${idx}`)
     console.log(api)
     return post
   } catch (error) {
@@ -25,7 +25,7 @@ const getPost = async (idx) => {
 }
 const allPosts = async () => {
   try {
-    const post = await posts.get('user/posts')
+    const post = await posts.get('api/list')
     console.log(api)
     return post
   } catch (error) {
