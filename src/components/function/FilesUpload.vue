@@ -23,9 +23,13 @@
           <i class="fa-solid fa-chevron-right text-[10px] text-gray-400"></i>
         </div>
 
-        <div class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block">
+        <div
+          class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block"
+        >
           <RouterLink :to="{ name: 'editor' }">
-            <div class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-800 dark:text-gray-200">
+            <div
+              class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-800 dark:text-gray-200"
+            >
               문서 만들기
             </div>
           </RouterLink>
@@ -49,7 +53,9 @@
           <i class="fa-solid fa-chevron-right text-[10px] text-gray-400"></i>
         </div>
 
-        <div class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block">
+        <div
+          class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block"
+        >
           <label
             class="block px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-800 dark:text-gray-200"
           >
@@ -70,7 +76,7 @@
       {{ uploadError }}
     </p>
     <p v-if="isUploading" class="mt-2 text-xs text-blue-500">
-      업로드 중...
+      {{ uploadStatusMessage }}
     </p>
 
     <div
@@ -82,19 +88,32 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import axios from "axios"
 import { completePartitionUpload, parseUploadResponse, uploadFiles } from "@/api/filesApi.js"
 
 const isDropdownOpen = ref(false)
 const uploadedFiles = ref([])
 const isUploading = ref(false)
+const uploadPhase = ref("idle")
 const uploadError = ref("")
 
 const emit = defineEmits(["upload-complete", "upload-fail"])
 const MAX_UPLOAD_COUNT = 1000
 const PARTITION_SIZE_BYTES = 100 * 1024 * 1024
 const CHUNK_SIZE_BYTES = 80 * 1024 * 1024
+
+const uploadStatusMessage = computed(() => {
+  if (uploadPhase.value === "merging") {
+    return "서버에서 파일 병합 중..."
+  }
+
+  if (uploadPhase.value === "finalizing") {
+    return "서버에서 업로드 완료를 확인 중..."
+  }
+
+  return "파일 업로드 중..."
+})
 
 const toggleDropdown = () => {
   if (isUploading.value) return
@@ -128,7 +147,11 @@ const getFileFormat = (file) => {
     .toLowerCase()
 }
 
-const uploadToPresignedUrl = async (payload, presignedUploadUrl, contentType = "application/octet-stream") => {
+const uploadToPresignedUrl = async (
+  payload,
+  presignedUploadUrl,
+  contentType = "application/octet-stream",
+) => {
   if (!presignedUploadUrl) {
     throw new Error("업로드 URL이 없습니다.")
   }
@@ -173,13 +196,19 @@ const uploadFileByChunks = async (file, uploadMetas) => {
   }
 }
 
-const completeChunkUpload = async (file, uploadMetas) => {
+const completeUploadedFile = async (file, uploadMetas, partitioned) => {
   const firstMeta = uploadMetas[0]
   const finalObjectKey = firstMeta?.finalObjectKey
-  const chunkObjectKeys = uploadMetas.map((meta) => meta?.objectKey).filter(Boolean)
+  const chunkObjectKeys = partitioned
+    ? uploadMetas.map((meta) => meta?.objectKey).filter(Boolean)
+    : []
 
-  if (!finalObjectKey || chunkObjectKeys.length !== uploadMetas.length) {
-    throw new Error(`${file.name}의 완료 요청 정보가 부족합니다.`)
+  if (!finalObjectKey) {
+    throw new Error(`${file.name}의 완료 요청 정보가 올바르지 않습니다.`)
+  }
+
+  if (partitioned && chunkObjectKeys.length !== uploadMetas.length) {
+    throw new Error(`${file.name}의 완료 요청 정보가 올바르지 않습니다.`)
   }
 
   await completePartitionUpload({
@@ -195,11 +224,15 @@ const toNormalizedError = (error) => {
   if (!error) return "업로드에 실패했습니다."
   if (typeof error === "string") return error
 
+  if (error.code === "ECONNABORTED") {
+    return "대용량 파일 처리 시간이 초과되었습니다. 잠시 후 다시 확인해주세요."
+  }
+
   if (error.response) {
     if (typeof error.response.data === "string") return error.response.data
     if (error.response.data?.message) return error.response.data.message
     if (error.response.data?.result?.message) return error.response.data.result.message
-    return `업로드 실패. 상태 코드: ${error.response.status}`
+    return `업로드에 실패했습니다. 상태 코드: ${error.response.status}`
   }
 
   if (error.message) return error.message
@@ -212,6 +245,7 @@ const handleUpload = async (event, uploadTypeLabel) => {
 
   uploadError.value = ""
   isUploading.value = true
+  uploadPhase.value = "uploading"
 
   try {
     if (selectedFiles.length > MAX_UPLOAD_COUNT) {
@@ -220,7 +254,7 @@ const handleUpload = async (event, uploadTypeLabel) => {
 
     const invalidName = selectedFiles.find((file) => !file?.name || typeof file.name !== "string")
     if (invalidName) {
-      throw new Error("유효하지 않은 파일이 있습니다.")
+      throw new Error("유효하지 않은 파일이 포함되어 있습니다.")
     }
 
     const invalidFormat = selectedFiles.find((file) => {
@@ -245,11 +279,11 @@ const handleUpload = async (event, uploadTypeLabel) => {
       const expectedUploadCount = getExpectedUploadCount(targetFile)
       const uploadMetas = presignedResponses.slice(responseIndex, responseIndex + expectedUploadCount)
 
+      uploadPhase.value = "uploading"
       await uploadFileByChunks(targetFile, uploadMetas)
 
-      if (expectedUploadCount > 1) {
-        await completeChunkUpload(targetFile, uploadMetas)
-      }
+      uploadPhase.value = expectedUploadCount > 1 ? "merging" : "finalizing"
+      await completeUploadedFile(targetFile, uploadMetas, expectedUploadCount > 1)
 
       responseIndex += expectedUploadCount
       successList.push(targetFile.name)
@@ -269,6 +303,7 @@ const handleUpload = async (event, uploadTypeLabel) => {
     console.error(`[${uploadTypeLabel}] 업로드 실패:`, error)
   } finally {
     isUploading.value = false
+    uploadPhase.value = "idle"
     closeDropdown()
 
     if (event?.target) {
