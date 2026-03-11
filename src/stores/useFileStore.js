@@ -1,6 +1,12 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
-import { fetchFileList as fetchFileListApi } from "@/api/filesApi.js";
+import {
+  clearTrash as clearTrashApi,
+  createFolder as createFolderApi,
+  deleteFilePermanently as deleteFilePermanentlyApi,
+  fetchFileList as fetchFileListApi,
+  moveFileToTrash as moveFileToTrashApi,
+} from "@/api/filesApi.js";
 
 const FILE_LOCATION_LABEL = "내 드라이브";
 
@@ -53,11 +59,15 @@ const formatFileSize = (bytes) => {
 
 const normalizeFileRecord = (rawFile) => {
   const name = rawFile?.fileOriginName || rawFile?.name || "이름 없는 파일";
-  const extension = (
-    rawFile?.fileFormat ||
-    rawFile?.extension ||
-    extractExtension(name)
-  ).toLowerCase();
+  const nodeType = String(rawFile?.nodeType || rawFile?.type || "FILE").toUpperCase();
+  const type = nodeType === "FOLDER" ? "folder" : "file";
+  const extension = type === "folder"
+    ? ""
+    : (
+      rawFile?.fileFormat ||
+      rawFile?.extension ||
+      extractExtension(name)
+    ).toLowerCase();
   const sizeBytes = Number(rawFile?.fileSize ?? rawFile?.sizeBytes ?? rawFile?.size ?? 0) || 0;
   const uploadedAt = rawFile?.uploadDate || rawFile?.uploadedAt || rawFile?.createdAt || null;
   const updatedAt =
@@ -67,7 +77,6 @@ const normalizeFileRecord = (rawFile) => {
     uploadedAt;
   const updatedDate = parseDate(updatedAt);
   const uploadedDate = parseDate(uploadedAt);
-  const type = rawFile?.type || "file";
 
   return {
     id: rawFile?.idx ?? rawFile?.id ?? `${name}-${uploadedAt || Date.now()}`,
@@ -77,9 +86,10 @@ const normalizeFileRecord = (rawFile) => {
     extension,
     fileFormat: extension,
     type,
+    nodeType,
     sizeBytes,
-    sizeLabel: formatFileSize(sizeBytes),
-    size: formatFileSize(sizeBytes),
+    sizeLabel: type === "folder" ? "-" : formatFileSize(sizeBytes),
+    size: type === "folder" ? "-" : formatFileSize(sizeBytes),
     uploadDate: uploadedAt,
     uploadedAt,
     uploadDateLabel: formatDateLabel(uploadedAt),
@@ -90,13 +100,18 @@ const normalizeFileRecord = (rawFile) => {
     uploadedAtMs: uploadedDate?.getTime() ?? 0,
     date: formatDateLabel(updatedAt),
     owner: rawFile?.owner || "나",
-    location: rawFile?.location || FILE_LOCATION_LABEL,
-    reason: rawFile?.reason || `${extension ? extension.toUpperCase() : "FILE"} · ${formatFileSize(sizeBytes)}`,
-    isTrash: Boolean(rawFile?.isTrash),
+    location: FILE_LOCATION_LABEL,
+    reason:
+      rawFile?.reason ||
+      (type === "folder"
+        ? "폴더"
+        : `${extension ? extension.toUpperCase() : "FILE"} · ${formatFileSize(sizeBytes)}`),
+    isTrash: Boolean(rawFile?.trashed ?? rawFile?.isTrash),
     isShared: Boolean(rawFile?.sharedFile ?? rawFile?.isShared),
     sharedFile: Boolean(rawFile?.sharedFile ?? rawFile?.isShared),
     lockedFile: Boolean(rawFile?.lockedFile),
     parentId: rawFile?.parentId ?? null,
+    deletedAt: rawFile?.deletedAt || null,
     downloadUrl: rawFile?.presignedDownloadUrl || rawFile?.downloadUrl || "",
     presignedDownloadUrl: rawFile?.presignedDownloadUrl || "",
     fileSaveName: rawFile?.fileSaveName || "",
@@ -105,20 +120,16 @@ const normalizeFileRecord = (rawFile) => {
   };
 };
 
-const createFolderRecord = (folderName, parentId) => {
-  const createdAt = new Date().toISOString();
+const decorateLocations = (files) => {
+  const fileById = new Map(files.map((file) => [String(file.id), file]));
 
-  return normalizeFileRecord({
-    id: Date.now(),
-    name: folderName,
-    type: "folder",
-    size: 0,
-    uploadDate: createdAt,
-    lastModifyDate: createdAt,
-    reason: "새 폴더",
-    location: FILE_LOCATION_LABEL,
-    parentId,
-  });
+  return files.map((file) => ({
+    ...file,
+    location:
+      file.parentId != null
+        ? fileById.get(String(file.parentId))?.name || FILE_LOCATION_LABEL
+        : FILE_LOCATION_LABEL,
+  }));
 };
 
 export const useFileStore = defineStore("file", () => {
@@ -128,14 +139,53 @@ export const useFileStore = defineStore("file", () => {
   const loadError = ref("");
   const hasLoaded = ref(false);
 
+  const fileById = computed(() => {
+    return new Map(allFiles.value.map((file) => [String(file.id), file]));
+  });
+
+  const currentFolder = computed(() => {
+    if (currentFolderId.value == null) {
+      return null;
+    }
+
+    return fileById.value.get(String(currentFolderId.value)) || null;
+  });
+
+  const currentFolderPath = computed(() => {
+    const path = [];
+    let cursor = currentFolder.value;
+
+    while (cursor) {
+      path.unshift(cursor);
+      if (cursor.parentId == null) {
+        break;
+      }
+      cursor = fileById.value.get(String(cursor.parentId)) || null;
+    }
+
+    return path;
+  });
+
+  const syncCurrentFolder = () => {
+    if (currentFolderId.value == null) {
+      return;
+    }
+
+    const activeFolder = fileById.value.get(String(currentFolderId.value));
+    if (!activeFolder || activeFolder.isTrash || activeFolder.type !== "folder") {
+      currentFolderId.value = null;
+    }
+  };
+
   const fetchFiles = async () => {
     isLoading.value = true;
     loadError.value = "";
 
     try {
       const fileList = await fetchFileListApi();
-      allFiles.value = fileList.map(normalizeFileRecord);
+      allFiles.value = decorateLocations(fileList.map(normalizeFileRecord));
       hasLoaded.value = true;
+      syncCurrentFolder();
       return allFiles.value;
     } catch (error) {
       loadError.value =
@@ -152,7 +202,7 @@ export const useFileStore = defineStore("file", () => {
     allFiles.value.filter(
       (file) =>
         !file.isTrash &&
-        (file.parentId || null) === currentFolderId.value,
+        (file.parentId ?? null) === currentFolderId.value,
     ),
   );
 
@@ -167,39 +217,58 @@ export const useFileStore = defineStore("file", () => {
   );
 
   const trashFiles = computed(() =>
-    allFiles.value.filter((file) => file.isTrash),
+    allFiles.value.filter((file) => {
+      if (!file.isTrash) {
+        return false;
+      }
+
+      if (file.parentId == null) {
+        return true;
+      }
+
+      return !fileById.value.get(String(file.parentId))?.isTrash;
+    }),
   );
 
   const allOnlyFiles = computed(() =>
     allFiles.value.filter((file) => !file.isTrash && file.type !== "folder"),
   );
 
-  const moveToTrash = (fileId) => {
-    const targetFile = allFiles.value.find(
-      (file) => String(file.id) === String(fileId),
-    );
+  const createFolder = async (folderName) => {
+    if (!folderName?.trim()) return null;
 
-    if (targetFile) {
-      targetFile.isTrash = true;
-    }
+    await createFolderApi(folderName.trim(), currentFolderId.value);
+    await fetchFiles();
+    return true;
   };
 
-  const createFolder = (folderName) => {
-    if (!folderName?.trim()) return;
-    allFiles.value.unshift(createFolderRecord(folderName.trim(), currentFolderId.value));
+  const moveToTrash = async (fileId) => {
+    await moveFileToTrashApi(fileId);
+    await fetchFiles();
+  };
+
+  const permanentlyDelete = async (fileId) => {
+    await deleteFilePermanentlyApi(fileId);
+    await fetchFiles();
+  };
+
+  const emptyTrash = async () => {
+    await clearTrashApi();
+    await fetchFiles();
   };
 
   const enterFolder = (folderId) => {
-    currentFolderId.value = folderId;
+    const targetFolder = fileById.value.get(String(folderId));
+    if (targetFolder?.type === "folder" && !targetFolder.isTrash) {
+      currentFolderId.value = targetFolder.id;
+    }
   };
 
   const goBack = () => {
     if (!currentFolderId.value) return;
 
-    const currentFolder = allFiles.value.find(
-      (file) => String(file.id) === String(currentFolderId.value),
-    );
-    currentFolderId.value = currentFolder?.parentId ?? null;
+    const activeFolder = fileById.value.get(String(currentFolderId.value));
+    currentFolderId.value = activeFolder?.parentId ?? null;
   };
 
   const moveFileToFolder = (fileId, folderId) => {
@@ -218,6 +287,8 @@ export const useFileStore = defineStore("file", () => {
   return {
     allFiles,
     currentFolderId,
+    currentFolder,
+    currentFolderPath,
     isLoading,
     loadError,
     hasLoaded,
@@ -227,8 +298,10 @@ export const useFileStore = defineStore("file", () => {
     trashFiles,
     allOnlyFiles,
     fetchFiles,
-    moveToTrash,
     createFolder,
+    moveToTrash,
+    permanentlyDelete,
+    emptyTrash,
     enterFolder,
     goBack,
     moveFileToFolder,

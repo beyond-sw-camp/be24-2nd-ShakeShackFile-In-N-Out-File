@@ -8,6 +8,10 @@ const props = defineProps({
     type: Array,
     required: true,
   },
+  deleteMode: {
+    type: String,
+    default: "trash",
+  },
 });
 
 const emit = defineEmits(["delete-file"]);
@@ -84,6 +88,10 @@ const canDownload = (file) => {
 
 const openFile = (file) => {
   if (file?.type === "folder") {
+    if (props.deleteMode === "permanent") {
+      return;
+    }
+
     fileStore.enterFolder(file.id);
     return;
   }
@@ -97,7 +105,12 @@ const openFile = (file) => {
 const onClickDelete = (file, event) => {
   event.stopPropagation();
 
-  if (window.confirm(`'${getFileName(file)}' 파일을 삭제하시겠습니까?`)) {
+  const targetLabel = file?.type === "folder" ? "폴더" : "파일";
+  const confirmMessage = props.deleteMode === "permanent"
+    ? `'${getFileName(file)}' ${targetLabel}을(를) 영구 삭제하시겠습니까?`
+    : `'${getFileName(file)}' ${targetLabel}을(를) 휴지통으로 이동하시겠습니까?`;
+
+  if (window.confirm(confirmMessage)) {
     emit("delete-file", file?.id);
   }
 };
@@ -213,7 +226,7 @@ const gridClassName = computed(() => {
                   class="action-button text-rose-500 hover:bg-rose-50"
                   @click="onClickDelete(file, $event)"
                 >
-                  삭제
+                  {{ deleteMode === "permanent" ? "영구 삭제" : "삭제" }}
                 </button>
               </div>
             </td>
@@ -303,14 +316,23 @@ const gridClassName = computed(() => {
           </span>
         </div>
 
-        <button
-          v-if="canDownload(file)"
-          type="button"
-          class="mt-4 w-full rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-600 transition hover:bg-blue-100"
-          @click="openFile(file)"
-        >
-          다운로드
-        </button>
+        <div class="mt-4 grid gap-2" :class="canDownload(file) ? 'grid-cols-2' : 'grid-cols-1'">
+          <button
+            v-if="canDownload(file)"
+            type="button"
+            class="w-full rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-600 transition hover:bg-blue-100"
+            @click="openFile(file)"
+          >
+            다운로드
+          </button>
+          <button
+            type="button"
+            class="w-full rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-500 transition hover:bg-rose-100"
+            @click="onClickDelete(file, $event)"
+          >
+            {{ deleteMode === "permanent" ? "영구 삭제" : "삭제" }}
+          </button>
+        </div>
       </article>
     </div>
   </div>

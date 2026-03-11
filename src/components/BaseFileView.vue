@@ -4,6 +4,8 @@ import FileTable from "@/components/FileTable.vue";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
 
+const FILE_ROOT_LABEL = "내 드라이브";
+
 const props = defineProps({
   title: {
     type: String,
@@ -16,6 +18,14 @@ const props = defineProps({
   showEmpty: {
     type: Boolean,
     default: true,
+  },
+  deleteMode: {
+    type: String,
+    default: "trash",
+  },
+  showFolderNavigation: {
+    type: Boolean,
+    default: false,
   },
 });
 
@@ -72,6 +82,14 @@ const totalSizeLabel = computed(() => {
   const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
 
   return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`;
+});
+
+const folderPathLabel = computed(() => {
+  if (!fileStore.currentFolderPath?.length) {
+    return FILE_ROOT_LABEL;
+  }
+
+  return [FILE_ROOT_LABEL, ...fileStore.currentFolderPath.map((folder) => folder.name)].join(" / ");
 });
 
 const hasActiveFilters = computed(() => {
@@ -168,6 +186,25 @@ onMounted(() => {
       <div class="flex items-center gap-2">
         <slot name="header-right"></slot>
       </div>
+    </div>
+
+    <div
+      v-if="showFolderNavigation"
+      class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
+    >
+      <div class="min-w-0">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">현재 위치</p>
+        <p class="truncate text-sm font-semibold text-gray-700">{{ folderPathLabel }}</p>
+      </div>
+
+      <button
+        v-if="fileStore.currentFolder"
+        type="button"
+        class="rounded-full border border-gray-200 px-3 py-1.5 text-sm font-semibold text-gray-600 transition hover:bg-gray-50"
+        @click="fileStore.goBack()"
+      >
+        상위 폴더로
+      </button>
     </div>
 
     <div class="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -288,7 +325,7 @@ onMounted(() => {
     </div>
 
     <div v-else-if="filteredFiles.length > 0">
-      <FileTable :files="filteredFiles" @delete-file="handleDelete" />
+      <FileTable :files="filteredFiles" :delete-mode="deleteMode" @delete-file="handleDelete" />
     </div>
 
     <div

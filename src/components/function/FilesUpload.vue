@@ -654,7 +654,12 @@ const dismissUploadPanel = () => {
 const createNewFolder = () => {
   const folderName = prompt("폴더 이름을 입력해 주세요.")
   if (folderName) {
-    console.log("폴더 생성:", folderName)
+    fileStore.createFolder(folderName).catch((error) => {
+      uploadError.value =
+        error?.response?.data?.message ||
+        error?.message ||
+        "폴더를 생성하지 못했습니다."
+    })
   }
   closeDropdown()
 }
@@ -843,7 +848,7 @@ const uploadFileByChunks = async (file, uploadMetas, uploadItemId) => {
   }
 }
 
-const completeUploadedFile = async (file, uploadMetas, partitioned, uploadItemId) => {
+const completeUploadedFile = async (file, uploadMetas, partitioned, uploadItemId, parentId) => {
   if (!partitioned) {
     setUploadItemState(uploadItemId, {
       status: "completed",
@@ -879,6 +884,7 @@ const completeUploadedFile = async (file, uploadMetas, partitioned, uploadItemId
     fileSize: file.size,
     finalObjectKey,
     chunkObjectKeys,
+    parentId,
   })
 
   setUploadItemState(uploadItemId, {
@@ -889,7 +895,7 @@ const completeUploadedFile = async (file, uploadMetas, partitioned, uploadItemId
   })
 }
 
-const runUploadJobs = async (uploadJobs, concurrency) => {
+const runUploadJobs = async (uploadJobs, concurrency, parentId) => {
   const successList = new Array(uploadJobs.length)
   const workerCount = Math.min(concurrency, uploadJobs.length)
   let nextJobIndex = 0
@@ -927,6 +933,7 @@ const runUploadJobs = async (uploadJobs, concurrency) => {
               currentJob.uploadMetas,
               true,
               currentJob.uploadItemId,
+              parentId,
             )
           } finally {
             mergingUploadCount.value = Math.max(0, mergingUploadCount.value - 1)
@@ -937,6 +944,7 @@ const runUploadJobs = async (uploadJobs, concurrency) => {
             currentJob.uploadMetas,
             false,
             currentJob.uploadItemId,
+            parentId,
           )
         }
 
@@ -1031,6 +1039,7 @@ const toNormalizedError = (error) => {
 const handleUpload = async (event, uploadTypeLabel) => {
   const selectedFiles = Array.from(event?.target?.files || [])
   if (!selectedFiles.length) return
+  const uploadParentId = fileStore.currentFolderId
 
   uploadError.value = ""
   uploadedFiles.value = []
@@ -1070,7 +1079,7 @@ const handleUpload = async (event, uploadTypeLabel) => {
       item.statusText = "업로드 정보 준비 중"
     })
 
-    const response = await uploadFiles(selectedFiles)
+    const response = await uploadFiles(selectedFiles, uploadParentId)
     const presignedResponses = parseUploadResponse(response?.data)
 
     if (!Array.isArray(presignedResponses) || presignedResponses.length === 0) {
@@ -1091,6 +1100,7 @@ const handleUpload = async (event, uploadTypeLabel) => {
     const successList = await runUploadJobs(
       uploadJobs,
       normalizeUploadConcurrency(uploadConcurrency.value),
+      uploadParentId,
     )
 
     if (isCancelRequested.value) {
