@@ -253,6 +253,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import axios from "axios"
 import { completePartitionUpload, parseUploadResponse, uploadFiles } from "@/api/filesApi.js"
+import { useFileStore } from "@/stores/useFileStore"
 
 const isDropdownOpen = ref(false)
 const uploadedFiles = ref([])
@@ -268,6 +269,7 @@ const mergingUploadCount = ref(0)
 const uploadSessionStartedAt = ref(null)
 const nowTick = ref(Date.now())
 const isCancelRequested = ref(false)
+const fileStore = useFileStore()
 
 const emit = defineEmits(["upload-complete", "upload-fail"])
 const MAX_UPLOAD_COUNT = 1000
@@ -279,6 +281,9 @@ const UPLOAD_CONCURRENCY_STORAGE_KEY = "file-upload-concurrency"
 const uploadConcurrencyOptions = [1, 2, 3, 4, 5]
 const ACTIVE_UPLOAD_STATUSES = new Set(["preparing", "pending", "uploading", "merging", "canceling"])
 const activeUploadControllers = new Map()
+const SPEED_SAMPLE_WINDOW_MS = 12000
+const MAX_SPEED_SAMPLES = 8
+const MIN_PROGRESS_SAMPLE_INTERVAL_MS = 400
 
 let tickTimerId = null
 
@@ -342,32 +347,42 @@ const uploadedTrackedBytes = computed(() =>
   uploadItems.value.reduce((sum, item) => sum + (item.uploadedBytes || 0), 0),
 )
 
+const overallTransferSpeedBytes = computed(() =>
+  uploadItems.value.reduce((sum, item) => {
+    if (!ACTIVE_UPLOAD_STATUSES.has(item.status) || item.status === "merging") {
+      return sum
+    }
+
+    return sum + Math.max(0, item.averageBytesPerSecond || 0)
+  }, 0),
+)
+
+const overallTransferSpeedText = computed(() => {
+  if (overallTransferSpeedBytes.value <= 0) {
+    return ""
+  }
+
+  return formatTransferSpeed(overallTransferSpeedBytes.value)
+})
+
 const overallEstimatedSeconds = computed(() => {
-  if (!uploadSessionStartedAt.value || activeUploadCountComputed.value === 0) {
+  if (activeUploadCountComputed.value === 0 || mergingUploadCount.value > 0) {
     return null
   }
 
-  if (mergingUploadCount.value > 0) {
+  const remainingBytes = uploadItems.value.reduce((sum, item) => {
+    if (item.status === "completed") {
+      return sum
+    }
+
+    return sum + Math.max(0, (item.fileSize || 0) - (item.uploadedBytes || 0))
+  }, 0)
+
+  if (remainingBytes <= 0 || overallTransferSpeedBytes.value <= 0) {
     return null
   }
 
-  const elapsedSeconds = Math.max(
-    Math.floor((nowTick.value - uploadSessionStartedAt.value) / 1000),
-    1,
-  )
-  const uploadedBytes = uploadedTrackedBytes.value
-  const totalBytes = totalTrackedBytes.value
-
-  if (uploadedBytes <= 0 || totalBytes <= uploadedBytes) {
-    return null
-  }
-
-  const speed = uploadedBytes / elapsedSeconds
-  if (speed <= 0) {
-    return null
-  }
-
-  return Math.max(1, Math.ceil((totalBytes - uploadedBytes) / speed))
+  return Math.max(1, Math.ceil(remainingBytes / overallTransferSpeedBytes.value))
 })
 
 const uploadPanelTitle = computed(() => {
@@ -432,10 +447,16 @@ const uploadPanelEtaText = computed(() => {
   }
 
   if (overallEstimatedSeconds.value == null) {
-    return "남은 시간 계산 중..."
+    return overallTransferSpeedText.value
+      ? `${overallTransferSpeedText.value} 측정 중`
+      : "남은 시간 계산 중..."
   }
 
-  return `${formatRemainingTime(overallEstimatedSeconds.value)} 남음...`
+  const speedSuffix = overallTransferSpeedText.value
+    ? ` · ${overallTransferSpeedText.value}`
+    : ""
+
+  return `${formatRemainingTime(overallEstimatedSeconds.value)} 남음${speedSuffix}`
 })
 
 const canCancelUploads = computed(() =>
@@ -452,6 +473,11 @@ const createUploadItem = (file, index) => ({
   statusText: "업로드 대기 중",
   errorMessage: "",
   startedAt: null,
+  lastProgressAt: null,
+  lastProgressBytes: 0,
+  speedSamples: [],
+  averageBytesPerSecond: 0,
+  estimatedSeconds: null,
 })
 
 const getUploadItem = (itemId) =>
@@ -461,6 +487,29 @@ const setUploadItemState = (itemId, patch) => {
   const item = getUploadItem(itemId)
   if (!item) return
   Object.assign(item, patch)
+}
+
+const calculateWeightedAverageSpeed = (speedSamples) => {
+  if (!Array.isArray(speedSamples) || speedSamples.length === 0) {
+    return 0
+  }
+
+  const weighted = speedSamples.reduce(
+    (sum, sample, index) => {
+      const weight = index + 1
+      return {
+        speed: sum.speed + sample.speed * weight,
+        weight: sum.weight + weight,
+      }
+    },
+    { speed: 0, weight: 0 },
+  )
+
+  if (weighted.weight <= 0) {
+    return 0
+  }
+
+  return weighted.speed / weighted.weight
 }
 
 const updateUploadItemProgress = (itemId, uploadedBytes) => {
@@ -482,26 +531,58 @@ const updateUploadItemProgress = (itemId, uploadedBytes) => {
     progress,
   }
 
-  if (item.startedAt && safeUploadedBytes > 0 && safeUploadedBytes < item.fileSize) {
-    const elapsedSeconds = Math.max(
-      Math.floor((Date.now() - item.startedAt) / 1000),
-      1,
-    )
-    const speed = safeUploadedBytes / elapsedSeconds
+  const now = Date.now()
+  const currentSamples = Array.isArray(item.speedSamples) ? [...item.speedSamples] : []
+  const lastProgressAt = item.lastProgressAt || item.startedAt || now
+  const lastProgressBytes = Number(item.lastProgressBytes || 0)
+  const deltaBytes = Math.max(0, safeUploadedBytes - lastProgressBytes)
+  const deltaMs = Math.max(0, now - lastProgressAt)
 
-    if (speed > 0) {
-      const estimatedSeconds = Math.max(
-        1,
-        Math.ceil((item.fileSize - safeUploadedBytes) / speed),
-      )
-      nextPatch.statusText = `${progress}% · ${formatRemainingTime(estimatedSeconds)} 남음`
-    } else {
-      nextPatch.statusText = `${progress}% 업로드 중`
-    }
+  let speedSamples = currentSamples.filter((sample) => now - sample.at <= SPEED_SAMPLE_WINDOW_MS)
+
+  if (deltaBytes > 0 && deltaMs >= MIN_PROGRESS_SAMPLE_INTERVAL_MS) {
+    speedSamples = [
+      ...speedSamples,
+      {
+        at: now,
+        speed: (deltaBytes / deltaMs) * 1000,
+      },
+    ].slice(-MAX_SPEED_SAMPLES)
+    nextPatch.lastProgressAt = now
+    nextPatch.lastProgressBytes = safeUploadedBytes
+  } else {
+    nextPatch.lastProgressAt = item.lastProgressAt || now
+    nextPatch.lastProgressBytes = Math.max(lastProgressBytes, safeUploadedBytes)
+  }
+
+  const averageBytesPerSecond = calculateWeightedAverageSpeed(speedSamples)
+  const remainingBytes = Math.max(0, (item.fileSize || 0) - safeUploadedBytes)
+  const estimatedSeconds =
+    averageBytesPerSecond > 0 && remainingBytes > 0
+      ? Math.max(1, Math.ceil(remainingBytes / averageBytesPerSecond))
+      : null
+
+  nextPatch.speedSamples = speedSamples
+  nextPatch.averageBytesPerSecond = averageBytesPerSecond
+  nextPatch.estimatedSeconds = estimatedSeconds
+
+  if (item.startedAt && safeUploadedBytes > 0 && safeUploadedBytes < item.fileSize) {
+    const speedText = averageBytesPerSecond > 0
+      ? formatTransferSpeed(averageBytesPerSecond)
+      : ""
+    const etaText = estimatedSeconds != null
+      ? `${formatRemainingTime(estimatedSeconds)} 남음`
+      : ""
+
+    nextPatch.statusText = [progress > 0 ? `${progress}%` : "업로드 중", speedText, etaText]
+      .filter(Boolean)
+      .join(" · ")
   } else if (safeUploadedBytes >= item.fileSize && item.fileSize > 0) {
     nextPatch.statusText = "업로드 완료, 마무리 중"
+    nextPatch.averageBytesPerSecond = 0
+    nextPatch.estimatedSeconds = 0
   } else {
-    nextPatch.statusText = `${progress}% 업로드 중`
+    nextPatch.statusText = progress > 0 ? `${progress}% 업로드 중` : "업로드 준비 중"
   }
 
   setUploadItemState(itemId, nextPatch)
@@ -528,6 +609,24 @@ const formatRemainingTime = (seconds) => {
   }
 
   return `약 ${hours}시간 ${minutes}분`
+}
+
+const formatTransferSpeed = (bytesPerSecond) => {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) {
+    return ""
+  }
+
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"]
+  let value = bytesPerSecond
+  let unitIndex = 0
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+
+  const fractionDigits = value >= 100 ? 0 : value >= 10 ? 1 : 2
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
 }
 
 const getProgressCircleStyle = (item) => ({
@@ -999,6 +1098,7 @@ const handleUpload = async (event, uploadTypeLabel) => {
     }
 
     uploadedFiles.value = successList
+    await fileStore.fetchFiles().catch(() => {})
     emit("upload-complete", uploadedFiles.value)
     console.log(`[${uploadTypeLabel}] 업로드 완료:`, uploadedFiles.value)
   } catch (error) {

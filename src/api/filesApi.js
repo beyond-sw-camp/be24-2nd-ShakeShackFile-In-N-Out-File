@@ -27,15 +27,17 @@ const toUploadRequestList = (files) => {
   });
 };
 
-export const parseUploadResponse = (responseData) => {
+const extractArrayResult = (responseData) => {
   if (!responseData) return [];
-
   if (Array.isArray(responseData)) return responseData;
   if (Array.isArray(responseData?.result)) return responseData.result;
-  if (Array.isArray(responseData?.data) && Array.isArray(responseData.data.result)) {
-    return responseData.data.result;
-  }
+  if (Array.isArray(responseData?.data)) return responseData.data;
+  if (Array.isArray(responseData?.data?.result)) return responseData.data.result;
   return [];
+};
+
+export const parseUploadResponse = (responseData) => {
+  return extractArrayResult(responseData);
 };
 
 export function uploadFiles(files) {
@@ -47,4 +49,9 @@ export function completePartitionUpload(payload) {
   return api.post("/file/upload/complete", payload, {
     timeout: 600000,
   });
+}
+
+export async function fetchFileList() {
+  const response = await api.get("/file/list");
+  return extractArrayResult(response?.data);
 }
