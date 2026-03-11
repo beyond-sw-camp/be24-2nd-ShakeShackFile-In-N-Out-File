@@ -6,6 +6,12 @@
     >
       <i class="fa-solid fa-plus"></i>
       <span>업로드 / 새로 만들기</span>
+      <span
+        v-if="activeUploadCountComputed > 0"
+        class="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold"
+      >
+        {{ activeUploadCountComputed }}
+      </span>
     </button>
 
     <div
@@ -23,16 +29,26 @@
           <i class="fa-solid fa-chevron-right text-[10px] text-gray-400"></i>
         </div>
 
-        <div class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block">
-          <RouterLink :to="{ name: 'workspace' }" >
-          <div class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-200">파일 생성하기</div></RouterLink>
-          <div @click="createNewFolder" class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl text-gray-200">폴더 생성하기</div>
+        <div
+          class="absolute left-full top-0 ml-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl hidden group-hover/sub:block"
+        >
+          <RouterLink :to="{ name: 'workspace' }">
+            <div class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-800 dark:text-gray-200">
+              파일 생성
+            </div>
+          </RouterLink>
+          <div
+            @click="createNewFolder"
+            class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl text-gray-800 dark:text-gray-200"
+          >
+            폴더 생성
+          </div>
         </div>
       </div>
 
       <div class="relative group/sub">
         <div
-          class="flex items-center justify-between px-4 py-3 text-sm text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors rounded-b-2xl border-t border-gray-100 dark:border-gray-700"
+          class="flex items-center justify-between px-4 py-3 text-sm text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors border-t border-gray-100 dark:border-gray-700"
         >
           <div class="flex items-center gap-3">
             <i class="fa-solid fa-cloud-arrow-up w-5 text-center text-gray-600 dark:text-gray-400"></i>
@@ -48,24 +64,182 @@
             class="block px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-800 dark:text-gray-200"
           >
             파일 업로드
-            <input type="file" multiple hidden :disabled="isUploading" @change="handleFileChange" />
+            <input
+              type="file"
+              multiple
+              hidden
+              :disabled="isUploading"
+              @change="handleFileChange"
+            />
           </label>
           <label
             class="block px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl text-gray-800 dark:text-gray-200"
           >
             폴더 업로드
-            <input type="file" webkitdirectory directory multiple hidden :disabled="isUploading" @change="handleFolderChange" />
+            <input
+              type="file"
+              webkitdirectory
+              directory
+              multiple
+              hidden
+              :disabled="isUploading"
+              @change="handleFolderChange"
+            />
           </label>
         </div>
+      </div>
+
+      <div class="px-4 py-3 border-t border-gray-100 dark:border-gray-700 rounded-b-2xl">
+        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-300 mb-2">
+          동시 업로드 수
+        </label>
+        <select
+          v-model.number="uploadConcurrency"
+          :disabled="isUploading"
+          class="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-100 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <option
+            v-for="count in uploadConcurrencyOptions"
+            :key="count"
+            :value="count"
+          >
+            {{ count }}
+          </option>
+        </select>
       </div>
     </div>
 
     <p v-if="uploadError" class="mt-2 text-xs text-rose-500">
       {{ uploadError }}
     </p>
-    <p v-if="isUploading" class="mt-2 text-xs text-blue-500">
-      {{ uploadStatusMessage }}
-    </p>
+
+    <button
+      v-if="hasUploadItems && !uploadPanelVisible"
+      type="button"
+      class="upload-panel-chip"
+      @click="uploadPanelVisible = true"
+    >
+      <span class="upload-panel-chip__dot"></span>
+      <span>{{ uploadPanelTitle }}</span>
+    </button>
+
+    <div
+      v-if="hasUploadItems && uploadPanelVisible"
+      class="upload-panel"
+    >
+      <div class="upload-panel__header">
+        <div class="upload-panel__header-copy">
+          <strong class="upload-panel__title">{{ uploadPanelTitle }}</strong>
+          <span class="upload-panel__subtitle">{{ uploadPanelSubtitle }}</span>
+        </div>
+
+        <div class="upload-panel__actions">
+          <button
+            type="button"
+            class="upload-panel__icon-button"
+            @click="uploadPanelCollapsed = !uploadPanelCollapsed"
+            :title="uploadPanelCollapsed ? '펼치기' : '접기'"
+          >
+            <svg
+              class="upload-panel__chevron"
+              :class="{ 'is-collapsed': uploadPanelCollapsed }"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            class="upload-panel__icon-button"
+            @click="dismissUploadPanel"
+            title="닫기"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div
+        v-if="!uploadPanelCollapsed"
+        class="upload-panel__body"
+      >
+        <div class="upload-panel__summary-bar">
+          <span>{{ uploadPanelEtaText }}</span>
+          <button
+            v-if="canCancelUploads"
+            type="button"
+            class="upload-panel__cancel"
+            @click="cancelActiveUploads"
+          >
+            취소
+          </button>
+        </div>
+
+        <div class="upload-panel__list">
+          <div
+            v-for="item in uploadItems"
+            :key="item.id"
+            class="upload-item"
+          >
+            <div class="upload-item__file-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M7 3.75h6.586a1.5 1.5 0 0 1 1.06.44l2.914 2.914a1.5 1.5 0 0 1 .44 1.06V19.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5v-14A1.5 1.5 0 0 1 7.5 4Z"
+                  fill="#dbeafe"
+                />
+                <path
+                  d="M14 4v3a1 1 0 0 0 1 1h3"
+                  stroke="#93c5fd"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+
+            <div class="upload-item__copy">
+              <div class="upload-item__name-row">
+                <span class="upload-item__name">{{ item.name }}</span>
+              </div>
+              <div class="upload-item__detail">
+                {{ item.statusText }}
+              </div>
+            </div>
+
+            <div
+              class="upload-item__indicator"
+              :class="`is-${item.status}`"
+              :style="getProgressCircleStyle(item)"
+              :title="item.statusText"
+            >
+              <span v-if="item.status === 'completed'" class="upload-item__indicator-symbol">✓</span>
+              <span v-else-if="item.status === 'failed'" class="upload-item__indicator-symbol">!</span>
+              <span v-else-if="item.status === 'canceled'" class="upload-item__indicator-symbol">-</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div
       v-if="isDropdownOpen"
@@ -76,32 +250,294 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import axios from "axios"
 import { completePartitionUpload, parseUploadResponse, uploadFiles } from "@/api/filesApi.js"
 
 const isDropdownOpen = ref(false)
 const uploadedFiles = ref([])
 const isUploading = ref(false)
-const uploadPhase = ref("idle")
 const uploadError = ref("")
+const uploadItems = ref([])
+const uploadPanelVisible = ref(false)
+const uploadPanelCollapsed = ref(false)
+const totalUploadCount = ref(0)
+const completedUploadCount = ref(0)
+const activeUploadCount = ref(0)
+const mergingUploadCount = ref(0)
+const uploadSessionStartedAt = ref(null)
+const nowTick = ref(Date.now())
+const isCancelRequested = ref(false)
 
 const emit = defineEmits(["upload-complete", "upload-fail"])
 const MAX_UPLOAD_COUNT = 1000
 const PARTITION_SIZE_BYTES = 100 * 1024 * 1024
 const CHUNK_SIZE_BYTES = 80 * 1024 * 1024
+const DEFAULT_UPLOAD_CONCURRENCY = 3
+const MAX_UPLOAD_CONCURRENCY = 5
+const UPLOAD_CONCURRENCY_STORAGE_KEY = "file-upload-concurrency"
+const uploadConcurrencyOptions = [1, 2, 3, 4, 5]
+const ACTIVE_UPLOAD_STATUSES = new Set(["preparing", "pending", "uploading", "merging", "canceling"])
+const activeUploadControllers = new Map()
 
-const uploadStatusMessage = computed(() => {
-  if (uploadPhase.value === "merging") {
-    return "서버에서 파일 병합 중..."
+let tickTimerId = null
+
+const normalizeUploadConcurrency = (value) => {
+  const parsedValue = Number(value)
+
+  if (!Number.isInteger(parsedValue)) {
+    return DEFAULT_UPLOAD_CONCURRENCY
   }
 
-  if (uploadPhase.value === "finalizing") {
-    return "서버에서 업로드 완료를 확인 중..."
+  return Math.min(MAX_UPLOAD_CONCURRENCY, Math.max(1, parsedValue))
+}
+
+const readStoredUploadConcurrency = () => {
+  if (typeof window === "undefined") {
+    return DEFAULT_UPLOAD_CONCURRENCY
   }
 
-  return "파일 업로드 중..."
+  return normalizeUploadConcurrency(
+    window.localStorage.getItem(UPLOAD_CONCURRENCY_STORAGE_KEY),
+  )
+}
+
+const uploadConcurrency = ref(readStoredUploadConcurrency())
+
+watch(uploadConcurrency, (value) => {
+  const normalizedValue = normalizeUploadConcurrency(value)
+
+  if (normalizedValue !== value) {
+    uploadConcurrency.value = normalizedValue
+    return
+  }
+
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(
+      UPLOAD_CONCURRENCY_STORAGE_KEY,
+      String(normalizedValue),
+    )
+  }
 })
+
+const hasUploadItems = computed(() => uploadItems.value.length > 0)
+
+const activeUploadCountComputed = computed(() =>
+  uploadItems.value.filter((item) => ACTIVE_UPLOAD_STATUSES.has(item.status)).length,
+)
+
+const failedUploadCount = computed(() =>
+  uploadItems.value.filter((item) => item.status === "failed").length,
+)
+
+const canceledUploadCount = computed(() =>
+  uploadItems.value.filter((item) => item.status === "canceled").length,
+)
+
+const totalTrackedBytes = computed(() =>
+  uploadItems.value.reduce((sum, item) => sum + (item.fileSize || 0), 0),
+)
+
+const uploadedTrackedBytes = computed(() =>
+  uploadItems.value.reduce((sum, item) => sum + (item.uploadedBytes || 0), 0),
+)
+
+const overallEstimatedSeconds = computed(() => {
+  if (!uploadSessionStartedAt.value || activeUploadCountComputed.value === 0) {
+    return null
+  }
+
+  if (mergingUploadCount.value > 0) {
+    return null
+  }
+
+  const elapsedSeconds = Math.max(
+    Math.floor((nowTick.value - uploadSessionStartedAt.value) / 1000),
+    1,
+  )
+  const uploadedBytes = uploadedTrackedBytes.value
+  const totalBytes = totalTrackedBytes.value
+
+  if (uploadedBytes <= 0 || totalBytes <= uploadedBytes) {
+    return null
+  }
+
+  const speed = uploadedBytes / elapsedSeconds
+  if (speed <= 0) {
+    return null
+  }
+
+  return Math.max(1, Math.ceil((totalBytes - uploadedBytes) / speed))
+})
+
+const uploadPanelTitle = computed(() => {
+  if (activeUploadCountComputed.value > 0) {
+    return `${activeUploadCountComputed.value}개 항목 업로드 중`
+  }
+
+  if (failedUploadCount.value > 0 && completedUploadCount.value > 0) {
+    return `${completedUploadCount.value}개 완료, ${failedUploadCount.value}개 실패`
+  }
+
+  if (failedUploadCount.value > 0) {
+    return `${failedUploadCount.value}개 항목 업로드 실패`
+  }
+
+  if (canceledUploadCount.value > 0) {
+    return "업로드가 취소됨"
+  }
+
+  if (completedUploadCount.value > 0) {
+    return `${completedUploadCount.value}개 항목 업로드 완료`
+  }
+
+  return "업로드 상태"
+})
+
+const uploadPanelSubtitle = computed(() => {
+  if (activeUploadCountComputed.value > 0) {
+    return `${completedUploadCount.value}/${totalUploadCount.value} 완료`
+  }
+
+  if (failedUploadCount.value > 0) {
+    return "실패한 파일을 확인해 주세요"
+  }
+
+  if (canceledUploadCount.value > 0) {
+    return "중단된 업로드가 있습니다"
+  }
+
+  if (completedUploadCount.value > 0) {
+    return "모든 업로드가 끝났습니다"
+  }
+
+  return ""
+})
+
+const uploadPanelEtaText = computed(() => {
+  if (activeUploadCountComputed.value === 0) {
+    if (failedUploadCount.value > 0) {
+      return "업로드가 중단되었거나 실패했습니다."
+    }
+
+    if (canceledUploadCount.value > 0) {
+      return "업로드가 취소되었습니다."
+    }
+
+    return "모든 업로드가 완료되었습니다."
+  }
+
+  if (mergingUploadCount.value > 0) {
+    return "서버에서 업로드를 마무리하는 중..."
+  }
+
+  if (overallEstimatedSeconds.value == null) {
+    return "남은 시간 계산 중..."
+  }
+
+  return `${formatRemainingTime(overallEstimatedSeconds.value)} 남음...`
+})
+
+const canCancelUploads = computed(() =>
+  isUploading.value && activeUploadCountComputed.value > 0,
+)
+
+const createUploadItem = (file, index) => ({
+  id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+  name: file.name,
+  fileSize: file.size || 0,
+  uploadedBytes: 0,
+  progress: 0,
+  status: "pending",
+  statusText: "업로드 대기 중",
+  errorMessage: "",
+  startedAt: null,
+})
+
+const getUploadItem = (itemId) =>
+  uploadItems.value.find((item) => item.id === itemId)
+
+const setUploadItemState = (itemId, patch) => {
+  const item = getUploadItem(itemId)
+  if (!item) return
+  Object.assign(item, patch)
+}
+
+const updateUploadItemProgress = (itemId, uploadedBytes) => {
+  const item = getUploadItem(itemId)
+  if (!item) return
+
+  const safeUploadedBytes = Math.min(
+    item.fileSize || uploadedBytes,
+    Math.max(0, uploadedBytes),
+  )
+  const progress = item.fileSize
+    ? Math.min(100, Math.round((safeUploadedBytes / item.fileSize) * 100))
+    : safeUploadedBytes > 0
+      ? 100
+      : 0
+
+  const nextPatch = {
+    uploadedBytes: safeUploadedBytes,
+    progress,
+  }
+
+  if (item.startedAt && safeUploadedBytes > 0 && safeUploadedBytes < item.fileSize) {
+    const elapsedSeconds = Math.max(
+      Math.floor((Date.now() - item.startedAt) / 1000),
+      1,
+    )
+    const speed = safeUploadedBytes / elapsedSeconds
+
+    if (speed > 0) {
+      const estimatedSeconds = Math.max(
+        1,
+        Math.ceil((item.fileSize - safeUploadedBytes) / speed),
+      )
+      nextPatch.statusText = `${progress}% · ${formatRemainingTime(estimatedSeconds)} 남음`
+    } else {
+      nextPatch.statusText = `${progress}% 업로드 중`
+    }
+  } else if (safeUploadedBytes >= item.fileSize && item.fileSize > 0) {
+    nextPatch.statusText = "업로드 완료, 마무리 중"
+  } else {
+    nextPatch.statusText = `${progress}% 업로드 중`
+  }
+
+  setUploadItemState(itemId, nextPatch)
+}
+
+const formatRemainingTime = (seconds) => {
+  if (seconds == null || Number.isNaN(seconds) || seconds <= 0) {
+    return "곧 완료"
+  }
+
+  if (seconds < 60) {
+    return `약 ${Math.ceil(seconds)}초`
+  }
+
+  if (seconds < 3600) {
+    return `약 ${Math.ceil(seconds / 60)}분`
+  }
+
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.ceil((seconds % 3600) / 60)
+
+  if (minutes === 0) {
+    return `약 ${hours}시간`
+  }
+
+  return `약 ${hours}시간 ${minutes}분`
+}
+
+const getProgressCircleStyle = (item) => ({
+  "--progress": `${item.progress || 0}%`,
+})
+
+const isAbortError = (error) =>
+  error?.code === "ERR_CANCELED" ||
+  error?.name === "CanceledError" ||
+  error?.name === "AbortError"
 
 const toggleDropdown = () => {
   if (isUploading.value) return
@@ -112,8 +548,12 @@ const closeDropdown = () => {
   isDropdownOpen.value = false
 }
 
+const dismissUploadPanel = () => {
+  uploadPanelVisible.value = false
+}
+
 const createNewFolder = () => {
-  const folderName = prompt("폴더 이름을 입력해주세요.")
+  const folderName = prompt("폴더 이름을 입력해 주세요.")
   if (folderName) {
     console.log("폴더 생성:", folderName)
   }
@@ -140,8 +580,11 @@ const uploadToPresignedUrl = async (
   uploadMeta,
   fileName,
   contentType = "application/octet-stream",
+  options = {},
 ) => {
+  const { signal, onProgress } = options
   const presignedUploadUrl = uploadMeta?.presignedUploadUrl
+
   if (!presignedUploadUrl) {
     throw new Error("업로드 URL이 없습니다.")
   }
@@ -158,13 +601,22 @@ const uploadToPresignedUrl = async (
     }
     formData.append("file", payload, fileName || "upload.bin")
 
-    await axios.post(presignedUploadUrl, formData)
+    await axios.post(presignedUploadUrl, formData, {
+      signal,
+      onUploadProgress: (event) => {
+        onProgress?.(event?.loaded ?? 0)
+      },
+    })
     return
   }
 
   await axios.put(presignedUploadUrl, payload, {
+    signal,
     headers: {
       "Content-Type": contentType || "application/octet-stream",
+    },
+    onUploadProgress: (event) => {
+      onProgress?.(event?.loaded ?? 0)
     },
   })
 }
@@ -180,59 +632,147 @@ const getExpectedUploadCount = (file) => {
 const getUploadMetaCount = (file, firstUploadMeta) => {
   const partitionCount = Number(firstUploadMeta?.partitionCount)
 
-  if (firstUploadMeta?.partitioned === true && Number.isInteger(partitionCount) && partitionCount > 0) {
+  if (
+    firstUploadMeta?.partitioned === true &&
+    Number.isInteger(partitionCount) &&
+    partitionCount > 0
+  ) {
     return partitionCount
   }
 
   return getExpectedUploadCount(file)
 }
 
-const uploadFileByChunks = async (file, uploadMetas) => {
+const buildUploadJobs = (selectedFiles, presignedResponses, createdItems) => {
+  const uploadJobs = []
+  let responseIndex = 0
+
+  for (const [fileIndex, targetFile] of selectedFiles.entries()) {
+    const firstUploadMeta = presignedResponses[responseIndex]
+    const uploadItem = createdItems[fileIndex]
+
+    if (!firstUploadMeta || !uploadItem) {
+      throw new Error(`${targetFile.name} 업로드 정보를 찾을 수 없습니다.`)
+    }
+
+    const expectedUploadCount = getUploadMetaCount(targetFile, firstUploadMeta)
+    const uploadMetas = presignedResponses.slice(
+      responseIndex,
+      responseIndex + expectedUploadCount,
+    )
+
+    if (uploadMetas.length !== expectedUploadCount) {
+      throw new Error(`${targetFile.name} 업로드 메타 개수가 맞지 않습니다.`)
+    }
+
+    uploadJobs.push({
+      file: targetFile,
+      uploadMetas,
+      partitioned: uploadMetas[0]?.partitioned === true,
+      uploadItemId: uploadItem.id,
+    })
+
+    responseIndex += expectedUploadCount
+  }
+
+  if (responseIndex !== presignedResponses.length) {
+    throw new Error("업로드 메타 개수와 선택한 파일 수가 일치하지 않습니다.")
+  }
+
+  return uploadJobs
+}
+
+const uploadFileByChunks = async (file, uploadMetas, uploadItemId) => {
   const uploadChunkCount = Array.isArray(uploadMetas) ? uploadMetas.length : 0
 
   if (uploadChunkCount === 0) {
-    throw new Error(`${file?.name || "unknown-file"}의 업로드 메타데이터 개수가 맞지 않습니다.`)
+    throw new Error(`${file?.name || "unknown-file"} 업로드 정보가 올바르지 않습니다.`)
   }
 
-  if (uploadChunkCount === 1) {
-    await uploadToPresignedUrl(file, uploadMetas[0], file.name, file.type)
-    return
-  }
+  setUploadItemState(uploadItemId, {
+    status: "uploading",
+    startedAt: Date.now(),
+    statusText: "업로드 시작 중",
+  })
+
+  let completedBytes = 0
 
   for (let chunkIndex = 0; chunkIndex < uploadChunkCount; chunkIndex++) {
-    const start = chunkIndex * CHUNK_SIZE_BYTES
-    const end = chunkIndex === uploadChunkCount - 1
-      ? file.size
-      : Math.min(start + CHUNK_SIZE_BYTES, file.size)
-    const chunkBlob = file.slice(start, end, file.type || "application/octet-stream")
+    if (isCancelRequested.value) {
+      throw new DOMException("Upload canceled", "AbortError")
+    }
 
-    await uploadToPresignedUrl(
-      chunkBlob,
-      uploadMetas[chunkIndex],
-      `${file.name}.part${String(chunkIndex + 1).padStart(5, "0")}`,
-      file.type,
+    const start = chunkIndex * CHUNK_SIZE_BYTES
+    const end =
+      chunkIndex === uploadChunkCount - 1
+        ? file.size
+        : Math.min(start + CHUNK_SIZE_BYTES, file.size)
+    const chunkBlob = file.slice(
+      start,
+      end,
+      file.type || "application/octet-stream",
     )
+    const chunkSize = chunkBlob.size || 0
+    const controller = new AbortController()
+
+    activeUploadControllers.set(uploadItemId, controller)
+
+    try {
+      await uploadToPresignedUrl(
+        chunkBlob,
+        uploadMetas[chunkIndex],
+        uploadChunkCount === 1
+          ? file.name
+          : `${file.name}.part${String(chunkIndex + 1).padStart(5, "0")}`,
+        file.type,
+        {
+          signal: controller.signal,
+          onProgress: (loadedBytes) => {
+            updateUploadItemProgress(
+              uploadItemId,
+              completedBytes + Math.min(chunkSize, loadedBytes),
+            )
+          },
+        },
+      )
+    } finally {
+      activeUploadControllers.delete(uploadItemId)
+    }
+
+    completedBytes += chunkSize
+    updateUploadItemProgress(uploadItemId, completedBytes)
   }
 }
 
-const completeUploadedFile = async (file, uploadMetas, partitioned) => {
+const completeUploadedFile = async (file, uploadMetas, partitioned, uploadItemId) => {
   if (!partitioned) {
+    setUploadItemState(uploadItemId, {
+      status: "completed",
+      statusText: "업로드 완료",
+      progress: 100,
+      uploadedBytes: file.size || 0,
+    })
     return
   }
 
   const firstMeta = uploadMetas[0]
   const finalObjectKey = firstMeta?.finalObjectKey
-  const chunkObjectKeys = partitioned
-    ? uploadMetas.map((meta) => meta?.objectKey).filter(Boolean)
-    : []
+  const chunkObjectKeys = uploadMetas.map((meta) => meta?.objectKey).filter(Boolean)
 
   if (!finalObjectKey) {
-    throw new Error(`${file.name}의 완료 요청 정보가 올바르지 않습니다.`)
+    throw new Error(`${file.name} 완료 정보가 올바르지 않습니다.`)
   }
 
-  if (partitioned && chunkObjectKeys.length !== uploadMetas.length) {
-    throw new Error(`${file.name}의 완료 요청 정보가 올바르지 않습니다.`)
+  if (chunkObjectKeys.length !== uploadMetas.length) {
+    throw new Error(`${file.name} 청크 정보가 올바르지 않습니다.`)
   }
+
+  setUploadItemState(uploadItemId, {
+    status: "merging",
+    statusText: "서버에서 파일 병합 중",
+    progress: 100,
+    uploadedBytes: file.size || 0,
+  })
 
   await completePartitionUpload({
     fileOriginName: file.name,
@@ -241,20 +781,147 @@ const completeUploadedFile = async (file, uploadMetas, partitioned) => {
     finalObjectKey,
     chunkObjectKeys,
   })
+
+  setUploadItemState(uploadItemId, {
+    status: "completed",
+    statusText: "업로드 완료",
+    progress: 100,
+    uploadedBytes: file.size || 0,
+  })
+}
+
+const runUploadJobs = async (uploadJobs, concurrency) => {
+  const successList = new Array(uploadJobs.length)
+  const workerCount = Math.min(concurrency, uploadJobs.length)
+  let nextJobIndex = 0
+  let firstError = null
+
+  const worker = async () => {
+    while (true) {
+      if (firstError || isCancelRequested.value) {
+        return
+      }
+
+      const currentJobIndex = nextJobIndex
+      nextJobIndex += 1
+
+      if (currentJobIndex >= uploadJobs.length) {
+        return
+      }
+
+      const currentJob = uploadJobs[currentJobIndex]
+      activeUploadCount.value += 1
+
+      try {
+        await uploadFileByChunks(
+          currentJob.file,
+          currentJob.uploadMetas,
+          currentJob.uploadItemId,
+        )
+
+        if (currentJob.partitioned) {
+          mergingUploadCount.value += 1
+
+          try {
+            await completeUploadedFile(
+              currentJob.file,
+              currentJob.uploadMetas,
+              true,
+              currentJob.uploadItemId,
+            )
+          } finally {
+            mergingUploadCount.value = Math.max(0, mergingUploadCount.value - 1)
+          }
+        } else {
+          await completeUploadedFile(
+            currentJob.file,
+            currentJob.uploadMetas,
+            false,
+            currentJob.uploadItemId,
+          )
+        }
+
+        completedUploadCount.value += 1
+        successList[currentJobIndex] = currentJob.file.name
+      } catch (error) {
+        if (isAbortError(error)) {
+          setUploadItemState(currentJob.uploadItemId, {
+            status: "canceled",
+            statusText: "업로드 취소됨",
+          })
+        } else {
+          setUploadItemState(currentJob.uploadItemId, {
+            status: "failed",
+            statusText: error?.message || "업로드 실패",
+            errorMessage: error?.message || "업로드 실패",
+          })
+          firstError = error
+        }
+      } finally {
+        activeUploadCount.value = Math.max(0, activeUploadCount.value - 1)
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, worker))
+
+  if (firstError) {
+    throw firstError
+  }
+
+  return successList.filter(Boolean)
+}
+
+const cancelActiveUploads = () => {
+  if (!canCancelUploads.value) return
+
+  isCancelRequested.value = true
+
+  uploadItems.value.forEach((item) => {
+    if (item.status === "pending" || item.status === "preparing") {
+      item.status = "canceled"
+      item.statusText = "업로드 취소됨"
+      return
+    }
+
+    if (item.status === "uploading" || item.status === "merging") {
+      item.status = "canceling"
+      item.statusText = "취소 중..."
+    }
+  })
+
+  activeUploadControllers.forEach((controller) => {
+    controller.abort()
+  })
+}
+
+const markUnfinishedUploadsStopped = (reasonText) => {
+  uploadItems.value.forEach((item) => {
+    if (item.status === "pending" || item.status === "preparing") {
+      item.status = "failed"
+      item.statusText = reasonText
+    }
+  })
 }
 
 const toNormalizedError = (error) => {
   if (!error) return "업로드에 실패했습니다."
   if (typeof error === "string") return error
 
+  if (isAbortError(error)) {
+    return "업로드가 취소되었습니다."
+  }
+
   if (error.code === "ECONNABORTED") {
-    return "대용량 파일 처리 시간이 초과되었습니다. 잠시 후 다시 확인해주세요."
+    return "업로드 시간이 초과되었습니다. 서버 상태를 확인해 주세요."
   }
 
   if (error.response) {
     if (typeof error.response.data === "string") return error.response.data
     if (error.response.data?.message) return error.response.data.message
-    if (error.response.data?.result?.message) return error.response.data.result.message
+    if (error.response.data?.result?.message) {
+      return error.response.data.result.message
+    }
     return `업로드에 실패했습니다. 상태 코드: ${error.response.status}`
   }
 
@@ -267,17 +934,28 @@ const handleUpload = async (event, uploadTypeLabel) => {
   if (!selectedFiles.length) return
 
   uploadError.value = ""
+  uploadedFiles.value = []
+  uploadPanelVisible.value = true
+  uploadPanelCollapsed.value = false
   isUploading.value = true
-  uploadPhase.value = "uploading"
+  isCancelRequested.value = false
+  totalUploadCount.value = selectedFiles.length
+  completedUploadCount.value = 0
+  activeUploadCount.value = 0
+  mergingUploadCount.value = 0
+  uploadSessionStartedAt.value = Date.now()
+  uploadItems.value = selectedFiles.map((file, index) => createUploadItem(file, index))
 
   try {
     if (selectedFiles.length > MAX_UPLOAD_COUNT) {
       throw new Error(`한 번에 최대 ${MAX_UPLOAD_COUNT}개까지 업로드할 수 있습니다.`)
     }
 
-    const invalidName = selectedFiles.find((file) => !file?.name || typeof file.name !== "string")
+    const invalidName = selectedFiles.find(
+      (file) => !file?.name || typeof file.name !== "string",
+    )
     if (invalidName) {
-      throw new Error("유효하지 않은 파일이 포함되어 있습니다.")
+      throw new Error("이름이 올바르지 않은 파일이 포함되어 있습니다.")
     }
 
     const invalidFormat = selectedFiles.find((file) => {
@@ -288,6 +966,11 @@ const handleUpload = async (event, uploadTypeLabel) => {
       throw new Error(`"${invalidFormat.name}" 파일은 확장자가 없습니다.`)
     }
 
+    uploadItems.value.forEach((item) => {
+      item.status = "preparing"
+      item.statusText = "업로드 정보 준비 중"
+    })
+
     const response = await uploadFiles(selectedFiles)
     const presignedResponses = parseUploadResponse(response?.data)
 
@@ -295,29 +978,24 @@ const handleUpload = async (event, uploadTypeLabel) => {
       throw new Error("업로드 응답이 비어 있습니다.")
     }
 
-    const successList = []
-    let responseIndex = 0
+    uploadItems.value.forEach((item) => {
+      item.status = "pending"
+      item.statusText = "업로드 대기 중"
+    })
 
-    for (const targetFile of selectedFiles) {
-      const firstUploadMeta = presignedResponses[responseIndex]
-      const expectedUploadCount = getUploadMetaCount(targetFile, firstUploadMeta)
-      const uploadMetas = presignedResponses.slice(responseIndex, responseIndex + expectedUploadCount)
-      const partitioned = uploadMetas[0]?.partitioned === true
+    const uploadJobs = buildUploadJobs(
+      selectedFiles,
+      presignedResponses,
+      uploadItems.value,
+    )
 
-      uploadPhase.value = "uploading"
-      await uploadFileByChunks(targetFile, uploadMetas)
+    const successList = await runUploadJobs(
+      uploadJobs,
+      normalizeUploadConcurrency(uploadConcurrency.value),
+    )
 
-      if (partitioned) {
-        uploadPhase.value = "merging"
-        await completeUploadedFile(targetFile, uploadMetas, true)
-      }
-
-      responseIndex += expectedUploadCount
-      successList.push(targetFile.name)
-    }
-
-    if (responseIndex !== presignedResponses.length) {
-      throw new Error("업로드 응답 개수가 선택한 파일과 일치하지 않습니다.")
+    if (isCancelRequested.value) {
+      return
     }
 
     uploadedFiles.value = successList
@@ -325,12 +1003,19 @@ const handleUpload = async (event, uploadTypeLabel) => {
     console.log(`[${uploadTypeLabel}] 업로드 완료:`, uploadedFiles.value)
   } catch (error) {
     const message = toNormalizedError(error)
+
+    if (!isAbortError(error)) {
+      markUnfinishedUploadsStopped("업로드 중단됨")
+    }
+
     uploadError.value = message
     emit("upload-fail", message)
     console.error(`[${uploadTypeLabel}] 업로드 실패:`, error)
   } finally {
     isUploading.value = false
-    uploadPhase.value = "idle"
+    activeUploadCount.value = 0
+    mergingUploadCount.value = 0
+    activeUploadControllers.clear()
     closeDropdown()
 
     if (event?.target) {
@@ -355,12 +1040,276 @@ const handleKeydown = (event) => {
 
 onMounted(() => {
   document.addEventListener("keydown", handleKeydown)
+  tickTimerId = window.setInterval(() => {
+    nowTick.value = Date.now()
+  }, 1000)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", handleKeydown)
+
+  if (tickTimerId) {
+    window.clearInterval(tickTimerId)
+  }
+
+  activeUploadControllers.forEach((controller) => {
+    controller.abort()
+  })
+  activeUploadControllers.clear()
 })
 </script>
 
 <style scoped>
+.upload-panel-chip {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 999px;
+  background: #1f2937;
+  color: #fff;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.24);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.upload-panel-chip__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #60a5fa;
+  box-shadow: 0 0 0 6px rgba(96, 165, 250, 0.18);
+}
+
+.upload-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 80;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  border-radius: 22px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #c7dbff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+}
+
+.upload-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  background: #ffffff;
+}
+
+.upload-panel__header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.upload-panel__title {
+  color: #111827;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.upload-panel__subtitle {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.upload-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.upload-panel__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: #374151;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.upload-panel__icon-button:hover {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.upload-panel__chevron {
+  transition: transform 0.18s ease;
+}
+
+.upload-panel__chevron.is-collapsed {
+  transform: rotate(180deg);
+}
+
+.upload-panel__body {
+  border-top: 1px solid #e5e7eb;
+}
+
+.upload-panel__summary-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  background: #eef2f7;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.upload-panel__cancel {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.upload-panel__cancel:hover {
+  text-decoration: underline;
+}
+
+.upload-panel__list {
+  max-height: 280px;
+  overflow-y: auto;
+  background: #ffffff;
+}
+
+.upload-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.upload-item + .upload-item {
+  border-top: 1px solid #f1f5f9;
+}
+
+.upload-item__file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-item__copy {
+  min-width: 0;
+}
+
+.upload-item__name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.upload-item__name {
+  color: #374151;
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-item__detail {
+  margin-top: 4px;
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-item__indicator {
+  --progress: 0%;
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1.5px solid #d1d5db;
+  background: #fff;
+}
+
+.upload-item__indicator::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.upload-item__indicator.is-uploading,
+.upload-item__indicator.is-merging,
+.upload-item__indicator.is-canceling {
+  border: none;
+  background: conic-gradient(#3b82f6 var(--progress), #dbeafe 0);
+}
+
+.upload-item__indicator.is-merging {
+  background: conic-gradient(#60a5fa var(--progress), #dbeafe 0);
+}
+
+.upload-item__indicator.is-completed {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.upload-item__indicator.is-failed {
+  border-color: #fca5a5;
+  background: #fff1f2;
+}
+
+.upload-item__indicator.is-canceled {
+  border-color: #d1d5db;
+  background: #f8fafc;
+}
+
+.upload-item__indicator-symbol {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #2563eb;
+  font-size: 14px;
+  font-weight: 900;
+  z-index: 1;
+}
+
+.upload-item__indicator.is-failed .upload-item__indicator-symbol {
+  color: #ef4444;
+}
+
+.upload-item__indicator.is-canceled .upload-item__indicator-symbol {
+  color: #6b7280;
+}
+
+@media (max-width: 640px) {
+  .upload-panel,
+  .upload-panel-chip {
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .upload-panel {
+    width: min(100vw - 24px, 380px);
+  }
+}
 </style>
