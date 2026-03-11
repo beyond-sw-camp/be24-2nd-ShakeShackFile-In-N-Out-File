@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
 
@@ -12,11 +12,41 @@ const props = defineProps({
     type: String,
     default: "trash",
   },
+  showParentNavigator: {
+    type: Boolean,
+    default: false,
+  },
+  parentFolderTargetId: {
+    type: Number,
+    default: null,
+  },
 });
 
-const emit = defineEmits(["delete-file"]);
+const emit = defineEmits(["delete-file", "rename-folder", "show-folder-properties"]);
 const fileStore = useFileStore();
 const { viewMode, gridSize } = useViewStore();
+const dragTargetId = ref(null);
+const draggingFileIds = ref([]);
+const selectedIds = ref([]);
+
+const visibleFileIds = computed(() =>
+  props.files
+    .map((file) => String(file?.id))
+    .filter(Boolean),
+);
+
+watch(visibleFileIds, (ids) => {
+  const visibleSet = new Set(ids);
+  selectedIds.value = selectedIds.value.filter((id) => visibleSet.has(String(id)));
+});
+
+const selectedIdSet = computed(() => new Set(selectedIds.value.map((id) => String(id))));
+const selectedCount = computed(() => selectedIds.value.length);
+const hasSelection = computed(() => selectedCount.value > 0);
+const allVisibleSelected = computed(() =>
+  visibleFileIds.value.length > 0 &&
+  visibleFileIds.value.every((id) => selectedIdSet.value.has(String(id))),
+);
 
 const extractExtension = (fileName = "") => {
   const lastDot = fileName.lastIndexOf(".");
@@ -86,6 +116,18 @@ const canDownload = (file) => {
   return file?.type !== "folder" && Boolean(file?.downloadUrl || file?.presignedDownloadUrl);
 };
 
+const canManageFolder = (file) => {
+  return props.deleteMode !== "permanent" && file?.type === "folder" && !file?.isTrash;
+};
+
+const isMovable = (file) => {
+  return props.deleteMode !== "permanent" && !file?.isTrash;
+};
+
+const isFolderDropTarget = (file) => {
+  return canManageFolder(file);
+};
+
 const openFile = (file) => {
   if (file?.type === "folder") {
     if (props.deleteMode === "permanent") {
@@ -115,9 +157,207 @@ const onClickDelete = (file, event) => {
   }
 };
 
+const onClickRenameFolder = (file, event) => {
+  event.stopPropagation();
+  emit("rename-folder", file);
+};
+
+const onClickShowFolderProperties = (file, event) => {
+  event.stopPropagation();
+  emit("show-folder-properties", file);
+};
+
+const toggleFileSelection = (fileId, checked) => {
+  const normalizedId = String(fileId);
+  if (!normalizedId) {
+    return;
+  }
+
+  if (checked) {
+    if (!selectedIdSet.value.has(normalizedId)) {
+      selectedIds.value = [...selectedIds.value, normalizedId];
+    }
+    return;
+  }
+
+  selectedIds.value = selectedIds.value.filter((id) => String(id) !== normalizedId);
+};
+
+const toggleSelectAllVisible = (checked) => {
+  if (checked) {
+    selectedIds.value = [...visibleFileIds.value];
+    return;
+  }
+
+  selectedIds.value = [];
+};
+
+const clearSelection = () => {
+  selectedIds.value = [];
+};
+
+const getDragFileIds = (file) => {
+  const fileId = String(file?.id);
+  if (!fileId) {
+    return [];
+  }
+
+  if (selectedIdSet.value.has(fileId)) {
+    return [...selectedIds.value];
+  }
+
+  return [fileId];
+};
+
+const readDraggedFileIds = (event) => {
+  const payload = event?.dataTransfer?.getData("text/plain");
+  if (payload) {
+    try {
+      const parsed = JSON.parse(payload);
+      if (Array.isArray(parsed?.fileIds)) {
+        return parsed.fileIds.map((id) => String(id));
+      }
+    } catch {
+      return [];
+    }
+  }
+
+  return [...draggingFileIds.value];
+};
+
+const onDragStart = (event, file) => {
+  if (!isMovable(file)) {
+    return;
+  }
+
+  const fileIds = getDragFileIds(file);
+  draggingFileIds.value = fileIds;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", JSON.stringify({ fileIds }));
+};
+
+const onDragEnd = () => {
+  draggingFileIds.value = [];
+  dragTargetId.value = null;
+};
+
+const onDragOverFolder = (event, folder) => {
+  if (!isFolderDropTarget(folder)) {
+    return;
+  }
+
+  const draggedFileIds = readDraggedFileIds(event);
+  if (!draggedFileIds.length || draggedFileIds.includes(String(folder.id))) {
+    return;
+  }
+
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  dragTargetId.value = folder.id;
+};
+
+const onDragLeaveFolder = (folder) => {
+  if (String(dragTargetId.value) === String(folder.id)) {
+    dragTargetId.value = null;
+  }
+};
+
+const performMove = async (fileIds, targetFolderId) => {
+  const normalizedIds = Array.from(
+    new Set((fileIds || []).map((id) => String(id)).filter(Boolean)),
+  );
+
+  if (!normalizedIds.length) {
+    return;
+  }
+
+  if (normalizedIds.length === 1) {
+    await fileStore.moveFileToFolder(normalizedIds[0], targetFolderId);
+  } else {
+    await fileStore.moveFilesToFolder(normalizedIds, targetFolderId);
+  }
+
+  selectedIds.value = selectedIds.value.filter((id) => !normalizedIds.includes(String(id)));
+};
+
+const onDropToFolder = async (event, folder) => {
+  if (!isFolderDropTarget(folder)) {
+    return;
+  }
+
+  event.preventDefault();
+  const draggedFileIds = readDraggedFileIds(event);
+  dragTargetId.value = null;
+  draggingFileIds.value = [];
+
+  if (!draggedFileIds.length || draggedFileIds.includes(String(folder.id))) {
+    return;
+  }
+
+  try {
+    await performMove(draggedFileIds, folder.id);
+  } catch (error) {
+    window.alert(
+      error?.response?.data?.message ||
+      error?.message ||
+      "폴더로 이동하지 못했습니다.",
+    );
+  }
+};
+
+const onDragOverParentNavigator = (event) => {
+  if (!props.showParentNavigator || props.deleteMode === "permanent") {
+    return;
+  }
+
+  const draggedFileIds = readDraggedFileIds(event);
+  if (!draggedFileIds.length) {
+    return;
+  }
+
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  dragTargetId.value = "__parent__";
+};
+
+const onDragLeaveParentNavigator = () => {
+  if (dragTargetId.value === "__parent__") {
+    dragTargetId.value = null;
+  }
+};
+
+const onDropToParentNavigator = async (event) => {
+  if (!props.showParentNavigator || props.deleteMode === "permanent") {
+    return;
+  }
+
+  event.preventDefault();
+  const draggedFileIds = readDraggedFileIds(event);
+  dragTargetId.value = null;
+  draggingFileIds.value = [];
+
+  if (!draggedFileIds.length) {
+    return;
+  }
+
+  try {
+    await performMove(draggedFileIds, props.parentFolderTargetId);
+  } catch (error) {
+    window.alert(
+      error?.response?.data?.message ||
+      error?.message ||
+      "상위 폴더로 이동하지 못했습니다.",
+    );
+  }
+};
+
 const gridClassName = computed(() => {
   if (gridSize.value === "large") {
     return "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3";
+  }
+
+  if (gridSize.value === "xsmall") {
+    return "grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7";
   }
 
   if (gridSize.value === "small") {
@@ -131,12 +371,42 @@ const gridClassName = computed(() => {
 <template>
   <div>
     <div
+      v-if="deleteMode !== 'permanent'"
+      class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
+    >
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
+          <input
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            :checked="allVisibleSelected"
+            @change="toggleSelectAllVisible($event.target.checked)"
+          />
+          현재 목록 전체 선택
+        </label>
+        <span v-if="hasSelection" class="text-sm text-blue-600">
+          {{ selectedCount }}개 선택됨
+        </span>
+      </div>
+
+      <button
+        v-if="hasSelection"
+        type="button"
+        class="rounded-full px-3 py-1 text-sm font-semibold text-gray-600 transition hover:bg-gray-100"
+        @click="clearSelection"
+      >
+        선택 해제
+      </button>
+    </div>
+
+    <div
       v-if="viewMode === 'table'"
       class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
     >
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-slate-50">
           <tr>
+            <th class="w-14 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">선택</th>
             <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">이름</th>
             <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">확장자</th>
             <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">크기</th>
@@ -148,11 +418,57 @@ const gridClassName = computed(() => {
 
         <tbody class="divide-y divide-gray-100 bg-white">
           <tr
+            v-if="showParentNavigator"
+            class="cursor-pointer transition hover:bg-slate-50"
+            :class="{ 'ring-2 ring-blue-300 bg-blue-50': dragTargetId === '__parent__' }"
+            @click="fileStore.goBack()"
+            @dragover="onDragOverParentNavigator"
+            @dragleave="onDragLeaveParentNavigator"
+            @drop="onDropToParentNavigator"
+          >
+            <td class="px-4 py-4 text-gray-300">-</td>
+            <td class="px-6 py-4">
+              <div class="flex items-center gap-3">
+                <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+                  <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </div>
+                <div>
+                  <p class="text-sm font-semibold text-gray-900">../</p>
+                  <p class="text-xs text-gray-400">상위 폴더로 이동 또는 드롭</p>
+                </div>
+              </div>
+            </td>
+            <td class="px-6 py-4 text-sm text-gray-500">-</td>
+            <td class="px-6 py-4 text-sm text-gray-500">-</td>
+            <td class="px-6 py-4 text-sm text-gray-500">-</td>
+            <td class="px-6 py-4 text-sm text-gray-500">폴더 이동</td>
+            <td class="px-6 py-4 text-right text-sm text-blue-600">상위 폴더</td>
+          </tr>
+
+          <tr
             v-for="(file, index) in files"
             :key="file.id || file.idx || `${getFileName(file)}-${index}`"
             class="cursor-pointer transition hover:bg-slate-50"
+            :class="{ 'ring-2 ring-blue-300 bg-blue-50': String(dragTargetId) === String(file.id) }"
+            :draggable="isMovable(file)"
             @click="openFile(file)"
+            @dragstart="onDragStart($event, file)"
+            @dragend="onDragEnd"
+            @dragover="onDragOverFolder($event, file)"
+            @dragleave="onDragLeaveFolder(file)"
+            @drop="onDropToFolder($event, file)"
           >
+            <td class="px-4 py-4" @click.stop>
+              <input
+                v-if="deleteMode !== 'permanent'"
+                type="checkbox"
+                class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                :checked="selectedIdSet.has(String(file.id))"
+                @change="toggleFileSelection(file.id, $event.target.checked)"
+              />
+            </td>
             <td class="px-6 py-4">
               <div class="flex items-center gap-3">
                 <div
@@ -179,7 +495,7 @@ const gridClassName = computed(() => {
 
                 <div class="min-w-0">
                   <p class="truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
-                  <p class="truncate text-xs text-gray-400">{{ file.location || '내 드라이브' }}</p>
+                  <p class="truncate text-xs text-gray-400">{{ file.location || "내 드라이브" }}</p>
                 </div>
               </div>
             </td>
@@ -212,7 +528,7 @@ const gridClassName = computed(() => {
               </div>
             </td>
             <td class="px-6 py-4">
-              <div class="flex justify-end gap-2">
+              <div class="flex flex-wrap justify-end gap-2">
                 <button
                   v-if="canDownload(file)"
                   type="button"
@@ -220,6 +536,22 @@ const gridClassName = computed(() => {
                   @click.stop="openFile(file)"
                 >
                   다운로드
+                </button>
+                <button
+                  v-if="canManageFolder(file)"
+                  type="button"
+                  class="action-button text-slate-600 hover:bg-slate-100"
+                  @click="onClickRenameFolder(file, $event)"
+                >
+                  이름 변경
+                </button>
+                <button
+                  v-if="canManageFolder(file)"
+                  type="button"
+                  class="action-button text-indigo-600 hover:bg-indigo-50"
+                  @click="onClickShowFolderProperties(file, $event)"
+                >
+                  속성
                 </button>
                 <button
                   type="button"
@@ -241,32 +573,51 @@ const gridClassName = computed(() => {
       :class="gridClassName"
     >
       <article
+        v-if="showParentNavigator"
+        class="group rounded-2xl border border-dashed border-gray-300 bg-slate-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+        :class="{ 'ring-2 ring-blue-300 border-blue-300 bg-blue-50/60': dragTargetId === '__parent__' }"
+        @click="fileStore.goBack()"
+        @dragover="onDragOverParentNavigator"
+        @dragleave="onDragLeaveParentNavigator"
+        @drop="onDropToParentNavigator"
+      >
+        <div class="mb-4 flex items-start justify-between gap-3">
+          <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+            </svg>
+          </div>
+        </div>
+        <p class="truncate text-sm font-semibold text-gray-900">../</p>
+        <p class="mt-1 text-xs text-gray-400">상위 폴더로 이동 또는 드롭</p>
+      </article>
+
+      <article
         v-for="(file, index) in files"
         :key="file.id || file.idx || `${getFileName(file)}-${index}`"
         class="group rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+        :class="{ 'ring-2 ring-blue-300 border-blue-300 bg-blue-50/60': String(dragTargetId) === String(file.id) }"
+        :draggable="isMovable(file)"
+        @dragstart="onDragStart($event, file)"
+        @dragend="onDragEnd"
+        @dragover="onDragOverFolder($event, file)"
+        @dragleave="onDragLeaveFolder(file)"
+        @drop="onDropToFolder($event, file)"
       >
         <div class="mb-4 flex items-start justify-between gap-3">
-          <div
-            class="flex h-12 w-12 items-center justify-center rounded-2xl"
-            :class="file.type === 'folder' ? 'bg-amber-100 text-amber-600' : 'bg-blue-50 text-blue-600'"
+          <label
+            v-if="deleteMode !== 'permanent'"
+            class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/90 shadow-sm"
+            @click.stop
           >
-            <svg
-              v-if="file.type === 'folder'"
-              class="h-6 w-6"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path d="M2 6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6Z" />
-            </svg>
-            <svg
-              v-else
-              class="h-6 w-6"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" />
-            </svg>
-          </div>
+            <input
+              type="checkbox"
+              class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              :checked="selectedIdSet.has(String(file.id))"
+              @change="toggleFileSelection(file.id, $event.target.checked)"
+            />
+          </label>
+          <span v-else class="h-6 w-6"></span>
 
           <button
             type="button"
@@ -279,9 +630,31 @@ const gridClassName = computed(() => {
           </button>
         </div>
 
+        <div
+          class="flex h-12 w-12 items-center justify-center rounded-2xl"
+          :class="file.type === 'folder' ? 'bg-amber-100 text-amber-600' : 'bg-blue-50 text-blue-600'"
+        >
+          <svg
+            v-if="file.type === 'folder'"
+            class="h-6 w-6"
+            fill="currentColor"
+            viewBox="0 0 20 20"
+          >
+            <path d="M2 6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6Z" />
+          </svg>
+          <svg
+            v-else
+            class="h-6 w-6"
+            fill="currentColor"
+            viewBox="0 0 20 20"
+          >
+            <path d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" />
+          </svg>
+        </div>
+
         <button
           type="button"
-          class="w-full text-left"
+          class="mt-4 w-full text-left"
           @click="openFile(file)"
         >
           <p class="truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
@@ -314,6 +687,23 @@ const gridClassName = computed(() => {
           >
             잠금
           </span>
+        </div>
+
+        <div v-if="canManageFolder(file)" class="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            class="w-full rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+            @click="onClickRenameFolder(file, $event)"
+          >
+            이름 변경
+          </button>
+          <button
+            type="button"
+            class="w-full rounded-xl bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-100"
+            @click="onClickShowFolderProperties(file, $event)"
+          >
+            속성 보기
+          </button>
         </div>
 
         <div class="mt-4 grid gap-2" :class="canDownload(file) ? 'grid-cols-2' : 'grid-cols-1'">

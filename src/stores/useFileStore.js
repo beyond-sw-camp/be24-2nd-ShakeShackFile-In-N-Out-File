@@ -4,8 +4,13 @@ import {
   clearTrash as clearTrashApi,
   createFolder as createFolderApi,
   deleteFilePermanently as deleteFilePermanentlyApi,
+  fetchFolderProperties as fetchFolderPropertiesApi,
   fetchFileList as fetchFileListApi,
+  fetchStorageSummary as fetchStorageSummaryApi,
   moveFileToTrash as moveFileToTrashApi,
+  moveFileToFolder as moveFileToFolderApi,
+  moveFilesToFolder as moveFilesToFolderApi,
+  renameFolder as renameFolderApi,
 } from "@/api/filesApi.js";
 
 const FILE_LOCATION_LABEL = "내 드라이브";
@@ -138,6 +143,9 @@ export const useFileStore = defineStore("file", () => {
   const isLoading = ref(false);
   const loadError = ref("");
   const hasLoaded = ref(false);
+  const storageSummary = ref(null);
+  const storageLoading = ref(false);
+  const storageError = ref("");
 
   const fileById = computed(() => {
     return new Map(allFiles.value.map((file) => [String(file.id), file]));
@@ -152,8 +160,16 @@ export const useFileStore = defineStore("file", () => {
   });
 
   const currentFolderPath = computed(() => {
+    return getFolderPath(currentFolderId.value);
+  });
+
+  const getFolderPath = (folderId) => {
+    if (folderId == null) {
+      return [];
+    }
+
     const path = [];
-    let cursor = currentFolder.value;
+    let cursor = fileById.value.get(String(folderId)) || null;
 
     while (cursor) {
       path.unshift(cursor);
@@ -164,7 +180,7 @@ export const useFileStore = defineStore("file", () => {
     }
 
     return path;
-  });
+  };
 
   const syncCurrentFolder = () => {
     if (currentFolderId.value == null) {
@@ -186,6 +202,7 @@ export const useFileStore = defineStore("file", () => {
       allFiles.value = decorateLocations(fileList.map(normalizeFileRecord));
       hasLoaded.value = true;
       syncCurrentFolder();
+      fetchStorageSummary().catch(() => {});
       return allFiles.value;
     } catch (error) {
       loadError.value =
@@ -264,6 +281,15 @@ export const useFileStore = defineStore("file", () => {
     }
   };
 
+  const navigateToFolder = (folderId) => {
+    if (folderId == null) {
+      currentFolderId.value = null;
+      return;
+    }
+
+    enterFolder(folderId);
+  };
+
   const goBack = () => {
     if (!currentFolderId.value) return;
 
@@ -271,16 +297,49 @@ export const useFileStore = defineStore("file", () => {
     currentFolderId.value = activeFolder?.parentId ?? null;
   };
 
-  const moveFileToFolder = (fileId, folderId) => {
-    const targetFile = allFiles.value.find(
-      (file) => String(file.id) === String(fileId),
+  const moveFileToFolder = async (fileId, folderId) => {
+    await moveFileToFolderApi(fileId, folderId);
+    await fetchFiles();
+  };
+
+  const moveFilesToFolder = async (fileIds, folderId) => {
+    const normalizedIds = Array.from(
+      new Set((fileIds || []).map((value) => Number(value)).filter(Number.isFinite)),
     );
 
-    if (targetFile) {
-      targetFile.parentId = folderId;
-      targetFile.location =
-        allFiles.value.find((file) => String(file.id) === String(folderId))?.name ||
-        FILE_LOCATION_LABEL;
+    if (!normalizedIds.length) {
+      return;
+    }
+
+    await moveFilesToFolderApi(normalizedIds, folderId);
+    await fetchFiles();
+  };
+
+  const renameFolder = async (folderId, folderName) => {
+    await renameFolderApi(folderId, folderName.trim());
+    await fetchFiles();
+  };
+
+  const fetchFolderProperties = async (folderId) => {
+    return fetchFolderPropertiesApi(folderId);
+  };
+
+  const fetchStorageSummary = async () => {
+    storageLoading.value = true;
+    storageError.value = "";
+
+    try {
+      const summary = await fetchStorageSummaryApi();
+      storageSummary.value = summary;
+      return summary;
+    } catch (error) {
+      storageError.value =
+        error?.response?.data?.message ||
+        error?.message ||
+        "저장 공간 통계를 불러오지 못했습니다.";
+      throw error;
+    } finally {
+      storageLoading.value = false;
     }
   };
 
@@ -292,6 +351,9 @@ export const useFileStore = defineStore("file", () => {
     isLoading,
     loadError,
     hasLoaded,
+    storageSummary,
+    storageLoading,
+    storageError,
     driveFiles,
     sharedFiles,
     recentFiles,
@@ -303,7 +365,13 @@ export const useFileStore = defineStore("file", () => {
     permanentlyDelete,
     emptyTrash,
     enterFolder,
+    navigateToFolder,
     goBack,
     moveFileToFolder,
+    moveFilesToFolder,
+    renameFolder,
+    fetchFolderProperties,
+    getFolderPath,
+    fetchStorageSummary,
   };
 });

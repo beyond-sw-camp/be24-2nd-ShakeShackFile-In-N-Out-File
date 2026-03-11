@@ -38,6 +38,16 @@ const extensionFilter = ref("all");
 const sizeFilter = ref("all");
 const sortOption = ref("updatedAt-desc");
 
+const renameTarget = ref(null);
+const renameValue = ref("");
+const renameError = ref("");
+const isRenaming = ref(false);
+
+const propertyTarget = ref(null);
+const propertySummary = ref(null);
+const propertyError = ref("");
+const isPropertyLoading = ref(false);
+
 const sizeOptions = [
   { label: "전체 크기", value: "all" },
   { label: "10MB 이하", value: "small" },
@@ -63,33 +73,92 @@ const extensionOptions = computed(() => {
   return ["all", ...new Set(extensions).values()];
 });
 
+const formatBytes = (totalSize) => {
+  const size = Number(totalSize || 0);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const unitIndex = Math.min(
+    Math.floor(Math.log(size) / Math.log(1024)),
+    units.length - 1,
+  );
+  const value = size / 1024 ** unitIndex;
+  const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
+
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`;
+};
+
+const formatDisplayDate = (value) => {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+};
+
 const totalSizeLabel = computed(() => {
   const totalSize = filteredFiles.value.reduce(
     (sum, file) => sum + Number(file?.sizeBytes || 0),
     0,
   );
 
-  if (totalSize <= 0) {
-    return "0 B";
-  }
+  return formatBytes(totalSize);
+});
 
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const unitIndex = Math.min(
-    Math.floor(Math.log(totalSize) / Math.log(1024)),
-    units.length - 1,
-  );
-  const value = totalSize / 1024 ** unitIndex;
-  const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
-
-  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`;
+const folderPathSegments = computed(() => {
+  return [
+    { id: null, name: FILE_ROOT_LABEL },
+    ...fileStore.currentFolderPath.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+    })),
+  ];
 });
 
 const folderPathLabel = computed(() => {
-  if (!fileStore.currentFolderPath?.length) {
+  return folderPathSegments.value.map((segment) => segment.name).join(" / ");
+});
+
+const propertyPathLabel = computed(() => {
+  if (!propertyTarget.value?.id) {
     return FILE_ROOT_LABEL;
   }
 
-  return [FILE_ROOT_LABEL, ...fileStore.currentFolderPath.map((folder) => folder.name)].join(" / ");
+  return [
+    FILE_ROOT_LABEL,
+    ...fileStore.getFolderPath(propertyTarget.value.id).map((folder) => folder.name),
+  ].join(" / ");
+});
+
+const currentFolderVisibleSummary = computed(() => {
+  if (!fileStore.currentFolder) {
+    return null;
+  }
+
+  const visibleFiles = props.files.filter((file) => file?.type !== "folder");
+  const visibleFolders = props.files.filter((file) => file?.type === "folder");
+  const visibleSize = visibleFiles.reduce(
+    (sum, file) => sum + Number(file?.sizeBytes || 0),
+    0,
+  );
+
+  return {
+    visibleChildCount: props.files.length,
+    visibleFileCount: visibleFiles.length,
+    visibleFolderCount: visibleFolders.length,
+    visibleSizeLabel: formatBytes(visibleSize),
+  };
 });
 
 const hasActiveFilters = computed(() => {
@@ -165,6 +234,83 @@ const handleDelete = (fileId) => {
   emit("delete", fileId);
 };
 
+const navigateToFolder = (folderId) => {
+  fileStore.navigateToFolder(folderId);
+};
+
+const openRenameFolder = (folder) => {
+  if (!folder || folder.type !== "folder") {
+    return;
+  }
+
+  renameTarget.value = folder;
+  renameValue.value = folder.name || folder.fileOriginName || "";
+  renameError.value = "";
+};
+
+const closeRenameModal = () => {
+  renameTarget.value = null;
+  renameValue.value = "";
+  renameError.value = "";
+  isRenaming.value = false;
+};
+
+const submitRenameFolder = async () => {
+  const normalizedName = renameValue.value.trim();
+  if (!renameTarget.value?.id) {
+    return;
+  }
+
+  if (!normalizedName) {
+    renameError.value = "폴더 이름을 입력해 주세요.";
+    return;
+  }
+
+  isRenaming.value = true;
+  renameError.value = "";
+
+  try {
+    await fileStore.renameFolder(renameTarget.value.id, normalizedName);
+    closeRenameModal();
+  } catch (error) {
+    renameError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      "폴더 이름을 변경하지 못했습니다.";
+  } finally {
+    isRenaming.value = false;
+  }
+};
+
+const openFolderProperties = async (folder) => {
+  if (!folder || folder.type !== "folder") {
+    return;
+  }
+
+  propertyTarget.value = folder;
+  propertySummary.value = null;
+  propertyError.value = "";
+  isPropertyLoading.value = true;
+
+  try {
+    propertySummary.value = await fileStore.fetchFolderProperties(folder.id);
+  } catch (error) {
+    propertyError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      "폴더 속성을 불러오지 못했습니다.";
+  } finally {
+    isPropertyLoading.value = false;
+  }
+};
+
+const closePropertyModal = () => {
+  propertyTarget.value = null;
+  propertySummary.value = null;
+  propertyError.value = "";
+  isPropertyLoading.value = false;
+};
+
 onMounted(() => {
   if (!fileStore.hasLoaded && !fileStore.isLoading) {
     fileStore.fetchFiles().catch(() => {});
@@ -194,17 +340,77 @@ onMounted(() => {
     >
       <div class="min-w-0">
         <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">현재 위치</p>
-        <p class="truncate text-sm font-semibold text-gray-700">{{ folderPathLabel }}</p>
+        <div class="mt-1 flex flex-wrap items-center gap-1 text-sm font-semibold text-gray-700">
+          <template v-for="(segment, index) in folderPathSegments" :key="`${segment.id ?? 'root'}-${index}`">
+            <button
+              type="button"
+              class="rounded-full px-2 py-1 transition hover:bg-slate-100"
+              :class="{ 'text-blue-600': index !== folderPathSegments.length - 1 }"
+              @click="navigateToFolder(segment.id)"
+            >
+              {{ segment.name }}
+            </button>
+            <span v-if="index < folderPathSegments.length - 1" class="text-gray-300">/</span>
+          </template>
+        </div>
       </div>
 
-      <button
-        v-if="fileStore.currentFolder"
-        type="button"
-        class="rounded-full border border-gray-200 px-3 py-1.5 text-sm font-semibold text-gray-600 transition hover:bg-gray-50"
-        @click="fileStore.goBack()"
-      >
-        상위 폴더로
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          v-if="fileStore.currentFolder"
+          type="button"
+          class="rounded-full border border-gray-200 px-3 py-1.5 text-sm font-semibold text-gray-600 transition hover:bg-gray-50"
+          @click="openRenameFolder(fileStore.currentFolder)"
+        >
+          이름 변경
+        </button>
+        <button
+          v-if="fileStore.currentFolder"
+          type="button"
+          class="rounded-full border border-blue-200 px-3 py-1.5 text-sm font-semibold text-blue-600 transition hover:bg-blue-50"
+          @click="openFolderProperties(fileStore.currentFolder)"
+        >
+          속성 보기
+        </button>
+        <button
+          v-if="fileStore.currentFolder"
+          type="button"
+          class="rounded-full border border-gray-200 px-3 py-1.5 text-sm font-semibold text-gray-600 transition hover:bg-gray-50"
+          @click="fileStore.goBack()"
+        >
+          상위 폴더로
+        </button>
+      </div>
+    </div>
+
+    <div
+      v-if="showFolderNavigation && currentFolderVisibleSummary"
+      class="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+    >
+      <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">현재 폴더 항목</p>
+        <p class="mt-2 text-2xl font-bold text-gray-900">
+          {{ currentFolderVisibleSummary.visibleChildCount }}
+        </p>
+      </div>
+      <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">현재 폴더 파일</p>
+        <p class="mt-2 text-2xl font-bold text-gray-900">
+          {{ currentFolderVisibleSummary.visibleFileCount }}
+        </p>
+      </div>
+      <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">현재 폴더 하위 폴더</p>
+        <p class="mt-2 text-2xl font-bold text-gray-900">
+          {{ currentFolderVisibleSummary.visibleFolderCount }}
+        </p>
+      </div>
+      <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">현재 폴더 파일 크기</p>
+        <p class="mt-2 text-2xl font-bold text-gray-900">
+          {{ currentFolderVisibleSummary.visibleSizeLabel }}
+        </p>
+      </div>
     </div>
 
     <div class="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -284,6 +490,7 @@ onMounted(() => {
               class="file-filter__input min-w-[108px]"
               @change="setGridSize($event.target.value)"
             >
+              <option value="xsmall">최소 카드</option>
               <option value="large">큰 카드</option>
               <option value="medium">중간 카드</option>
               <option value="small">작은 카드</option>
@@ -325,7 +532,15 @@ onMounted(() => {
     </div>
 
     <div v-else-if="filteredFiles.length > 0">
-      <FileTable :files="filteredFiles" :delete-mode="deleteMode" @delete-file="handleDelete" />
+      <FileTable
+        :files="filteredFiles"
+        :delete-mode="deleteMode"
+        :show-parent-navigator="showFolderNavigation && Boolean(fileStore.currentFolder)"
+        :parent-folder-target-id="fileStore.currentFolder?.parentId ?? null"
+        @delete-file="handleDelete"
+        @rename-folder="openRenameFolder"
+        @show-folder-properties="openFolderProperties"
+      />
     </div>
 
     <div
@@ -333,6 +548,164 @@ onMounted(() => {
       class="rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-14 text-center text-sm text-gray-400"
     >
       표시할 파일이 없습니다.
+    </div>
+
+    <div
+      v-if="renameTarget"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4"
+      @click.self="closeRenameModal"
+    >
+      <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">폴더 이름 변경</p>
+            <h3 class="mt-1 text-xl font-bold text-gray-900">{{ renameTarget.name }}</h3>
+          </div>
+          <button
+            type="button"
+            class="rounded-full p-2 text-gray-400 transition hover:bg-slate-100 hover:text-gray-600"
+            @click="closeRenameModal"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <label class="mt-5 block">
+          <span class="mb-2 block text-sm font-semibold text-gray-600">새 폴더 이름</span>
+          <input
+            v-model="renameValue"
+            type="text"
+            maxlength="100"
+            class="file-filter__input"
+            placeholder="폴더 이름을 입력하세요"
+            @keydown.enter.prevent="submitRenameFolder"
+          />
+        </label>
+
+        <p v-if="renameError" class="mt-3 text-sm text-rose-500">
+          {{ renameError }}
+        </p>
+
+        <div class="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 transition hover:bg-gray-50"
+            @click="closeRenameModal"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            class="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+            :disabled="isRenaming"
+            @click="submitRenameFolder"
+          >
+            {{ isRenaming ? "변경 중..." : "이름 저장" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="propertyTarget"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4"
+      @click.self="closePropertyModal"
+    >
+      <div class="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">폴더 속성</p>
+            <h3 class="mt-1 text-xl font-bold text-gray-900">
+              {{ propertySummary?.folderName || propertyTarget.name }}
+            </h3>
+            <p class="mt-2 text-sm text-gray-500">{{ propertyPathLabel }}</p>
+          </div>
+          <button
+            type="button"
+            class="rounded-full p-2 text-gray-400 transition hover:bg-slate-100 hover:text-gray-600"
+            @click="closePropertyModal"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div
+          v-if="isPropertyLoading"
+          class="mt-6 rounded-2xl border border-dashed border-gray-200 bg-slate-50 px-4 py-10 text-center text-sm text-gray-500"
+        >
+          폴더 속성을 불러오는 중입니다.
+        </div>
+
+        <div
+          v-else-if="propertyError"
+          class="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-600"
+        >
+          {{ propertyError }}
+        </div>
+
+        <div v-else-if="propertySummary" class="mt-6 space-y-6">
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div class="rounded-2xl bg-slate-50 px-4 py-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">직접 포함 항목</p>
+              <p class="mt-2 text-2xl font-bold text-gray-900">{{ propertySummary.directChildCount }}</p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-4 py-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">전체 하위 항목</p>
+              <p class="mt-2 text-2xl font-bold text-gray-900">{{ propertySummary.totalChildCount }}</p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-4 py-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">직접 포함 파일 크기</p>
+              <p class="mt-2 text-2xl font-bold text-gray-900">{{ formatBytes(propertySummary.directSize) }}</p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-4 py-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">전체 파일 크기</p>
+              <p class="mt-2 text-2xl font-bold text-gray-900">{{ formatBytes(propertySummary.totalSize) }}</p>
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="rounded-2xl border border-gray-200 px-4 py-4">
+              <p class="text-sm font-semibold text-gray-900">직접 포함 정보</p>
+              <dl class="mt-4 space-y-3 text-sm text-gray-600">
+                <div class="flex items-center justify-between gap-4">
+                  <dt>파일 수</dt>
+                  <dd class="font-semibold text-gray-900">{{ propertySummary.directFileCount }}</dd>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <dt>폴더 수</dt>
+                  <dd class="font-semibold text-gray-900">{{ propertySummary.directFolderCount }}</dd>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <dt>마지막 수정</dt>
+                  <dd class="font-semibold text-gray-900">{{ formatDisplayDate(propertySummary.lastModifyDate) }}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="rounded-2xl border border-gray-200 px-4 py-4">
+              <p class="text-sm font-semibold text-gray-900">전체 하위 정보</p>
+              <dl class="mt-4 space-y-3 text-sm text-gray-600">
+                <div class="flex items-center justify-between gap-4">
+                  <dt>전체 파일 수</dt>
+                  <dd class="font-semibold text-gray-900">{{ propertySummary.totalFileCount }}</dd>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <dt>전체 폴더 수</dt>
+                  <dd class="font-semibold text-gray-900">{{ propertySummary.totalFolderCount }}</dd>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <dt>생성 시간</dt>
+                  <dd class="font-semibold text-gray-900">{{ formatDisplayDate(propertySummary.uploadDate) }}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>

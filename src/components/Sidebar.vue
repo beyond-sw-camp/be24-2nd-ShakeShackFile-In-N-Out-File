@@ -1,9 +1,11 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import FileUpload from '@/components/function/FilesUpload.vue';
 import loadpost from '@/components/workspace/loadpost';
+import { useFileStore } from '@/stores/useFileStore';
 
 const isSidebarOpen = ref(true) // 사이드바 토글 상태
+const fileStore = useFileStore()
 
 // 1. loadpost에서 정의된 상태와 함수를 가져옵니다.
 const { 
@@ -23,12 +25,44 @@ const scrollToTop = () => {
 
 onMounted(() => {
   side_list();
+  fileStore.fetchStorageSummary().catch(() => {})
 })
  
 // 사이드바 토글 함수
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value
 }
+
+const formatBytes = (bytes) => {
+  const size = Number(bytes || 0)
+  if (!Number.isFinite(size) || size <= 0) {
+    return '0 B'
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const unitIndex = Math.min(
+    Math.floor(Math.log(size) / Math.log(1024)),
+    units.length - 1,
+  )
+  const value = size / 1024 ** unitIndex
+  const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
+
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
+}
+
+const storageSummary = computed(() => fileStore.storageSummary)
+
+const storageUsageWidth = computed(() => {
+  return `${Math.min(100, Math.max(0, Number(storageSummary.value?.usagePercent || 0)))}%`
+})
+
+const storageUsageText = computed(() => {
+  if (!storageSummary.value) {
+    return '저장 공간 통계 불러오는 중'
+  }
+
+  return `${formatBytes(storageSummary.value.usedBytes)} / ${formatBytes(storageSummary.value.quotaBytes)} 사용`
+})
 </script>
 
 <template>
@@ -191,10 +225,19 @@ const toggleSidebar = () => {
               </RouterLink>
 
               <div class="w-full bg-[var(--bg-input)] rounded-full h-1.5 mb-2 overflow-hidden">
-                <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300" style="width: 45%"></div>
+                <div
+                  class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300"
+                  :style="{ width: storageUsageWidth }"
+                ></div>
               </div>
 
-              <p class="text-xs text-[var(--text-muted)] mb-4">15GB 중 6.75GB 사용</p>
+              <p class="text-xs text-[var(--text-muted)] mb-1">{{ storageUsageText }}</p>
+              <p v-if="storageSummary" class="text-[11px] text-[var(--text-muted)] mb-4">
+                {{ storageSummary.planLabel }} 플랜 · 휴지통 포함 {{ storageSummary.usagePercent }}%
+              </p>
+              <p v-else class="text-[11px] text-[var(--text-muted)] mb-4">
+                저장 공간 통계 확인 중
+              </p>
 
               <RouterLink
                 :to="{ name: 'payment' }"

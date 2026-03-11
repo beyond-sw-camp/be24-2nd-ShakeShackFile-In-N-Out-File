@@ -87,3 +87,35 @@ export async function clearTrash() {
   const response = await api.delete("/file/trash");
   return extractObjectResult(response?.data);
 }
+
+export async function moveFileToFolder(fileId, targetParentId) {
+  const response = await api.patch(`/file/${fileId}/move`, {
+    targetParentId,
+  });
+  return extractObjectResult(response?.data);
+}
+
+export async function moveFilesToFolder(fileIdList, targetParentId) {
+  const response = await api.patch("/file/move", {
+    fileIdxList: fileIdList,
+    targetParentId,
+  });
+  return extractObjectResult(response?.data);
+}
+
+export async function renameFolder(fileId, fileName) {
+  const response = await api.patch(`/file/${fileId}/rename`, {
+    fileName,
+  });
+  return extractObjectResult(response?.data);
+}
+
+export async function fetchFolderProperties(fileId) {
+  const response = await api.get(`/file/${fileId}/properties`);
+  return extractObjectResult(response?.data);
+}
+
+export async function fetchStorageSummary() {
+  const response = await api.get("/file/storage/summary");
+  return extractObjectResult(response?.data);
+}

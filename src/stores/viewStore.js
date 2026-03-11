@@ -4,7 +4,7 @@ const VIEW_MODE_KEY = "file-view-mode";
 const GRID_SIZE_KEY = "file-grid-size";
 const DEFAULT_VIEW_MODE = "table";
 const DEFAULT_GRID_SIZE = "medium";
-const GRID_SIZE_SET = new Set(["small", "medium", "large"]);
+const GRID_SIZE_SET = new Set(["xsmall", "small", "medium", "large"]);
 
 const readStorageValue = (key, fallback) => {
   if (typeof window === "undefined") {
