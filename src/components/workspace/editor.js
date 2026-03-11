@@ -54,7 +54,7 @@ import loadpost from './loadpost'
 //   },
 // })
 
-export async function initEditor(holderElement, room = 'default-room') {
+export async function initEditor(holderElement, room = 'default-room', initialData, idx) {
   if (!holderElement) throw new Error('holderElement is required')
 
   // Yjs setup
@@ -127,11 +127,13 @@ export async function initEditor(holderElement, room = 'default-room') {
       suppressLocal = false
     }
   }
+  // console.log(initialData);
 
   // Initialize EditorJS
   editor = new EditorJS({
     holder: holderElement,
     placeholder: '명령어 "/" 로 블록 추가',
+    data: initialData || {},
     tools,
     onReady: async () => {
       const initial = yText.toString()
@@ -186,8 +188,11 @@ export async function initEditor(holderElement, room = 'default-room') {
     await editor.isReady;
     const savedData = await editor.save(); 
 
+    console.log(idx);
+
     // FormData 대신 일반 객체(JSON) 생성
     const postData = {
+      idx : idx ?? null,
       title: yTitle.toString(),
       contents: JSON.stringify(savedData)
     };

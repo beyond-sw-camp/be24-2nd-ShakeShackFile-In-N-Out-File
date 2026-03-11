@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router';
 import FileUpload from '@/components/function/FilesUpload.vue';
 import loadpost from '@/components/workspace/loadpost';
 
@@ -29,6 +30,17 @@ onMounted(() => {
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value
 }
+
+const router = useRouter();
+const goToPost = (idx) => {
+  if (!idx) return;
+  
+  // 1. URL 주소를 /workspace/read/번호 로 변경
+  router.push(`/workspace/read/${idx}`);
+  
+  // 2. 만약 기존처럼 데이터를 바로 불러오는 로직이 필요하다면 함께 실행
+  // loadpost.read_post(idx); 
+};
 </script>
 
 <template>
@@ -127,7 +139,7 @@ const toggleSidebar = () => {
           <div
             v-for="item in personalItems"
             :key="item.post_idx"
-            @click="loadpost.read_post(item.post_idx)"
+            @click="goToPost(item.post_idx)"
             class="px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center gap-3 transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]"
           >
             <i class="fa-solid fa-file-lines w-4 text-center opacity-70"></i>
@@ -158,7 +170,7 @@ const toggleSidebar = () => {
           <div
             v-for="team in sharedItems"
             :key="team.post_idx"
-            @click="loadpost.read_post(item.post_idx)"
+            @click="goToPost(team.post_idx)"
             class="px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center gap-3 transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]"
           >
             <i class="fa-solid fa-file-lines w-4 text-center opacity-70"></i>

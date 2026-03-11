@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { initEditor } from '@/components/workspace/editor' // logic file
 import loadpost from '@/components/workspace/loadpost'
 
@@ -8,6 +9,13 @@ const editorHolder = ref(null)
 const editorApi = ref(null)
 const title = ref('')
 const remoteCursors = ref({})
+
+// 만약 타이틀이랑 컨텐츠가 있을 경우
+const route = useRoute();
+
+if (route.meta.initialData) {
+    title.value = route.meta.initialData.title;
+  }
 
 // 편의 computed
 const isValid = computed(() => title.value.trim().length > 0)
@@ -40,18 +48,6 @@ watch(title, (newVal) => {
     editorApi.value.updateTitleFromLocal(newVal)
   }
 })
-watch(() => loadpost.currentPost.value, (newPost) => {
-  if (newPost) {
-    // 1. 제목 바인딩 (yTitle이 ref라면)
-    yTitle.value = newPost.title;
-    
-    // 2. 에디터 데이터 렌더링
-    // editor.js에 renderData(data) 같은 함수가 있다면 호출
-    if (editor && newPost.contents) {
-        editor.render(newPost.contents);
-    }
-  }
-}, { deep: true });
 
 onMounted(async () => {
   // 초기 테마 설정 확인
@@ -62,7 +58,12 @@ onMounted(async () => {
   applyTheme(isDarkMode.value)
 
   // 에디터 초기화
-  editorApi.value = await initEditor(editorHolder.value, 'notion-room')
+  editorApi.value = await initEditor(
+    editorHolder.value,
+   'notion-room',
+   route.meta.initialData?.contents, // Editor.js 형식의 JSON 객체 )
+   route.meta.initialData?.idx ?? null // idx가 없으면 null을 보냄
+  )
 
   if (editorApi.value?.bindTitleRef) {
     editorApi.value.bindTitleRef(title)

@@ -15,6 +15,7 @@ const savePost = async (formData) => {
 const getPost = async (idx) => {
   try {
     // baseURL(/api) + 경로이므로 'api/'는 중복이라 제거했습니다.
+    console.log(idx);
     const response = await api.get(`/workspace/read/${idx}`);
     return response.data;
   } catch (error) {

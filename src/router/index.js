@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/useAuthStore'
 import NotFound from '@/views/NotFound.vue'
+import loadpost from '@/components/workspace/loadpost'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -72,16 +73,50 @@ const router = createRouter({
           component: () => import('../views/dashboard/StorageView.vue'),
           meta: { title: '저장용량', requiresAuth: true },
         },
-        { 
-          path: 'workspace', 
+        {
+          path: '/workspace', 
           name: 'workspace',
           component: () => import('../views/WorkSpace.vue'),
-          meta: { title: '에디터', requiresAuth: true }
+          meta: { title: '워크스페이스', requiresAuth: true },
+          children: [
+            {
+              // :id 뒤에 (\\d+)를 붙여 숫자만 매칭되도록 설정
+              path: 'read/:id(\\d+)', 
+              name: 'workspace_read',
+              component: () => import('../views/WorkSpace.vue'),
+              meta: { title: '읽기 전용 ', requiresAuth: true },
+
+              // 페이지 진입 전 실행되는 가드
+              beforeEnter: async (to, from, next) => {
+                try {
+                  // result는 이미 { idx, title, contents } 형태입니다.
+                  const result = await loadpost.read_post(to.params.id);
+                  
+                  console.log('라우터 가드에서 받은 데이터:', result);
+
+                  if (result && result.title !== undefined) {
+                    to.meta.initialData = {
+                      idx: result.idx, // 위에서 추가했다면 사용 가능
+                      title: result.title,
+                      contents: result.contents
+                    };
+                    next();
+                  } else {
+                    next({ name: 'not_found' });
+                  }
+                } catch (error) {
+                  console.error('진입 전 로드 에러:', error);
+                  next({ name: 'not_found' });
+                }
+              }
+            }
+          ],
         },
         // /main/* 하위의 잘못된 경로도 404로 보내기
         {
           path: ':pathMatch(.*)*',
           component: NotFound,
+          name : 'not_found',
           meta: { title: '404 - 페이지를 찾을 수 없습니다', requiresAuth: false }
         }
       ],
