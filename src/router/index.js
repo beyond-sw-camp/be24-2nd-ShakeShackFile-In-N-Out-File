@@ -87,27 +87,8 @@ const router = createRouter({
               meta: { title: '읽기 전용 ', requiresAuth: true },
 
               // 페이지 진입 전 실행되는 가드
-              beforeEnter: async (to, from, next) => {
-                try {
-                  // result는 이미 { idx, title, contents } 형태입니다.
-                  const result = await loadpost.read_post(to.params.id);
-                  
-                  console.log('라우터 가드에서 받은 데이터:', result);
-
-                  if (result && result.title !== undefined) {
-                    to.meta.initialData = {
-                      idx: result.idx, // 위에서 추가했다면 사용 가능
-                      title: result.title,
-                      contents: result.contents
-                    };
-                    next();
-                  } else {
-                    next({ name: 'not_found' });
-                  }
-                } catch (error) {
-                  console.error('진입 전 로드 에러:', error);
-                  next({ name: 'not_found' });
-                }
+              beforeEnter: (to, from, next) => {
+                fetchWorkspaceData(to, next);
               }
             }
           ],
@@ -143,7 +124,7 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   
   // 1. 초기화: 로컬 스토리지 데이터 복구
@@ -154,21 +135,67 @@ router.beforeEach((to, from, next) => {
   // 2. URL 파라미터에 accessToken이 있는지 확인 (소셜 로그인용)
   // to.query는 라우터가 분석한 URL 쿼리 파라미터입니다.
   const hasTokenInUrl = to.query.accessToken || to.query.token
-
   const isAuthenticated = !!authStore.token
 
   // 3. 네비게이션 가드 로직
   if (to.meta.requiresAuth) {
     // 인증이 필요한데 토큰이 없고, URL에도 토큰이 없다면 튕김
     if (!isAuthenticated && !hasTokenInUrl) {
-      next({ name: 'login' })
-    } else {
-      // 토큰이 있거나, 지금 막 URL을 통해 토큰을 가지고 들어오는 중이라면 허용
-      next()
+      return next({ name: 'login' })
     }
-  } else {
-    next()
   }
+
+  // 4. 워크스페이스 데이터 로드 로직 (방법 3 통합)
+  // 대상이 workspace_read 페이지이고, ID가 바뀔 때만 실행
+  if (to.name === 'workspace_read' && to.params.id) {
+    // 이전 페이지와 ID가 다르거나, 아예 처음 진입하는 경우 데이터 호출
+    if (to.params.id !== from.params.id) {
+      try {
+        const result = await loadpost.read_post(to.params.id);
+        
+        if (result && result.title !== undefined) {
+          // 데이터를 meta에 저장하여 컴포넌트에서 쓸 수 있게 함
+          to.meta.initialData = {
+            idx: result.idx,
+            title: result.title,
+            contents: result.contents
+          };
+          return next(); // 데이터 로드 성공 시 이동
+        } else {
+          return next({ name: 'not_found' });
+        }
+      } catch (error) {
+        console.error('워크스페이스 로드 중 에러:', error);
+        return next({ name: 'not_found' });
+      }
+    }
+  }
+
+  // 위 조건들에 해당하지 않는 일반적인 이동은 그대로 진행
+  next()
 })
+
+// 1. 데이터 로드 로직을 별도 함수로 분리 (중복 방지)
+const fetchWorkspaceData = async (to, next) => {
+  try {
+    const result = await loadpost.read_post(to.params.id);
+    console.log('라우터 가드에서 받은 데이터:', result);
+
+    if (result && result.title !== undefined) {
+      to.meta.initialData = {
+        idx: result.idx,
+        title: result.title,
+        contents: result.contents
+      };
+      next();
+    } else {
+      next({ name: 'not_found' });
+    }
+  } catch (error) {
+    console.error('데이터 로드 에러:', error);
+    next({ name: 'not_found' });
+  }
+};
+
 
 export default router

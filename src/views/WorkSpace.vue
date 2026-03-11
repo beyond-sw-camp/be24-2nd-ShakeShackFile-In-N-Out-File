@@ -1,16 +1,15 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { initEditor } from '@/components/workspace/editor' // logic file
-import loadpost from '@/components/workspace/loadpost'
+import { initEditor } from '@/components/workspace/editor' 
 
 // 로컬 상태
 const editorHolder = ref(null)
 const editorApi = ref(null)
 const title = ref('')
 const remoteCursors = ref({})
+const isEditorLoading = ref(false) 
 
-// 만약 타이틀이랑 컨텐츠가 있을 경우
 const route = useRoute();
 
 if (route.meta.initialData) {
@@ -38,13 +37,11 @@ const applyTheme = (isDark) => {
     localStorage.setItem('theme', 'light')
   }
 }
-// 1. 이 watch 로직을 추가하세요.
+
 watch(title, (newVal) => {
   if (editorApi.value?.__updateOnLocal) {
-    // bindTitleRef에서 주입한 헬퍼 함수를 사용하여 Yjs 데이터 업데이트
     editorApi.value.__updateOnLocal(newVal)
   } else if (editorApi.value?.updateTitleFromLocal) {
-    // 또는 명시적인 헬퍼 함수 사용
     editorApi.value.updateTitleFromLocal(newVal)
   }
 })
@@ -57,25 +54,78 @@ onMounted(async () => {
   
   applyTheme(isDarkMode.value)
 
-  // 에디터 초기화
-  editorApi.value = await initEditor(
-    editorHolder.value,
-   'notion-room',
-   route.meta.initialData?.contents, // Editor.js 형식의 JSON 객체 )
-   route.meta.initialData?.idx ?? null // idx가 없으면 null을 보냄
-  )
+  const loadData = route.meta.initialData;
 
-  if (editorApi.value?.bindTitleRef) {
-    editorApi.value.bindTitleRef(title)
-  }
+  // 초기 에디터 초기화 - ★ 5번째 인자로 title 전달
+  if (editorHolder.value && loadData) {
+    editorApi.value = await initEditor(
+      editorHolder.value,
+      `notion-room-${loadData.idx}`,
+      loadData.contents,
+      loadData.idx ?? null,
+      loadData.title 
+    )
 
-  if (editorApi.value?.remoteCursorsRef) {
-    remoteCursors.value = editorApi.value.remoteCursorsRef.value
+    if (editorApi.value?.bindTitleRef) editorApi.value.bindTitleRef(title)
+    if (editorApi.value?.remoteCursorsRef) remoteCursors.value = editorApi.value.remoteCursorsRef.value
   }
 })
 
-onBeforeUnmount(() => {
-  if (editorApi.value?.destroy) editorApi.value.destroy()
+// ★ 핵심: 다른 게시글을 누르면 바뀜.
+watch(
+  () => route.params.id,
+  async (newId) => {
+    if (!newId || !route.meta.initialData) return
+
+    const newData = route.meta.initialData
+
+    // 1. 기존 에디터 자원 해제
+    if (editorApi.value) {
+      try {
+        if (editorApi.value.destroy) {
+          await editorApi.value.destroy()
+        }
+      } catch (e) {
+        console.warn('이전 에디터 해제 중 경고:', e)
+      }
+      editorApi.value = null
+    }
+
+    // 2. 제목 업데이트
+    title.value = newData.title
+
+    // 3. WebSocket 및 DOM 정리를 위한 충분한 여유 시간
+    await new Promise(resolve => setTimeout(resolve, 150)); 
+    await nextTick();
+
+    // 4. 새 데이터로 에디터 재초기화 - ★ 5번째 인자로 title 전달
+    if (editorHolder.value) {
+      try {
+        isEditorLoading.value = true
+
+        editorApi.value = await initEditor(
+          editorHolder.value,
+          `notion-room-${newData.idx}`,
+          newData.contents,
+          newData.idx ?? null,
+          newData.title
+        )
+
+        if (editorApi.value?.bindTitleRef) editorApi.value.bindTitleRef(title)
+        if (editorApi.value?.remoteCursorsRef) {
+          remoteCursors.value = editorApi.value.remoteCursorsRef.value
+        }
+      } catch (error) {
+        console.error('에디터 초기화 실패:', error)
+      } finally {
+        isEditorLoading.value = false 
+      }
+    }
+  }
+)
+
+onBeforeUnmount(async () => {
+  if (editorApi.value?.destroy) await editorApi.value.destroy()
 })
 </script>
 

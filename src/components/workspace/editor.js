@@ -26,35 +26,8 @@ import { ref, reactive } from 'vue'
 import postApi from '@/api/postApi'
 import loadpost from './loadpost'
 
-/**
- * initEditor(holderElement, room = 'default-room')
- */
-
-
-// // 커스텀 명령어 확장 생성
-// const Commands = Extension.create({
-//   name: 'mention',
-//   addOptions() {
-//     return {
-//       suggestion: {
-//         char: '/',
-//         command: ({ editor, range, props }) => {
-//           props.command({ editor, range })
-//         },
-//       },
-//     }
-//   },
-//   addProseMirrorPlugins() {
-//     return [
-//       Suggestion({
-//         editor: this.editor,
-//         ...this.options.suggestion,
-//       }),
-//     ]
-//   },
-// })
-
-export async function initEditor(holderElement, room = 'default-room', initialData, idx) {
+// ★ initialTitle 인자 추가
+export async function initEditor(holderElement, room, initialData, idx, initialTitle) {
   if (!holderElement) throw new Error('holderElement is required')
 
   // Yjs setup
@@ -62,6 +35,11 @@ export async function initEditor(holderElement, room = 'default-room', initialDa
   const provider = new WebsocketProvider('ws://10.10.10.100:8080', room, ydoc)
   const yText = ydoc.getText('contents')
   const yTitle = ydoc.getText('title')
+
+  // ★ 추가: Yjs 타이틀이 비어있고 초기 타이틀이 있다면 동기화
+  if (initialTitle && yTitle.toString() === '') {
+    yTitle.insert(0, initialTitle)
+  }
 
   // awareness presence
   const awareness = provider.awareness
@@ -106,17 +84,13 @@ export async function initEditor(holderElement, room = 'default-room', initialDa
   let editor = null
   let suppressLocal = false
 
-  // ⭐ 수정된 renderFromY: 안전장치 추가
   async function renderFromY(yval) {
     if (!editor) return
-    if (!yval || yval === "") return // 빈 데이터면 렌더링 스킵
+    if (!yval || yval === "") return 
     
     try {
-      // 에디터가 준비될 때까지 기다림 (TypeError: render of undefined 방지)
       await editor.isReady; 
-      
       const parsed = JSON.parse(yval)
-      // blocks가 유효한 배열인지 확인 (Incorrect data 방지)
       if (parsed && Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
         suppressLocal = true
         await editor.blocks.render(parsed.blocks)
@@ -127,7 +101,6 @@ export async function initEditor(holderElement, room = 'default-room', initialDa
       suppressLocal = false
     }
   }
-  // console.log(initialData);
 
   // Initialize EditorJS
   editor = new EditorJS({
@@ -159,7 +132,6 @@ export async function initEditor(holderElement, room = 'default-room', initialDa
     }
   })
 
-  // bindTitleRef (그대로 유지)
   function bindTitleRef(titleRef) {
     if (!titleRef) return
     const t0 = yTitle.toString()
@@ -181,40 +153,29 @@ export async function initEditor(holderElement, room = 'default-room', initialDa
     }
   }
 
-  // savePost (그대로 유지)
   async function savePost() {
-  if (!editor) return;
-  try {
-    await editor.isReady;
-    const savedData = await editor.save(); 
+    if (!editor) return;
+    try {
+      await editor.isReady;
+      const savedData = await editor.save(); 
 
-    console.log(idx);
+      const postData = {
+        idx : idx ?? null,
+        title: yTitle.toString(), // 이제 초기화된 yTitle을 안정적으로 가져옵니다.
+        contents: JSON.stringify(savedData)
+      };
 
-    // FormData 대신 일반 객체(JSON) 생성
-    const postData = {
-      idx : idx ?? null,
-      title: yTitle.toString(),
-      contents: JSON.stringify(savedData)
-    };
+      const response = await postApi.savePost(postData);
+      await loadpost.side_list();
 
-    /**
-     * 수정 포인트:
-     * 1. 토큰을 여기서 직접 가져올 필요가 없습니다. (인터셉터가 Pinia에서 꺼내서 넣어줌)
-     * 2. fetch 문법({method, body}) 대신 위에서 정의한 서비스 함수를 사용합니다.
-     */
-    const response = await postApi.savePost(postData);
-    await loadpost.side_list();
-
-    // axios는 성공 시 데이터 자체를 반환하므로 바로 사용 가능합니다.
-    console.log('저장 성공:', response);
-    return response;
-    
-  } catch (e) {
-    console.error('savePost error:', e);
+      console.log('저장 성공:', response);
+      return response;
+      
+    } catch (e) {
+      console.error('savePost error:', e);
+    }
   }
-}
 
-  // awareness listeners (그대로 유지)
   awareness.on('update', () => {
     const states = awareness.getStates()
     const remotes = {}
@@ -237,7 +198,6 @@ export async function initEditor(holderElement, room = 'default-room', initialDa
     remoteCursorsRef.value = remotes
   })
 
-  // yText observe (그대로 유지)
   yText.observe(event => {
     if (event.transaction.local) return 
     const val = yText.toString()
