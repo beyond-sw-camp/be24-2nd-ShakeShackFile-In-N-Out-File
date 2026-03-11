@@ -36,7 +36,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   const yText = ydoc.getText('contents')
   const yTitle = ydoc.getText('title')
 
-  // ★ 추가: Yjs 타이틀이 비어있고 초기 타이틀이 있다면 동기화
+  // 추가: Yjs 타이틀이 비어있고 초기 타이틀이 있다면 동기화
   if (initialTitle && yTitle.toString() === '') {
     yTitle.insert(0, initialTitle)
   }
@@ -102,11 +102,24 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     }
   }
 
+  // ★ 핵심 수정: 새 파일(빈 페이지) 생성 시 에디터 렌더링 충돌 방지
+  // 아무 데이터도 없을 때는 무조건 { blocks: [] } 가 들어가야 EditorJS가 뻗지 않습니다.
+  let parsedData = { blocks: [] }; 
+  try {
+    if (typeof initialData === 'string' && initialData.trim() !== '') {
+      parsedData = JSON.parse(initialData);
+    } else if (initialData && typeof initialData === 'object' && Object.keys(initialData).length > 0) {
+      parsedData = initialData;
+    }
+  } catch (e) {
+    console.warn('Data parsing failed, starting with empty editor', e);
+  }
+
   // Initialize EditorJS
   editor = new EditorJS({
     holder: holderElement,
     placeholder: '명령어 "/" 로 블록 추가',
-    data: initialData || {},
+    data: parsedData, // 빈 페이지 생성 시에도 완벽하게 대응되는 객체 주입
     tools,
     onReady: async () => {
       const initial = yText.toString()
@@ -131,6 +144,9 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       }
     }
   })
+
+  // 에디터가 온전히 준비될 때까지 기다림
+  await editor.isReady;
 
   function bindTitleRef(titleRef) {
     if (!titleRef) return
@@ -161,7 +177,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
       const postData = {
         idx : idx ?? null,
-        title: yTitle.toString(), // 이제 초기화된 yTitle을 안정적으로 가져옵니다.
+        title: yTitle.toString(), 
         contents: JSON.stringify(savedData)
       };
 

@@ -13,8 +13,8 @@ const isEditorLoading = ref(false)
 const route = useRoute();
 
 if (route.meta.initialData) {
-    title.value = route.meta.initialData.title;
-  }
+  title.value = route.meta.initialData.title;
+}
 
 // 편의 computed
 const isValid = computed(() => title.value.trim().length > 0)
@@ -75,9 +75,13 @@ onMounted(async () => {
 watch(
   () => route.params.id,
   async (newId) => {
-    if (!newId || !route.meta.initialData) return
+    // 라우터가 이동하고 meta 데이터가 반영될 시간을 확보
+    await nextTick();
+    
+    if (!newId) return
 
-    const newData = route.meta.initialData
+    // ★ 핵심 수정: 새 파일 생성 후 meta.initialData가 아직 도착하지 않았더라도 에러가 나지 않고 빈 에디터를 띄우도록 기본값 보장
+    const newData = route.meta.initialData || { idx: newId, title: '', contents: '' }
 
     // 1. 기존 에디터 자원 해제
     if (editorApi.value) {
@@ -92,11 +96,16 @@ watch(
     }
 
     // 2. 제목 업데이트
-    title.value = newData.title
+    title.value = newData.title || ''
 
     // 3. WebSocket 및 DOM 정리를 위한 충분한 여유 시간
     await new Promise(resolve => setTimeout(resolve, 150)); 
     await nextTick();
+
+    // 새 데이터로 에디터를 올리기 전 DOM을 확실히 비워주어 충돌 방지
+    if (editorHolder.value) {
+      editorHolder.value.innerHTML = "";
+    }
 
     // 4. 새 데이터로 에디터 재초기화 - ★ 5번째 인자로 title 전달
     if (editorHolder.value) {
