@@ -30,7 +30,6 @@ const toUploadRequestList = (files) => {
 export const parseUploadResponse = (responseData) => {
   if (!responseData) return [];
 
-  // Backend returns plain list, but defensive fallback keeps compatibility if wrapped response is used later.
   if (Array.isArray(responseData)) return responseData;
   if (Array.isArray(responseData?.result)) return responseData.result;
   if (Array.isArray(responseData?.data) && Array.isArray(responseData.data.result)) {
@@ -42,4 +41,10 @@ export const parseUploadResponse = (responseData) => {
 export function uploadFiles(files) {
   const fileRequestList = toUploadRequestList(files);
   return api.post("/file/upload", fileRequestList);
+}
+
+export function completePartitionUpload(payload) {
+  return api.post("/file/upload/complete", payload, {
+    timeout: 600000,
+  });
 }
