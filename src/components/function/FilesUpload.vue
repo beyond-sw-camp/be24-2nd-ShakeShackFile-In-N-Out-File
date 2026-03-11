@@ -189,21 +189,33 @@ const getExpectedUploadCount = (file) => {
   return Math.ceil(file.size / CHUNK_SIZE_BYTES)
 }
 
-const uploadFileByChunks = async (file, uploadMetas) => {
-  const expectedUploadCount = getExpectedUploadCount(file)
+const getUploadMetaCount = (file, firstUploadMeta) => {
+  const partitionCount = Number(firstUploadMeta?.partitionCount)
 
-  if (!Array.isArray(uploadMetas) || uploadMetas.length !== expectedUploadCount) {
+  if (firstUploadMeta?.partitioned === true && Number.isInteger(partitionCount) && partitionCount > 0) {
+    return partitionCount
+  }
+
+  return getExpectedUploadCount(file)
+}
+
+const uploadFileByChunks = async (file, uploadMetas) => {
+  const uploadChunkCount = Array.isArray(uploadMetas) ? uploadMetas.length : 0
+
+  if (uploadChunkCount === 0) {
     throw new Error(`${file?.name || "unknown-file"}의 업로드 메타데이터 개수가 맞지 않습니다.`)
   }
 
-  if (expectedUploadCount === 1) {
+  if (uploadChunkCount === 1) {
     await uploadToPresignedUrl(file, uploadMetas[0], file.name, file.type)
     return
   }
 
-  for (let chunkIndex = 0; chunkIndex < expectedUploadCount; chunkIndex++) {
+  for (let chunkIndex = 0; chunkIndex < uploadChunkCount; chunkIndex++) {
     const start = chunkIndex * CHUNK_SIZE_BYTES
-    const end = Math.min(start + CHUNK_SIZE_BYTES, file.size)
+    const end = chunkIndex === uploadChunkCount - 1
+      ? file.size
+      : Math.min(start + CHUNK_SIZE_BYTES, file.size)
     const chunkBlob = file.slice(start, end, file.type || "application/octet-stream")
 
     await uploadToPresignedUrl(
@@ -216,6 +228,10 @@ const uploadFileByChunks = async (file, uploadMetas) => {
 }
 
 const completeUploadedFile = async (file, uploadMetas, partitioned) => {
+  if (!partitioned) {
+    return
+  }
+
   const firstMeta = uploadMetas[0]
   const finalObjectKey = firstMeta?.finalObjectKey
   const chunkObjectKeys = partitioned
@@ -295,14 +311,18 @@ const handleUpload = async (event, uploadTypeLabel) => {
     let responseIndex = 0
 
     for (const targetFile of selectedFiles) {
-      const expectedUploadCount = getExpectedUploadCount(targetFile)
+      const firstUploadMeta = presignedResponses[responseIndex]
+      const expectedUploadCount = getUploadMetaCount(targetFile, firstUploadMeta)
       const uploadMetas = presignedResponses.slice(responseIndex, responseIndex + expectedUploadCount)
+      const partitioned = uploadMetas[0]?.partitioned === true
 
       uploadPhase.value = "uploading"
       await uploadFileByChunks(targetFile, uploadMetas)
 
-      uploadPhase.value = expectedUploadCount > 1 ? "merging" : "finalizing"
-      await completeUploadedFile(targetFile, uploadMetas, expectedUploadCount > 1)
+      if (partitioned) {
+        uploadPhase.value = "merging"
+        await completeUploadedFile(targetFile, uploadMetas, true)
+      }
 
       responseIndex += expectedUploadCount
       successList.push(targetFile.name)
