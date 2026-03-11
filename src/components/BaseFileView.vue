@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
+import FilePreviewModal from "@/components/FilePreviewModal.vue";
 import FileTable from "@/components/FileTable.vue";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
@@ -47,6 +48,7 @@ const propertyTarget = ref(null);
 const propertySummary = ref(null);
 const propertyError = ref("");
 const isPropertyLoading = ref(false);
+const previewTarget = ref(null);
 
 const sizeOptions = [
   { label: "전체 크기", value: "all" },
@@ -311,6 +313,18 @@ const closePropertyModal = () => {
   isPropertyLoading.value = false;
 };
 
+const openFilePreview = (file) => {
+  if (!file || file.type === "folder") {
+    return;
+  }
+
+  previewTarget.value = file;
+};
+
+const closeFilePreview = () => {
+  previewTarget.value = null;
+};
+
 onMounted(() => {
   if (!fileStore.hasLoaded && !fileStore.isLoading) {
     fileStore.fetchFiles().catch(() => {});
@@ -540,6 +554,7 @@ onMounted(() => {
         @delete-file="handleDelete"
         @rename-folder="openRenameFolder"
         @show-folder-properties="openFolderProperties"
+        @preview-file="openFilePreview"
       />
     </div>
 
@@ -707,6 +722,11 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <FilePreviewModal
+      :file="previewTarget"
+      @close="closeFilePreview"
+    />
   </div>
 </template>
 

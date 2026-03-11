@@ -119,3 +119,8 @@ export async function fetchStorageSummary() {
   const response = await api.get("/file/storage/summary");
   return extractObjectResult(response?.data);
 }
+
+export async function fetchTextPreview(fileId) {
+  const response = await api.get(`/file/${fileId}/text-preview`);
+  return extractObjectResult(response?.data);
+}

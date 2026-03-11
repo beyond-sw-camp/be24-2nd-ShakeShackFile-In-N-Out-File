@@ -7,6 +7,7 @@ import {
   fetchFolderProperties as fetchFolderPropertiesApi,
   fetchFileList as fetchFileListApi,
   fetchStorageSummary as fetchStorageSummaryApi,
+  fetchTextPreview as fetchTextPreviewApi,
   moveFileToTrash as moveFileToTrashApi,
   moveFileToFolder as moveFileToFolderApi,
   moveFilesToFolder as moveFilesToFolderApi,
@@ -324,6 +325,10 @@ export const useFileStore = defineStore("file", () => {
     return fetchFolderPropertiesApi(folderId);
   };
 
+  const fetchTextPreview = async (fileId) => {
+    return fetchTextPreviewApi(fileId);
+  };
+
   const fetchStorageSummary = async () => {
     storageLoading.value = true;
     storageError.value = "";
@@ -371,6 +376,7 @@ export const useFileStore = defineStore("file", () => {
     moveFilesToFolder,
     renameFolder,
     fetchFolderProperties,
+    fetchTextPreview,
     getFolderPath,
     fetchStorageSummary,
   };

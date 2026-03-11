@@ -3,6 +3,10 @@ import { computed, ref, watch } from "vue";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
 
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic"]);
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v"]);
+const INLINE_VIDEO_LIMIT_BYTES = 25 * 1024 * 1024;
+
 const props = defineProps({
   files: {
     type: Array,
@@ -22,7 +26,13 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["delete-file", "rename-folder", "show-folder-properties"]);
+const emit = defineEmits([
+  "delete-file",
+  "rename-folder",
+  "show-folder-properties",
+  "preview-file",
+]);
+
 const fileStore = useFileStore();
 const { viewMode, gridSize } = useViewStore();
 const dragTargetId = ref(null);
@@ -128,7 +138,26 @@ const isFolderDropTarget = (file) => {
   return canManageFolder(file);
 };
 
-const openFile = (file) => {
+const getPreviewUrl = (file) => {
+  return file?.downloadUrl || file?.presignedDownloadUrl || "";
+};
+
+const isInlineImagePreviewable = (file) => {
+  return file?.type !== "folder" && IMAGE_EXTENSIONS.has(getFileExtension(file)) && Boolean(getPreviewUrl(file));
+};
+
+const isInlineVideoPreviewable = (file) => {
+  const sizeBytes = Number(file?.sizeBytes || 0);
+  return (
+    file?.type !== "folder" &&
+    VIDEO_EXTENSIONS.has(getFileExtension(file)) &&
+    sizeBytes > 0 &&
+    sizeBytes <= INLINE_VIDEO_LIMIT_BYTES &&
+    Boolean(getPreviewUrl(file))
+  );
+};
+
+const handlePrimaryAction = (file) => {
   if (file?.type === "folder") {
     if (props.deleteMode === "permanent") {
       return;
@@ -138,10 +167,7 @@ const openFile = (file) => {
     return;
   }
 
-  const downloadUrl = file?.downloadUrl || file?.presignedDownloadUrl;
-  if (downloadUrl) {
-    window.open(downloadUrl, "_blank", "noopener,noreferrer");
-  }
+  emit("preview-file", file);
 };
 
 const onClickDelete = (file, event) => {
@@ -453,7 +479,7 @@ const gridClassName = computed(() => {
             class="cursor-pointer transition hover:bg-slate-50"
             :class="{ 'ring-2 ring-blue-300 bg-blue-50': String(dragTargetId) === String(file.id) }"
             :draggable="isMovable(file)"
-            @click="openFile(file)"
+            @click="handlePrimaryAction(file)"
             @dragstart="onDragStart($event, file)"
             @dragend="onDragEnd"
             @dragover="onDragOverFolder($event, file)"
@@ -529,14 +555,16 @@ const gridClassName = computed(() => {
             </td>
             <td class="px-6 py-4">
               <div class="flex flex-wrap justify-end gap-2">
-                <button
+                <a
                   v-if="canDownload(file)"
-                  type="button"
                   class="action-button text-blue-600 hover:bg-blue-50"
-                  @click.stop="openFile(file)"
+                  :href="getPreviewUrl(file)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  @click.stop
                 >
                   다운로드
-                </button>
+                </a>
                 <button
                   v-if="canManageFolder(file)"
                   type="button"
@@ -598,6 +626,7 @@ const gridClassName = computed(() => {
         class="group rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
         :class="{ 'ring-2 ring-blue-300 border-blue-300 bg-blue-50/60': String(dragTargetId) === String(file.id) }"
         :draggable="isMovable(file)"
+        @click="handlePrimaryAction(file)"
         @dragstart="onDragStart($event, file)"
         @dragend="onDragEnd"
         @dragover="onDragOverFolder($event, file)"
@@ -631,37 +660,61 @@ const gridClassName = computed(() => {
         </div>
 
         <div
-          class="flex h-12 w-12 items-center justify-center rounded-2xl"
-          :class="file.type === 'folder' ? 'bg-amber-100 text-amber-600' : 'bg-blue-50 text-blue-600'"
+          v-if="file.type === 'folder'"
+          class="flex h-36 items-center justify-center rounded-2xl bg-amber-50 text-amber-600"
         >
-          <svg
-            v-if="file.type === 'folder'"
-            class="h-6 w-6"
-            fill="currentColor"
-            viewBox="0 0 20 20"
-          >
+          <svg class="h-10 w-10" fill="currentColor" viewBox="0 0 20 20">
             <path d="M2 6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6Z" />
           </svg>
-          <svg
-            v-else
-            class="h-6 w-6"
-            fill="currentColor"
-            viewBox="0 0 20 20"
-          >
+        </div>
+
+        <div
+          v-else-if="isInlineImagePreviewable(file)"
+          class="h-36 overflow-hidden rounded-2xl bg-slate-100"
+        >
+          <img
+            :src="getPreviewUrl(file)"
+            :alt="getFileName(file)"
+            loading="lazy"
+            class="pointer-events-none h-full w-full object-cover"
+          />
+        </div>
+
+        <div
+          v-else-if="isInlineVideoPreviewable(file)"
+          class="relative h-36 overflow-hidden rounded-2xl bg-black"
+        >
+          <video
+            :src="getPreviewUrl(file)"
+            muted
+            playsinline
+            preload="metadata"
+            class="pointer-events-none h-full w-full object-cover opacity-90"
+          ></video>
+          <div class="absolute inset-0 flex items-center justify-center bg-black/15">
+            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-lg">
+              <svg class="ml-1 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M6 4.5v11l9-5.5-9-5.5Z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-else
+          class="flex h-36 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"
+        >
+          <svg class="h-10 w-10" fill="currentColor" viewBox="0 0 20 20">
             <path d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" />
           </svg>
         </div>
 
-        <button
-          type="button"
-          class="mt-4 w-full text-left"
-          @click="openFile(file)"
-        >
+        <div class="mt-4">
           <p class="truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
           <p class="mt-1 text-xs text-gray-400">
             {{ file.type === "folder" ? "폴더" : (getFileExtension(file) || "-").toUpperCase() }}
           </p>
-        </button>
+        </div>
 
         <dl class="mt-4 space-y-2 text-xs text-gray-500">
           <div class="flex items-center justify-between gap-3">
@@ -707,14 +760,16 @@ const gridClassName = computed(() => {
         </div>
 
         <div class="mt-4 grid gap-2" :class="canDownload(file) ? 'grid-cols-2' : 'grid-cols-1'">
-          <button
+          <a
             v-if="canDownload(file)"
-            type="button"
-            class="w-full rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-600 transition hover:bg-blue-100"
-            @click="openFile(file)"
+            :href="getPreviewUrl(file)"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="w-full rounded-xl bg-blue-50 px-3 py-2 text-center text-sm font-semibold text-blue-600 transition hover:bg-blue-100"
+            @click.stop
           >
             다운로드
-          </button>
+          </a>
           <button
             type="button"
             class="w-full rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-500 transition hover:bg-rose-100"
@@ -730,6 +785,9 @@ const gridClassName = computed(() => {
 
 <style scoped>
 .action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
   padding: 0.45rem 0.85rem;
   font-size: 0.78rem;
