@@ -85,7 +85,7 @@ const handleLogin = async () => {
       // 즉시 이동
       router.push({ name: 'main' });
     } else {
-      alert("서버가 인증 토큰을 보내지 않았습니다. 백엔드 ExposedHeaders 설정을 확인하세요.");
+      alert("회원 정보가 일치하지 않습니다.");
     }
   } catch (error) {
     loginErrorMessage.value = '로그인 정보가 일치하지 않습니다.';

@@ -47,25 +47,35 @@ const side_list = async () => {
 }
 // 상세 데이터를 담을 변수 추가
 const currentPost = ref({ title: '', contents: null });
+
 const read_post = async (idx) => {
     try {
         const response = await postApi.getPost(idx);
         console.log('워크스페이스 가져오기 성공:', response);
 
-        // 1. 데이터가 있는지 안전하게 확인
-        if (response && response.result && response.result.body) {
-            const data = response.result.body;
-            
-            // 데이터 할당
-            currentPost.value = {
-                title: data.title,
-                // contents가 문자열(JSON)로 온다면 파싱이 필요할 수 있습니다.
-                contents: typeof data.contents === 'string' ? JSON.parse(data.contents) : data.contents
-            };
+        const data = response.result.body;
 
+        let parsedContents;
+        try {
+            // 내용이 문자열이고 JSON 형식({ 로 시작)일 때만 파싱
+            if (typeof data.contents === 'string' && data.contents.trim().startsWith('{')) {
+                parsedContents = JSON.parse(data.contents);
+            } else {
+                parsedContents = data.contents;
+            }
+        } catch (jsonError) {
+            // 파싱 실패 시 원본 문자열을 그대로 사용 (에러 방지)
+            console.warn('JSON 파싱 실패, 원본 데이터를 사용합니다.');
+            parsedContents = data.contents;
         }
 
-        return response; 
+        currentPost.value = {
+            idx: data.idx,
+            title: data.title,
+            contents: parsedContents // { time, blocks, version } 구조의 객체
+        };
+
+        return currentPost.value;
         
     } catch (e) {
         console.error('side_list error:', e);
@@ -79,6 +89,5 @@ export default {
     isPersonalOpen,
     isSharedOpen,
     side_list,
-    read_post,
-    currentPost
+    read_post
 }

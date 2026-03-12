@@ -3,7 +3,7 @@ import axios from 'axios'
 import { useAuthStore } from '@/stores/useAuthStore'
 
 export const api = axios.create({
-  baseURL: '/api',
+  baseURL: 'http://localhost:8080',
   withCredentials: true, // Refresh Token 쿠키를 주고받기 위해 필수
   timeout: 5000,
 })
@@ -48,7 +48,7 @@ api.interceptors.response.use(
         // 백엔드의 재발급 API 호출 (withCredentials 덕분에 HttpOnly 쿠키가 자동 전송됨)
         // 무한 루프를 막기 위해 api 인스턴스 대신 순수 axios 사용
         const res = await axios.post('/auth/reissue', {}, { 
-          baseURL: '', // 프록시 설정을 타도록 빈 값 또는 환경변수 설정
+          baseURL: 'http://localhost:8080', // 프록시 설정을 타도록 빈 값 또는 환경변수 설정
           withCredentials: true 
         })
         
