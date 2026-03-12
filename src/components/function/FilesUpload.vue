@@ -254,7 +254,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import axios from "axios"
-import { completePartitionUpload, parseUploadResponse, uploadFiles } from "@/api/filesApi.js"
+import { abortPartitionUpload, completePartitionUpload, parseUploadResponse, uploadFiles } from "@/api/filesApi.js"
 import { useFileStore } from "@/stores/useFileStore"
 
 const isDropdownOpen = ref(false)
@@ -819,6 +819,30 @@ const buildUploadJobs = (selectedFiles, presignedResponses, createdItems) => {
   return uploadJobs
 }
 
+const cleanupPartitionUploadArtifacts = async (uploadJob) => {
+  if (!uploadJob?.partitioned) {
+    return
+  }
+
+  const chunkObjectKeys = (uploadJob.uploadMetas || [])
+    .map((meta) => meta?.objectKey)
+    .filter(Boolean)
+  const finalObjectKey = uploadJob.uploadMetas?.[0]?.finalObjectKey || null
+
+  if (!chunkObjectKeys.length && !finalObjectKey) {
+    return
+  }
+
+  try {
+    await abortPartitionUpload({
+      finalObjectKey,
+      chunkObjectKeys,
+    })
+  } catch (cleanupError) {
+    console.warn("[upload-cleanup] tmp cleanup failed:", cleanupError)
+  }
+}
+
 const uploadFileByChunks = async (file, uploadMetas, uploadItemId) => {
   const uploadChunkCount = Array.isArray(uploadMetas) ? uploadMetas.length : 0
 
@@ -984,6 +1008,8 @@ const runUploadJobs = async (uploadJobs, concurrency, parentId) => {
         completedUploadCount.value += 1
         successList[currentJobIndex] = currentJob.file.name
       } catch (error) {
+        await cleanupPartitionUploadArtifacts(currentJob)
+
         if (isAbortError(error)) {
           setUploadItemState(currentJob.uploadItemId, {
             status: "canceled",
