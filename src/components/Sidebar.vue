@@ -1,10 +1,12 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router';
 import FileUpload from '@/components/function/FilesUpload.vue';
 import loadpost from '@/components/workspace/loadpost';
+import { useFileStore } from '@/stores/useFileStore';
 import postApi from '@/api/postApi';
 
+const fileStore = useFileStore()
 const isSidebarOpen = ref(true) // 사이드바 토글 상태
 const openMenuId = ref(null) // 현재 열려있는 메뉴의 ID 관리
 
@@ -37,6 +39,9 @@ const closeMenu = () => {
 
 onMounted(() => {
   side_list();
+  fileStore.fetchStorageSummary().catch(() => {})
+
+  //
   window.addEventListener('click', closeMenu);
 })
 
@@ -49,6 +54,40 @@ const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value
 }
 
+const formatBytes = (bytes) => {
+  const size = Number(bytes || 0)
+  if (!Number.isFinite(size) || size <= 0) {
+    return '0 B'
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const unitIndex = Math.min(
+    Math.floor(Math.log(size) / Math.log(1024)),
+    units.length - 1,
+  )
+  const value = size / 1024 ** unitIndex
+  const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
+
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
+}
+
+const storageSummary = computed(() => fileStore.storageSummary)
+
+const storageUsageWidth = computed(() => {
+  return `${Math.min(100, Math.max(0, Number(storageSummary.value?.usagePercent || 0)))}%`
+})
+
+const storageUsageText = computed(() => {
+  if (!storageSummary.value) {
+    return '저장 공간 통계 불러오는 중'
+  }
+
+  return `${formatBytes(storageSummary.value.usedBytes)} / ${formatBytes(storageSummary.value.quotaBytes)} 사용`
+})
+
+const sidebarToggleStyle = computed(() => ({
+  left: isSidebarOpen.value ? 'calc(16rem - 0.75rem)' : '0.75rem',
+}))
 const router = useRouter();
 const goToPost = (idx) => {
   if (!idx) return;
@@ -79,7 +118,7 @@ const handleAction = async (action, idx) => {
 <template>
   <div class="relative">
     <aside 
-      class="bg-[var(--bg-main)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
+      class="bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
       :class="[
         isSidebarOpen ? 'w-64 overflow-visible' : 'w-0 border-r-0 overflow-hidden'
       ]"
@@ -286,10 +325,19 @@ const handleAction = async (action, idx) => {
               </RouterLink>
 
               <div class="w-full bg-[var(--bg-input)] rounded-full h-1.5 mb-2 overflow-hidden">
-                <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300" style="width: 45%"></div>
+                <div
+                  class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300"
+                  :style="{ width: storageUsageWidth }"
+                ></div>
               </div>
 
-              <p class="text-xs text-[var(--text-muted)] mb-4">15GB 중 6.75GB 사용</p>
+              <p class="text-xs text-[var(--text-muted)] mb-1">{{ storageUsageText }}</p>
+              <p v-if="storageSummary" class="text-[11px] text-[var(--text-muted)] mb-4">
+                {{ storageSummary.planLabel }} 플랜 · 휴지통 포함 {{ storageSummary.usagePercent }}%
+              </p>
+              <p v-else class="text-[11px] text-[var(--text-muted)] mb-4">
+                저장 공간 통계 확인 중
+              </p>
 
               <RouterLink
                 :to="{ name: 'payment' }"
@@ -305,8 +353,8 @@ const handleAction = async (action, idx) => {
 
     <button
       @click="toggleSidebar"
-      class="absolute top-4 z-50 w-8 h-8 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded-lg flex items-center justify-center text-[var(--text-main)] shadow-lg transition-all duration-300 hover:bg-[var(--bg-input)] hover:scale-110"
-      :class="isSidebarOpen ? 'left-[15rem]' : 'left-2'"
+      class="sidebar-toggle absolute top-4 z-50 flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--bg-elevated)] text-[var(--text-main)] shadow-lg transition-all duration-300 hover:bg-[var(--bg-input)]"
+      :style="sidebarToggleStyle"
       :title="isSidebarOpen ? '사이드바 숨기기' : '사이드바 보이기'"
     >
       <i class="fas transition-transform duration-300" :class="isSidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
@@ -334,5 +382,15 @@ nav::-webkit-scrollbar-thumb:hover {
 }
 .overflow-visible {
   overflow: visible !important; 
+}
+
+.sidebar-toggle {
+  transform: translateX(-50%);
+}
+
+@media (max-width: 1024px) {
+  .sidebar-toggle {
+    top: 0.75rem;
+  }
 }
 </style>

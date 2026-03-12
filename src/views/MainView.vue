@@ -83,7 +83,7 @@ const loadContent = async () => {
 .main-content {
   flex: 1;
   overflow-y: auto;
-  padding: 2rem;
+  padding: clamp(1rem, 2vw, 2rem);
   background-color: var(--bg-secondary);
   transition: all 0.3s ease;
 }
