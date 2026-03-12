@@ -60,16 +60,8 @@ export function completePartitionUpload(payload) {
   });
 }
 
-export function abortPartitionUpload(payload) {
-  return api.post("/file/upload/abort", payload, {
-    timeout: 600000,
-  });
-}
-
 export async function fetchFileList() {
-  const response = await api.get("/file/list", {
-    timeout: 30000,
-  });
+  const response = await api.get("/file/list");
   return extractArrayResult(response?.data);
 }
 
