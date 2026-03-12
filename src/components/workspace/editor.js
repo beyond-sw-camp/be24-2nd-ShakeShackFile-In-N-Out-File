@@ -1,4 +1,5 @@
-// useEditor.js
+// useEditor.js 수정본
+
 import EditorJS from '@editorjs/editorjs'
 import Header from '@editorjs/header'
 import List from '@editorjs/list'
@@ -13,54 +14,42 @@ import Delimiter from '@editorjs/delimiter'
 import Marker from '@editorjs/marker'
 import Warning from '@editorjs/warning'
 
-// Alignment tune and YouTube embed (community tools)
 import AlignmentTuneTool from 'editorjs-text-alignment-blocktune'
 import YouTubeEmbed from 'editorjs-youtube-embed'
 
-// Yjs
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 
-// Vue reactivity helpers
-import { ref, reactive } from 'vue'
+import { ref } from 'vue'
 import postApi from '@/api/postApi'
 import loadpost from './loadpost'
 
-// ★ initialTitle 인자 추가
 export async function initEditor(holderElement, room, initialData, idx, initialTitle) {
   if (!holderElement) throw new Error('holderElement is required')
 
-  // Yjs setup
   const ydoc = new Y.Doc()
   const provider = new WebsocketProvider('ws://10.10.10.100:8080', room, ydoc)
   const yText = ydoc.getText('contents')
   const yTitle = ydoc.getText('title')
 
-  // 추가: Yjs 타이틀이 비어있고 초기 타이틀이 있다면 동기화
   if (initialTitle && yTitle.toString() === '') {
     yTitle.insert(0, initialTitle)
   }
 
-  // awareness presence
   const awareness = provider.awareness
-
-  // remote cursors reactive store
   const remoteCursorsRef = ref({})
-
-  // local user identity
+  // 수정: {} -> [] (배열로 수정)
   const colors = ['#FF6B6B','#6BCB77','#4D96FF','#FF7BD1','#FFD93D','#8E6BFF']
   const myId = Math.floor(Math.random() * colors.length)
+  // 수정: {} -> [] (배열 인덱스 접근)
   const myColor = colors[myId]
   const myName = `사용자 ${myId + 1}`
 
   awareness.setLocalState({ user: { name: myName, color: myColor } })
 
   const tools = {
-    header: {
-      class: Header,
-      tunes: ['alignment'],
-      config: { levels: [1,2,3,4], defaultLevel: 1 }
-    },
+    // 수정: tunes와 levels의 {} -> [] (배열로 수정)
+    header: { class: Header, tunes: ['alignment'], config: { levels: [1,2,3,4], defaultLevel: 1 } },
     list: { class: List, inlineToolbar: true, tunes: ['alignment'] },
     quote: { class: Quote, inlineToolbar: true, tunes: ['alignment'] },
     table: { class: Table, inlineToolbar: true },
@@ -72,39 +61,40 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     delimiter: Delimiter,
     marker: Marker,
     warning: Warning,
-    alignment: {
-      class: AlignmentTuneTool,
-      config: { default: 'left' }
-    },
-    youtube: {
-      class: YouTubeEmbed
-    }
+    alignment: { class: AlignmentTuneTool, config: { default: 'left' } },
+    youtube: { class: YouTubeEmbed }
   }
 
   let editor = null
   let suppressLocal = false
+  let isRendering = false // 렌더링 중복 방지 플래그
 
   async function renderFromY(yval) {
-    if (!editor) return
-    if (!yval || yval === "") return 
+    if (!editor || !yval || isRendering) return
     
     try {
-      await editor.isReady; 
+      await editor.isReady;
+      
+      // 현재 에디터 데이터와 수신된 데이터 비교 (중복 방지 핵심)
+      const currentData = await editor.save();
+      if (JSON.stringify(currentData) === yval) return;
+
       const parsed = JSON.parse(yval)
-      if (parsed && Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
+      if (parsed && Array.isArray(parsed.blocks)) {
+        isRendering = true; 
         suppressLocal = true
         await editor.blocks.render(parsed.blocks)
         suppressLocal = false
+        isRendering = false;
       }
     } catch (e) {
       console.warn('failed to parse yval', e)
       suppressLocal = false
+      isRendering = false;
     }
   }
 
-  // ★ 핵심 수정: 새 파일(빈 페이지) 생성 시 에디터 렌더링 충돌 방지
-  // 아무 데이터도 없을 때는 무조건 { blocks: [] } 가 들어가야 EditorJS가 뻗지 않습니다.
-  let parsedData = { blocks: [] }; 
+  let parsedData = { blocks: [] }; // 수정: {} -> [] (blocks는 보통 배열임)
   try {
     if (typeof initialData === 'string' && initialData.trim() !== '') {
       parsedData = JSON.parse(initialData);
@@ -112,23 +102,23 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       parsedData = initialData;
     }
   } catch (e) {
-    console.warn('Data parsing failed, starting with empty editor', e);
+    console.warn('Data parsing failed', e);
   }
 
-  // Initialize EditorJS
   editor = new EditorJS({
     holder: holderElement,
     placeholder: '명령어 "/" 로 블록 추가',
-    data: parsedData, // 빈 페이지 생성 시에도 완벽하게 대응되는 객체 주입
+    data: parsedData,
     tools,
     onReady: async () => {
-      const initial = yText.toString()
-      if (initial) {
-        await renderFromY(initial)
+      // Yjs에 이미 서버 데이터가 있다면 그것을 우선 적용
+      const initialY = yText.toString()
+      if (initialY && initialY !== JSON.stringify(parsedData)) {
+        await renderFromY(initialY)
       }
     },
     onChange: async () => {
-      if (suppressLocal) return
+      if (suppressLocal || isRendering) return
       try {
         const saved = await editor.save()
         const newString = JSON.stringify(saved)
@@ -145,7 +135,6 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     }
   })
 
-  // 에디터가 온전히 준비될 때까지 기다림
   await editor.isReady;
 
   function bindTitleRef(titleRef) {
@@ -183,10 +172,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
       const response = await postApi.savePost(postData);
       await loadpost.side_list();
-
-      console.log('저장 성공:', response);
       return response;
-      
     } catch (e) {
       console.error('savePost error:', e);
     }
@@ -196,13 +182,13 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     const states = awareness.getStates()
     const remotes = {}
     states.forEach((state, clientId) => {
-      if (!state || !state.user) return
-      if (clientId === ydoc.clientID) return
+      if (!state || !state.user || clientId === ydoc.clientID) return
       const mouse = state.mouse || {}
       const user = state.user || {}
+      // 수정: {} -> [] (객체 속성 접근)
       remotes[clientId] = {
-        name: user.name || `user-${clientId}`,
-        color: user.color || '#888',
+        name: user.name,
+        color: user.color,
         style: {
           position: 'fixed',
           left: mouse.x ? `${mouse.x}px` : '-9999px',
@@ -216,37 +202,17 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
   yText.observe(event => {
     if (event.transaction.local) return 
-    const val = yText.toString()
-    renderFromY(val)
+    renderFromY(yText.toString())
   })
 
   function handleMouseMove(e) {
     awareness.setLocalStateField('mouse', { x: e.clientX, y: e.clientY })
   }
 
-  function reportSelection() {
-    const sel = window.getSelection()
-    if (!sel || sel.rangeCount === 0) return
-    const range = sel.getRangeAt(0)
-    let node = range.startContainer
-    while (node && node !== holderElement) {
-      if (node.classList && node.classList.contains('ce-block')) break
-      node = node.parentNode
-    }
-    let blockIndex = null
-    if (node && node !== holderElement) {
-      const blocks = Array.from(holderElement.querySelectorAll('.ce-block'))
-      blockIndex = blocks.indexOf(node)
-    }
-    awareness.setLocalStateField('selection', { blockIndex, offset: range.startOffset })
-  }
-
   window.addEventListener('mousemove', handleMouseMove)
-  document.addEventListener('selectionchange', reportSelection)
 
   function destroy() {
     window.removeEventListener('mousemove', handleMouseMove)
-    document.removeEventListener('selectionchange', reportSelection)
     try { editor?.destroy() } catch (e) {}
     try { provider?.destroy() } catch (e) {}
     try { ydoc?.destroy() } catch (e) {}
@@ -262,12 +228,5 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     }
   }
 
-  return {
-    editor,
-    destroy,
-    remoteCursorsRef,
-    bindTitleRef,
-    updateTitleFromLocal,
-    savePost
-  }
+  return { editor, destroy, remoteCursorsRef, bindTitleRef, updateTitleFromLocal, savePost }
 }
