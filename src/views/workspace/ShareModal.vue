@@ -1,33 +1,34 @@
 <script setup>
-import { ref, computed, watch } from 'vue'; // watch 추가
+import { ref, computed, watch } from 'vue'; 
 import postApi from '@/api/postApi'; 
 import loadpost from '@/components/workspace/loadpost';
 
 const props = defineProps({
   isOpen: Boolean,
   postIdx: [Number, String],
-  initialStatus: String // 부모로부터 받은 현재 상태 (예: 'Private', 'Shared')
+  uuid: String, 
+  initialStatus: String 
 });
 
 const emit = defineEmits(['close', 'refresh']);
 
-// 상태 관리: 백엔드 Enum 값과 동일하게 유지 (Private, Shared, Public)
 const privacyStatus = ref(props.initialStatus); 
 const email = ref('');
 
-// 서버에서 데이터가 갱신되어 내려오면 즉시 UI에 반영되도록 합니다.
 watch([() => props.isOpen, () => props.initialStatus], ([newOpen, newStatus]) => {
   if (newOpen) {
     privacyStatus.value = newStatus || 'Private';
   }
 }, { immediate: true });
 
-// 동적으로 초대 URL 생성
 const inviteUrl = computed(() => {
-  return `http://localhost:5173/workspace/invite/${props.postIdx}`;
+  const type = privacyStatus.value === 'Shared' ? 'email' : 'invite';
+  return `http://localhost:5173/workspace/invite?uuid=${props.uuid}&type=${type}`;
 });
 
 const copyLink = () => {
+  if (privacyStatus.value !== 'Public') return;
+
   navigator.clipboard.writeText(inviteUrl.value);
   alert('링크가 클립보드에 복사되었습니다.');
 };
@@ -42,9 +43,13 @@ const handleInvite = async () => {
   }
 
   try {
+    const type = privacyStatus.value === 'Shared' ? 'email' : 'invite';
+    
+    // postApi.js의 수정된 inviteUser 호출
     await postApi.inviteUser({
       email: email.value,
-      post_idx: props.postIdx
+      uuid: props.uuid,
+      type: type
     });
     
     alert(`${email.value}님께 초대장을 보냈습니다.`);
@@ -60,7 +65,6 @@ const handleInvite = async () => {
  */
 const handleSaveStatus = async () => {
   try {
-    // privacyStatus.value는 'Private', 'Shared', 'Public' 중 하나임
     await postApi.updateShareStatus(props.postIdx, privacyStatus.value);
     
     alert('공유 설정이 저장되었습니다.');
@@ -99,18 +103,20 @@ const handleSaveStatus = async () => {
       </div>
 
       <div class="p-6 space-y-6">
-        <div>
+        <div :class="{ 'opacity-50 pointer-events-none': privacyStatus !== 'Public' }">
           <label class="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2 tracking-wider">초대 링크</label>
           <div class="flex gap-2">
             <input 
               type="text" 
               readonly 
               :value="inviteUrl"
-              class="flex-1 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-main)] outline-none"
+              :disabled="privacyStatus !== 'Public'"
+              class="flex-1 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-main)] outline-none disabled:cursor-not-allowed"
             />
             <button 
               @click="copyLink"
-              class="bg-[var(--bg-input)] border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-700 text-[var(--text-main)] px-3 py-2 rounded-lg text-sm transition-colors"
+              :disabled="privacyStatus !== 'Public'"
+              class="bg-[var(--bg-input)] border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-700 text-[var(--text-main)] px-3 py-2 rounded-lg text-sm transition-colors disabled:cursor-not-allowed"
               title="링크 복사"
             >
               <i class="fa-solid fa-copy"></i>

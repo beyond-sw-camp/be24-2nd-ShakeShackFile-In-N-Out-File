@@ -46,11 +46,18 @@ const deletePost = async (idx) => {
 
 /**
  * 사용자 초대 API
- * @param {Object} inviteData - { email: string, post_idx: number|string }
+ * @param {Object} inviteData - { email: string, uuid: string, type: string }
  */
-const inviteUser = async (idx) => {
+const inviteUser = async (inviteData) => {
   try {
-    const response = await api.post(`/workspace/invite/${idx}`);
+    // @RequestParam으로 받기 위해 두 번째 인자(Body)는 null로 두고, 
+    // 세 번째 인자의 params 속성에 데이터를 전달합니다.
+    const response = await api.post('/workspace/invite', null, {
+      params: {
+        uuid: inviteData.uuid,
+        type: inviteData.type
+      }
+    });
     return response.data;
   } catch (error) {
     console.error(error);
