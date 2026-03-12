@@ -27,11 +27,11 @@ const side_list = async () => {
 
             // 3. 반복문을 돌며 속성에 따라 분류
             allItems.forEach(item => {
-                // 백엔드에서 구분해주는 필드명을 확인하세요 (예: item.type 또는 item.isTeam)
-                if (item.Type === true) {
+                // 백엔드 Enum(상태값)이 'Private' (대소문자 무관)이 아니면 협업 페이지로 분류
+                if (item.status && item.status.toUpperCase() !== 'PRIVATE') {
                     sharedItems.value.push(item);
                 } else {
-                    // 기본적으로는 개인 페이지로 분류
+                    // 상태가 'Private'이거나 값이 없으면 기본적으로 개인 페이지로 분류
                     personalItems.value.push(item);
                 }
             });
@@ -45,6 +45,7 @@ const side_list = async () => {
         sharedItems.value = [];
     }
 }
+
 // 상세 데이터를 담을 변수 추가
 const currentPost = ref({ title: '', contents: null });
 

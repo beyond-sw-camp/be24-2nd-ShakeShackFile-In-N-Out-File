@@ -4,13 +4,16 @@ import { useRouter } from 'vue-router';
 import FileUpload from '@/components/function/FilesUpload.vue';
 import loadpost from '@/components/workspace/loadpost';
 import { useFileStore } from '@/stores/useFileStore';
-import { useAuthStore } from '@/stores/useAuthStore';
 import postApi from '@/api/postApi';
+import ShareModal from '@/views/workspace/ShareModal.vue'; // {추가} 모달 컴포넌트 임포트
 
-const authStore = useAuthStore()
 const fileStore = useFileStore()
 const isSidebarOpen = ref(true) // 사이드바 토글 상태
 const openMenuId = ref(null) // 현재 열려있는 메뉴의 ID 관리
+
+// {추가} 공유 모달 관련 상태
+const isShareModalOpen = ref(false);
+const targetPostIdx = ref(null);
 
 // 1. loadpost에서 정의된 상태와 함수를 가져옵니다.
 const { 
@@ -90,15 +93,13 @@ const storageUsageText = computed(() => {
 const sidebarToggleStyle = computed(() => ({
   left: isSidebarOpen.value ? 'calc(16rem - 0.75rem)' : '0.75rem',
 }))
-
-const isAdministrator = computed(() => {
-  return authStore.user?.email === 'administrator@administrator.adm' && authStore.user?.role === 'ROLE_ADMIN'
-})
 const router = useRouter();
 const goToPost = (idx) => {
   if (!idx) return;
   router.push(`/workspace/read/${idx}`);
 };
+// 1. 선택된 게시글의 상태를 저장할 ref 추가
+const targetPostStatus = ref('Private');
 
 // 메뉴 액션 함수들
 const handleAction = async (action, idx) => {
@@ -114,6 +115,15 @@ const handleAction = async (action, idx) => {
       // 만약 현재 삭제한 페이지를 보고 있었다면 홈으로 이동시키는 로직을 추가할 수도 있습니다.
       router.push({ name: 'home' });
     }
+  }else if (action === 'share') {
+    // [수정] 현재 클릭한 아이템의 status를 찾아서 저장합니다.
+    const allItems = [...personalItems.value, ...sharedItems.value];
+    const selectedItem = allItems.find(item => item.post_idx === idx);
+
+    targetPostIdx.value = idx;
+    // 서버 데이터의 status('Private', 'Public' 등)를 모달에 넘겨줄 변수에 할당
+    targetPostStatus.value = selectedItem ? selectedItem.status : 'Private';
+    isShareModalOpen.value = true;
   } else {
     console.log(`${action} action on post: ${idx}`);
   }
@@ -123,6 +133,12 @@ const handleAction = async (action, idx) => {
 
 <template>
   <div class="relative">
+    <ShareModal 
+      :is-open="isShareModalOpen" 
+      :post-idx="targetPostIdx"
+      :initial-status="targetPostStatus" 
+      @close="isShareModalOpen = false"
+    />
     <aside 
       class="bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
       :class="[
@@ -319,16 +335,6 @@ const handleAction = async (action, idx) => {
             >
               <i class="fa-solid fa-trash w-5 text-center flex-shrink-0 text-lg"></i>
               <span>휴지통</span>
-            </RouterLink>
-
-            <RouterLink
-              v-if="isAdministrator"
-              :to="{ name: 'administrator' }"
-              class="w-full flex items-center gap-3.5 px-3 py-2.5 mt-1 text-sm text-[var(--text-secondary)] rounded-xl transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline"
-              active-class="!bg-blue-500/10 !text-blue-600 !font-bold dark:!bg-blue-400/20 dark:!text-blue-400"
-            >
-              <i class="fa-solid fa-user-shield w-5 text-center flex-shrink-0 text-lg"></i>
-              <span>관리자 페이지</span>
             </RouterLink>
 
             <div class="p-3 pt-2">
