@@ -79,6 +79,36 @@ const updateShareStatus = async (idx, status) => {
     throw error;
   }
 }
+/**
+ * 권한 리스트 불러오기 API
+ * @param {Number|String} idx - 게시글 인덱스
+ */
+const loadRole = async (idx) => {
+  try {
+    const response = await api.get(`/workspace/loadRole/${idx}`);
+    return response.data;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
+/**
+ * 변경된 권한 저장 API (차후 로직 구현용 틀)
+ * @param {Number|String} idx - 게시글 인덱스
+ * @param {Array} roleData - 변경된 멤버 권한 리스트
+ */
+const saveRole = async (idx, roleData) => {
+  try {
+    // 나중에 백엔드 API 주소 및 포맷이 확정되면 수정하세요.
+    const response = await api.post(`/workspace/saveRole/${idx}`, roleData);
+    return response.data;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
 
 export default { 
   savePost, 
@@ -86,5 +116,7 @@ export default {
   allPosts, 
   deletePost, 
   inviteUser, 
-  updateShareStatus 
+  updateShareStatus,
+  loadRole,
+  saveRole
 }
