@@ -6,6 +6,7 @@ import loadpost from '@/components/workspace/loadpost';
 import { useFileStore } from '@/stores/useFileStore';
 import postApi from '@/api/postApi';
 import ShareModal from '@/views/workspace/ShareModal.vue'; // {추가} 모달 컴포넌트 임포트
+import RoleModal from '@/views/workspace/RoleModal.vue';
 
 const fileStore = useFileStore()
 const isSidebarOpen = ref(true) // 사이드바 토글 상태
@@ -14,6 +15,10 @@ const openMenuId = ref(null) // 현재 열려있는 메뉴의 ID 관리
 // {추가} 공유 모달 관련 상태
 const isShareModalOpen = ref(false);
 const targetPostIdx = ref(null);
+
+// [추가] 권한 설정 모달 관련 상태
+const isRoleModalOpen = ref(false);
+const roleDataList = ref([]);
 
 // 1. loadpost에서 정의된 상태와 함수를 가져옵니다.
 const { 
@@ -124,6 +129,25 @@ const handleAction = async (action, idx) => {
     // 서버 데이터의 status('Private', 'Public' 등)를 모달에 넘겨줄 변수에 할당
     targetPostStatus.value = selectedItem ? selectedItem.status : 'Private';
     isShareModalOpen.value = true;
+  } else if (action === 'settings') {
+    // [추가] 권한 설정 로직 시작
+    try {
+      targetPostIdx.value = idx;
+      
+      // 1. 백엔드에서 멤버 Role 리스트 가져오기
+      const response = await postApi.loadRole(idx);
+      
+      // 백엔드 반환 구조(BaseResponse 유무)에 따라 배열을 추출합니다.
+      // (이전 질문의 BaseResponse 구조를 참고하여 result.body 또는 response 자체를 매핑)
+      const fetchedRoles = response.result ? response.result.body : response;
+      
+      roleDataList.value = Array.isArray(fetchedRoles) ? fetchedRoles : [];
+      isRoleModalOpen.value = true;
+      
+    } catch (error) {
+      console.error('Role list fetch error:', error);
+      alert('권한 정보를 불러오는데 실패했습니다.');
+    }
   } else {
     console.log(`${action} action on post: ${idx}`);
   }
@@ -139,6 +163,13 @@ const handleAction = async (action, idx) => {
       :initial-status="targetPostStatus" 
       @close="isShareModalOpen = false"
     />
+    <RoleModal
+      :is-open="isRoleModalOpen"
+      :post-idx="targetPostIdx"
+      :initial-roles="roleDataList"
+      @close="isRoleModalOpen = false"
+    />
+
     <aside 
       class="bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
       :class="[
