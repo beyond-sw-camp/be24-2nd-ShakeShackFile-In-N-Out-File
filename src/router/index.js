@@ -74,6 +74,12 @@ const router = createRouter({
           meta: { title: '저장용량', requiresAuth: true },
         },
         {
+          path: 'administrator',
+          name: 'administrator',
+          component: () => import('../views/dashboard/AdministratorView.vue'),
+          meta: { title: '관리자 페이지', requiresAuth: true, requiresAdmin: true },
+        },
+        {
           path: '/workspace', 
           name: 'workspace',
           component: () => import('@/views/workspace/WorkSpace.vue'),
@@ -141,6 +147,9 @@ router.beforeEach(async (to, from, next) => {
   // to.query는 라우터가 분석한 URL 쿼리 파라미터입니다.
   const hasTokenInUrl = to.query.accessToken || to.query.token
   const isAuthenticated = !!authStore.token
+  const isAdministrator =
+    authStore.user?.email === 'administrator@administrator.adm' &&
+    authStore.user?.role === 'ROLE_ADMIN'
 
   // 3. 네비게이션 가드 로직
   if (to.meta.requiresAuth) {
@@ -148,6 +157,10 @@ router.beforeEach(async (to, from, next) => {
     if (!isAuthenticated && !hasTokenInUrl) {
       return next({ name: 'login' })
     }
+  }
+
+  if (to.meta.requiresAdmin && !isAdministrator) {
+    return next({ name: isAuthenticated ? 'home' : 'login' })
   }
 
   // 4. 워크스페이스 데이터 로드 로직 (방법 3 통합)

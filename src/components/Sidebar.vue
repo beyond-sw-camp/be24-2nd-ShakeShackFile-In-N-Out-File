@@ -4,9 +4,11 @@ import { useRouter } from 'vue-router';
 import FileUpload from '@/components/function/FilesUpload.vue';
 import loadpost from '@/components/workspace/loadpost';
 import { useFileStore } from '@/stores/useFileStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import postApi from '@/api/postApi';
 import ShareModal from '@/views/workspace/ShareModal.vue'; // {추가} 모달 컴포넌트 임포트
 
+const authStore = useAuthStore()
 const fileStore = useFileStore()
 const isSidebarOpen = ref(true) // 사이드바 토글 상태
 const openMenuId = ref(null) // 현재 열려있는 메뉴의 ID 관리
@@ -88,6 +90,13 @@ const storageUsageText = computed(() => {
   }
 
   return `${formatBytes(storageSummary.value.usedBytes)} / ${formatBytes(storageSummary.value.quotaBytes)} 사용`
+})
+
+const isAdministrator = computed(() => {
+  return (
+    authStore.user?.email === 'administrator@administrator.adm' &&
+    authStore.user?.role === 'ROLE_ADMIN'
+  )
 })
 
 const sidebarToggleStyle = computed(() => ({
@@ -335,6 +344,16 @@ const handleAction = async (action, idx) => {
             >
               <i class="fa-solid fa-trash w-5 text-center flex-shrink-0 text-lg"></i>
               <span>휴지통</span>
+            </RouterLink>
+
+            <RouterLink
+              v-if="isAdministrator"
+              :to="{ name: 'administrator' }"
+              class="w-full flex items-center gap-3.5 px-3 py-2.5 text-sm text-[var(--text-secondary)] rounded-xl transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline"
+              active-class="!bg-blue-500/10 !text-blue-600 !font-bold dark:!bg-blue-400/20 dark:!text-blue-400"
+            >
+              <i class="fa-solid fa-user-shield w-5 text-center flex-shrink-0 text-lg"></i>
+              <span>관리자 페이지</span>
             </RouterLink>
 
             <div class="p-3 pt-2">
