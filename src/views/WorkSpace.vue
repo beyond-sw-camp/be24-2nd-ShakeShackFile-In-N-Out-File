@@ -13,6 +13,9 @@ const isEditorLoading = ref(false)
 const route = useRoute();
 const isValid = computed(() => title.value.trim().length > 0)
 
+// {핵심 추가} 중복 렌더링을 방지하기 위한 셋업 고유 ID
+let currentSetupId = 0;
+
 async function handleSave() {
   if (!editorApi.value?.savePost) return
   await editorApi.value.savePost()
@@ -52,15 +55,25 @@ async function prepareData() {
 }
 
 async function setupEditor() {
+  const setupId = ++currentSetupId; // {추가} 실행될 때마다 고유 ID 발급
+
   if (!editorHolder.value) return;
 
   isEditorLoading.value = true;
   const data = await prepareData();
+
+  // {추가} 데이터를 받아오는 비동기 시간 동안 다른 셋업이 시작되었다면 즉시 중단
+  if (setupId !== currentSetupId) return;
+
   title.value = data.title || '';
 
   // 1. 기존 에디터 자원 해제
   if (editorApi.value) {
     try {
+      // {수정} 에디터가 비동기 렌더링 중일 때 파기하면 DOM에 찌꺼기가 남으므로 안전하게 대기
+      if (editorApi.value.editor && editorApi.value.editor.isReady) {
+        await editorApi.value.editor.isReady;
+      }
       await editorApi.value.destroy();
     } catch (e) {}
     editorApi.value = null;
@@ -74,8 +87,7 @@ async function setupEditor() {
 
   try {
     // 3. 에디터 초기화
-    // [핵심 수정] 새 문서일 경우 방 이름을 고유하게 생성하여 이전 데이터를 방지합니다.
-    editorApi.value = await initEditor(
+    const newEditorApi = await initEditor(
       editorHolder.value,
       `notion-room-${data.idx ? data.idx : 'new-' + Date.now()}`,
       data.contents,
@@ -83,12 +95,26 @@ async function setupEditor() {
       data.title
     );
 
+    // {추가} 초기화 도중에 라우터가 또 변경되었다면 새로 만든 에디터 즉시 파기
+    if (setupId !== currentSetupId) {
+      if (newEditorApi.editor && newEditorApi.editor.isReady) {
+        await newEditorApi.editor.isReady;
+      }
+      newEditorApi.destroy();
+      return;
+    }
+
+    editorApi.value = newEditorApi;
+
     if (editorApi.value?.bindTitleRef) editorApi.value.bindTitleRef(title);
     if (editorApi.value?.remoteCursorsRef) remoteCursors.value = editorApi.value.remoteCursorsRef.value;
   } catch (error) {
     console.error('에디터 초기화 실패:', error);
   } finally {
-    isEditorLoading.value = false;
+    // {수정} 현재 진행 중인 셋업일 때만 로딩 상태 해제
+    if (setupId === currentSetupId) {
+      isEditorLoading.value = false;
+    }
   }
 }
 
@@ -109,7 +135,12 @@ watch(() => route.path, async (newPath) => {
 })
 
 onBeforeUnmount(async () => {
-  if (editorApi.value?.destroy) await editorApi.value.destroy()
+  if (editorApi.value?.destroy) {
+    if (editorApi.value.editor && editorApi.value.editor.isReady) {
+      await editorApi.value.editor.isReady;
+    }
+    await editorApi.value.destroy();
+  }
 })
 </script>
 

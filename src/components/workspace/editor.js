@@ -38,17 +38,15 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
   const awareness = provider.awareness
   const remoteCursorsRef = ref({})
-  // 수정: {} -> [] (배열로 수정)
+  
   const colors = ['#FF6B6B','#6BCB77','#4D96FF','#FF7BD1','#FFD93D','#8E6BFF']
   const myId = Math.floor(Math.random() * colors.length)
-  // 수정: {} -> [] (배열 인덱스 접근)
   const myColor = colors[myId]
   const myName = `사용자 ${myId + 1}`
 
   awareness.setLocalState({ user: { name: myName, color: myColor } })
 
   const tools = {
-    // 수정: tunes와 levels의 {} -> [] (배열로 수정)
     header: { class: Header, tunes: ['alignment'], config: { levels: [1,2,3,4], defaultLevel: 1 } },
     list: { class: List, inlineToolbar: true, tunes: ['alignment'] },
     quote: { class: Quote, inlineToolbar: true, tunes: ['alignment'] },
@@ -67,7 +65,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
   let editor = null
   let suppressLocal = false
-  let isRendering = false // 렌더링 중복 방지 플래그
+  let isRendering = false 
 
   async function renderFromY(yval) {
     if (!editor || !yval || isRendering) return
@@ -75,7 +73,6 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     try {
       await editor.isReady;
       
-      // 현재 에디터 데이터와 수신된 데이터 비교 (중복 방지 핵심)
       const currentData = await editor.save();
       if (JSON.stringify(currentData) === yval) return;
 
@@ -94,7 +91,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     }
   }
 
-  let parsedData = { blocks: [] }; // 수정: {} -> [] (blocks는 보통 배열임)
+  let parsedData = { blocks: [] }; 
   try {
     if (typeof initialData === 'string' && initialData.trim() !== '') {
       parsedData = JSON.parse(initialData);
@@ -111,7 +108,6 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     data: parsedData,
     tools,
     onReady: async () => {
-      // Yjs에 이미 서버 데이터가 있다면 그것을 우선 적용
       const initialY = yText.toString()
       if (initialY && initialY !== JSON.stringify(parsedData)) {
         await renderFromY(initialY)
@@ -185,7 +181,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       if (!state || !state.user || clientId === ydoc.clientID) return
       const mouse = state.mouse || {}
       const user = state.user || {}
-      // 수정: {} -> [] (객체 속성 접근)
+      
       remotes[clientId] = {
         name: user.name,
         color: user.color,
@@ -211,11 +207,12 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
   window.addEventListener('mousemove', handleMouseMove)
 
+  // {수정됨} 인스턴스가 존재하고 소멸 함수가 있을 때만 안전하게 실행되도록 변경
   function destroy() {
     window.removeEventListener('mousemove', handleMouseMove)
-    try { editor?.destroy() } catch (e) {}
-    try { provider?.destroy() } catch (e) {}
-    try { ydoc?.destroy() } catch (e) {}
+    try { if (editor && typeof editor.destroy === 'function') editor.destroy() } catch (e) { console.warn('editor destroy error:', e) }
+    try { if (provider && typeof provider.destroy === 'function') provider.destroy() } catch (e) {}
+    try { if (ydoc && typeof ydoc.destroy === 'function') ydoc.destroy() } catch (e) {}
   }
 
   function updateTitleFromLocal(val) {
