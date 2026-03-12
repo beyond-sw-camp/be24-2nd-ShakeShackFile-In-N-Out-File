@@ -13,7 +13,12 @@ const addNewFolder = () => {
 </script>
 
 <template>
-  <BaseFileView title="내 드라이브" :files="fileStore.driveFiles" @delete="fileStore.moveToTrash">
+  <BaseFileView
+    title="내 드라이브"
+    :files="fileStore.driveFiles"
+    :show-folder-navigation="true"
+    @delete="fileStore.moveToTrash"
+  >
 
   </BaseFileView>
 </template>
