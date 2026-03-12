@@ -71,131 +71,124 @@ const router = createRouter({
           path: 'storage',
           name: 'storage',
           component: () => import('../views/dashboard/StorageView.vue'),
-          meta: { title: '저장용량', requiresAuth: true },
+          meta: { title: '저장 용량', requiresAuth: true },
         },
         {
-          path: '/workspace', 
+          path: 'administrator',
+          name: 'administrator',
+          component: () => import('../views/dashboard/AdministratorView.vue'),
+          meta: { title: '관리자 페이지', requiresAuth: true, requiresAdmin: true },
+        },
+        {
+          path: '/workspace',
           name: 'workspace',
           component: () => import('../views/WorkSpace.vue'),
           meta: { title: '워크스페이스', requiresAuth: true },
           children: [
             {
-              // :id 뒤에 (\\d+)를 붙여 숫자만 매칭되도록 설정
-              path: 'read/:id(\\d+)', 
+              path: 'read/:id(\\d+)',
               name: 'workspace_read',
               component: () => import('../views/WorkSpace.vue'),
-              meta: { title: '읽기 전용 ', requiresAuth: true },
-
-              // 페이지 진입 전 실행되는 가드
+              meta: { title: '읽기 전용', requiresAuth: true },
               beforeEnter: (to, from, next) => {
-                fetchWorkspaceData(to, next);
-              }
-            }
+                fetchWorkspaceData(to, next)
+              },
+            },
           ],
         },
-        // /main/* 하위의 잘못된 경로도 404로 보내기
         {
           path: ':pathMatch(.*)*',
           component: NotFound,
-          name : 'not_found',
-          meta: { title: '404 - 페이지를 찾을 수 없습니다', requiresAuth: false }
-        }
+          name: 'not_found',
+          meta: { title: '404 - 페이지를 찾을 수 없습니다', requiresAuth: false },
+        },
       ],
     },
-    { 
+    {
       path: '/pay',
       name: 'pay',
       component: () => import('../views/Pay.vue'),
       meta: { title: '결제', requiresAuth: true },
     },
-    { 
+    {
       path: '/FindMember',
       name: 'FindMember',
       component: () => import('../views/user/FindMember.vue'),
       meta: { title: '회원 찾기', requiresAuth: false },
     },
-    // 404 페이지 - 모든 잘못된 경로를 캐치 (반드시 맨 마지막!)
     {
       path: '/:pathMatch(.*)*',
       name: 'notFound',
       component: NotFound,
-      meta: { title: '404 - 페이지를 찾을 수 없습니다', requiresAuth: false }
-    }
+      meta: { title: '404 - 페이지를 찾을 수 없습니다', requiresAuth: false },
+    },
   ],
 })
 
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
-  
-  // 1. 초기화: 로컬 스토리지 데이터 복구
+
   if (!authStore.token) {
     authStore.checkLogin()
   }
 
-  // 2. URL 파라미터에 accessToken이 있는지 확인 (소셜 로그인용)
-  // to.query는 라우터가 분석한 URL 쿼리 파라미터입니다.
   const hasTokenInUrl = to.query.accessToken || to.query.token
   const isAuthenticated = !!authStore.token
+  const isAdministrator = authStore.user?.email === 'administrator@administrator.adm' && authStore.user?.role === 'ROLE_ADMIN'
 
-  // 3. 네비게이션 가드 로직
   if (to.meta.requiresAuth) {
-    // 인증이 필요한데 토큰이 없고, URL에도 토큰이 없다면 튕김
     if (!isAuthenticated && !hasTokenInUrl) {
       return next({ name: 'login' })
     }
   }
 
-  // 4. 워크스페이스 데이터 로드 로직 (방법 3 통합)
-  // 대상이 workspace_read 페이지이고, ID가 바뀔 때만 실행
+  if (to.meta.requiresAdmin && !isAdministrator) {
+    return next({ name: isAuthenticated ? 'home' : 'login' })
+  }
+
   if (to.name === 'workspace_read' && to.params.id) {
-    // 이전 페이지와 ID가 다르거나, 아예 처음 진입하는 경우 데이터 호출
     if (to.params.id !== from.params.id) {
       try {
-        const result = await loadpost.read_post(to.params.id);
-        
+        const result = await loadpost.read_post(to.params.id)
+
         if (result && result.title !== undefined) {
-          // 데이터를 meta에 저장하여 컴포넌트에서 쓸 수 있게 함
           to.meta.initialData = {
             idx: result.idx,
             title: result.title,
-            contents: result.contents
-          };
-          return next(); // 데이터 로드 성공 시 이동
-        } else {
-          return next({ name: 'not_found' });
+            contents: result.contents,
+          }
+          return next()
         }
+        return next({ name: 'not_found' })
       } catch (error) {
-        console.error('워크스페이스 로드 중 에러:', error);
-        return next({ name: 'not_found' });
+        console.error('워크스페이스 로드 중 에러:', error)
+        return next({ name: 'not_found' })
       }
     }
   }
 
-  // 위 조건들에 해당하지 않는 일반적인 이동은 그대로 진행
   next()
 })
 
-// 1. 데이터 로드 로직을 별도 함수로 분리 (중복 방지)
 const fetchWorkspaceData = async (to, next) => {
   try {
-    const result = await loadpost.read_post(to.params.id);
-    console.log('라우터 가드에서 받은 데이터:', result);
+    const result = await loadpost.read_post(to.params.id)
+    console.log('라우트 가드에서 받은 데이터:', result)
 
     if (result && result.title !== undefined) {
       to.meta.initialData = {
         idx: result.idx,
         title: result.title,
-        contents: result.contents
-      };
-      next();
+        contents: result.contents,
+      }
+      next()
     } else {
-      next({ name: 'not_found' });
+      next({ name: 'not_found' })
     }
   } catch (error) {
-    console.error('데이터 로드 에러:', error);
-    next({ name: 'not_found' });
+    console.error('데이터 로드 에러:', error)
+    next({ name: 'not_found' })
   }
-};
-
+}
 
 export default router
