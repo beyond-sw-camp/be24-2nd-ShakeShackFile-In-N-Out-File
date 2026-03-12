@@ -3,9 +3,8 @@ import { computed, ref, watch } from "vue";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
 
-const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic"]);
-const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v"]);
-const INLINE_VIDEO_LIMIT_BYTES = 25 * 1024 * 1024;
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic", "avif", "apng", "jfif", "tif", "tiff"]);
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp"]);
 
 const props = defineProps({
   files: {
@@ -142,19 +141,31 @@ const getPreviewUrl = (file) => {
   return file?.downloadUrl || file?.presignedDownloadUrl || "";
 };
 
+const getContentType = (file) => String(file?.contentType || file?.raw?.contentType || "").toLowerCase();
+const getVideoThumbnailUrl = (file) => file?.thumbnailUrl || file?.thumbnailPresignedUrl || "";
+
+const hasPreviewSource = (file) => {
+  return file?.type !== "folder" && Boolean(getPreviewUrl(file));
+};
+
 const isInlineImagePreviewable = (file) => {
-  return file?.type !== "folder" && IMAGE_EXTENSIONS.has(getFileExtension(file)) && Boolean(getPreviewUrl(file));
+  const contentType = getContentType(file);
+  return hasPreviewSource(file) && (
+    contentType.startsWith("image/") ||
+    IMAGE_EXTENSIONS.has(getFileExtension(file))
+  );
 };
 
 const isInlineVideoPreviewable = (file) => {
-  const sizeBytes = Number(file?.sizeBytes || 0);
+  const contentType = getContentType(file);
   return (
-    file?.type !== "folder" &&
-    VIDEO_EXTENSIONS.has(getFileExtension(file)) &&
-    sizeBytes > 0 &&
-    sizeBytes <= INLINE_VIDEO_LIMIT_BYTES &&
-    Boolean(getPreviewUrl(file))
+    contentType.startsWith("video/") ||
+    VIDEO_EXTENSIONS.has(getFileExtension(file))
   );
+};
+
+const hasInlineVideoThumbnail = (file) => {
+  return isInlineVideoPreviewable(file) && Boolean(getVideoThumbnailUrl(file));
 };
 
 const handlePrimaryAction = (file) => {
@@ -395,7 +406,7 @@ const gridClassName = computed(() => {
 </script>
 
 <template>
-  <div>
+  <div class="file-table-shell">
     <div
       v-if="deleteMode !== 'permanent'"
       class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
@@ -681,22 +692,33 @@ const gridClassName = computed(() => {
         </div>
 
         <div
-          v-else-if="isInlineVideoPreviewable(file)"
+          v-else-if="hasInlineVideoThumbnail(file)"
           class="relative h-36 overflow-hidden rounded-2xl bg-black"
         >
-          <video
-            :src="getPreviewUrl(file)"
-            muted
-            playsinline
-            preload="metadata"
-            class="pointer-events-none h-full w-full object-cover opacity-90"
-          ></video>
+          <img
+            :src="getVideoThumbnailUrl(file)"
+            :alt="`${getFileName(file)} thumbnail`"
+            loading="lazy"
+            class="pointer-events-none h-full w-full object-cover opacity-95"
+          />
           <div class="absolute inset-0 flex items-center justify-center bg-black/15">
             <div class="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-lg">
               <svg class="ml-1 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M6 4.5v11l9-5.5-9-5.5Z" />
               </svg>
             </div>
+          </div>
+        </div>
+
+        <div
+          v-else-if="isInlineVideoPreviewable(file)"
+          class="relative flex h-36 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-white"
+        >
+          <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.2),transparent_55%)]"></div>
+          <div class="relative flex h-14 w-14 items-center justify-center rounded-full bg-white/90 text-slate-900 shadow-lg">
+            <svg class="ml-1 h-6 w-6" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M6 4.5v11l9-5.5-9-5.5Z" />
+            </svg>
           </div>
         </div>
 
@@ -784,6 +806,11 @@ const gridClassName = computed(() => {
 </template>
 
 <style scoped>
+.file-table-shell {
+  padding-bottom: var(--upload-panel-safe-space, 0px);
+  transition: padding-bottom 0.2s ease;
+}
+
 .action-button {
   display: inline-flex;
   align-items: center;

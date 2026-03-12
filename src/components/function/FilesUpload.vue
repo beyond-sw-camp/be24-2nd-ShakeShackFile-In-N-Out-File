@@ -113,133 +113,135 @@
       {{ uploadError }}
     </p>
 
-    <button
-      v-if="hasUploadItems && !uploadPanelVisible"
-      type="button"
-      class="upload-panel-chip"
-      @click="uploadPanelVisible = true"
-    >
-      <span class="upload-panel-chip__dot"></span>
-      <span>{{ uploadPanelTitle }}</span>
-    </button>
-
-    <div
-      v-if="hasUploadItems && uploadPanelVisible"
-      class="upload-panel"
-    >
-      <div class="upload-panel__header">
-        <div class="upload-panel__header-copy">
-          <strong class="upload-panel__title">{{ uploadPanelTitle }}</strong>
-          <span class="upload-panel__subtitle">{{ uploadPanelSubtitle }}</span>
-        </div>
-
-        <div class="upload-panel__actions">
-          <button
-            type="button"
-            class="upload-panel__icon-button"
-            @click="uploadPanelCollapsed = !uploadPanelCollapsed"
-            :title="uploadPanelCollapsed ? '펼치기' : '접기'"
-          >
-            <svg
-              class="upload-panel__chevron"
-              :class="{ 'is-collapsed': uploadPanelCollapsed }"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          </button>
-
-          <button
-            type="button"
-            class="upload-panel__icon-button"
-            @click="dismissUploadPanel"
-            title="닫기"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-      </div>
+    <Teleport to="body">
+      <button
+        v-if="hasUploadItems && !uploadPanelVisible"
+        type="button"
+        class="upload-panel-chip"
+        @click="uploadPanelVisible = true"
+      >
+        <span class="upload-panel-chip__dot"></span>
+        <span>{{ uploadPanelTitle }}</span>
+      </button>
 
       <div
-        v-if="!uploadPanelCollapsed"
-        class="upload-panel__body"
+        v-if="hasUploadItems && uploadPanelVisible"
+        class="upload-panel"
       >
-        <div class="upload-panel__summary-bar">
-          <span>{{ uploadPanelEtaText }}</span>
-          <button
-            v-if="canCancelUploads"
-            type="button"
-            class="upload-panel__cancel"
-            @click="cancelActiveUploads"
-          >
-            취소
-          </button>
+        <div class="upload-panel__header">
+          <div class="upload-panel__header-copy">
+            <strong class="upload-panel__title">{{ uploadPanelTitle }}</strong>
+            <span class="upload-panel__subtitle">{{ uploadPanelSubtitle }}</span>
+          </div>
+
+          <div class="upload-panel__actions">
+            <button
+              type="button"
+              class="upload-panel__icon-button"
+              @click="uploadPanelCollapsed = !uploadPanelCollapsed"
+              :title="uploadPanelCollapsed ? '펼치기' : '접기'"
+            >
+              <svg
+                class="upload-panel__chevron"
+                :class="{ 'is-collapsed': uploadPanelCollapsed }"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              class="upload-panel__icon-button"
+              @click="dismissUploadPanel"
+              title="닫기"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div class="upload-panel__list">
-          <div
-            v-for="item in uploadItems"
-            :key="item.id"
-            class="upload-item"
-          >
-            <div class="upload-item__file-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M7 3.75h6.586a1.5 1.5 0 0 1 1.06.44l2.914 2.914a1.5 1.5 0 0 1 .44 1.06V19.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5v-14A1.5 1.5 0 0 1 7.5 4Z"
-                  fill="#dbeafe"
-                />
-                <path
-                  d="M14 4v3a1 1 0 0 0 1 1h3"
-                  stroke="#93c5fd"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </div>
-
-            <div class="upload-item__copy">
-              <div class="upload-item__name-row">
-                <span class="upload-item__name">{{ item.name }}</span>
-              </div>
-              <div class="upload-item__detail">
-                {{ item.statusText }}
-              </div>
-            </div>
-
-            <div
-              class="upload-item__indicator"
-              :class="`is-${item.status}`"
-              :style="getProgressCircleStyle(item)"
-              :title="item.statusText"
+        <div
+          v-if="!uploadPanelCollapsed"
+          class="upload-panel__body"
+        >
+          <div class="upload-panel__summary-bar">
+            <span>{{ uploadPanelEtaText }}</span>
+            <button
+              v-if="canCancelUploads"
+              type="button"
+              class="upload-panel__cancel"
+              @click="cancelActiveUploads"
             >
-              <span v-if="item.status === 'completed'" class="upload-item__indicator-symbol">✓</span>
-              <span v-else-if="item.status === 'failed'" class="upload-item__indicator-symbol">!</span>
-              <span v-else-if="item.status === 'canceled'" class="upload-item__indicator-symbol">-</span>
+              취소
+            </button>
+          </div>
+
+          <div class="upload-panel__list">
+            <div
+              v-for="item in uploadItems"
+              :key="item.id"
+              class="upload-item"
+            >
+              <div class="upload-item__file-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M7 3.75h6.586a1.5 1.5 0 0 1 1.06.44l2.914 2.914a1.5 1.5 0 0 1 .44 1.06V19.5A1.5 1.5 0 0 1 16.5 21h-9A1.5 1.5 0 0 1 6 19.5v-14A1.5 1.5 0 0 1 7.5 4Z"
+                    fill="#dbeafe"
+                  />
+                  <path
+                    d="M14 4v3a1 1 0 0 0 1 1h3"
+                    stroke="#93c5fd"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </div>
+
+              <div class="upload-item__copy">
+                <div class="upload-item__name-row">
+                  <span class="upload-item__name">{{ item.name }}</span>
+                </div>
+                <div class="upload-item__detail">
+                  {{ item.statusText }}
+                </div>
+              </div>
+
+              <div
+                class="upload-item__indicator"
+                :class="`is-${item.status}`"
+                :style="getProgressCircleStyle(item)"
+                :title="item.statusText"
+              >
+                <span v-if="item.status === 'completed'" class="upload-item__indicator-symbol">✓</span>
+                <span v-else-if="item.status === 'failed'" class="upload-item__indicator-symbol">!</span>
+                <span v-else-if="item.status === 'canceled'" class="upload-item__indicator-symbol">-</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
     <div
       v-if="isDropdownOpen"
@@ -461,6 +463,37 @@ const uploadPanelEtaText = computed(() => {
 
 const canCancelUploads = computed(() =>
   isUploading.value && activeUploadCountComputed.value > 0,
+)
+
+const applyUploadPanelSafeArea = () => {
+  if (typeof document === "undefined") {
+    return
+  }
+
+  const rootStyle = document.documentElement.style
+  let safeSpace = "0px"
+
+  if (hasUploadItems.value) {
+    if (uploadPanelVisible.value && !uploadPanelCollapsed.value) {
+      safeSpace = window.innerWidth < 768 ? "320px" : "420px"
+    } else {
+      safeSpace = "96px"
+    }
+  }
+
+  rootStyle.setProperty("--upload-panel-safe-space", safeSpace)
+}
+
+const handleViewportResize = () => {
+  applyUploadPanelSafeArea()
+}
+
+watch(
+  [hasUploadItems, uploadPanelVisible, uploadPanelCollapsed],
+  () => {
+    applyUploadPanelSafeArea()
+  },
+  { immediate: true },
 )
 
 const createUploadItem = (file, index) => ({
@@ -1150,6 +1183,8 @@ const handleKeydown = (event) => {
 
 onMounted(() => {
   document.addEventListener("keydown", handleKeydown)
+  window.addEventListener("resize", handleViewportResize)
+  applyUploadPanelSafeArea()
   tickTimerId = window.setInterval(() => {
     nowTick.value = Date.now()
   }, 1000)
@@ -1157,6 +1192,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", handleKeydown)
+  window.removeEventListener("resize", handleViewportResize)
 
   if (tickTimerId) {
     window.clearInterval(tickTimerId)
@@ -1166,6 +1202,9 @@ onBeforeUnmount(() => {
     controller.abort()
   })
   activeUploadControllers.clear()
+  if (typeof document !== "undefined") {
+    document.documentElement.style.setProperty("--upload-panel-safe-space", "0px")
+  }
 })
 </script>
 
@@ -1174,15 +1213,18 @@ onBeforeUnmount(() => {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 80;
+  z-index: 10000;
   display: inline-flex;
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
   border-radius: 999px;
-  background: #1f2937;
-  color: #fff;
-  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.24);
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  isolation: isolate;
+  transform: translateZ(0);
   font-size: 13px;
   font-weight: 700;
 }
@@ -1199,14 +1241,17 @@ onBeforeUnmount(() => {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 80;
+  z-index: 10000;
   width: 380px;
   max-width: calc(100vw - 32px);
   border-radius: 22px;
   overflow: hidden;
-  background: #ffffff;
-  border: 1px solid #c7dbff;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  isolation: isolate;
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 .upload-panel__header {
@@ -1215,7 +1260,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 18px 18px 14px;
-  background: #ffffff;
+  background: var(--bg-elevated);
 }
 
 .upload-panel__header-copy {
@@ -1226,14 +1271,14 @@ onBeforeUnmount(() => {
 }
 
 .upload-panel__title {
-  color: #111827;
+  color: var(--text-main);
   font-size: 17px;
   font-weight: 800;
   line-height: 1.15;
 }
 
 .upload-panel__subtitle {
-  color: #6b7280;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1251,13 +1296,13 @@ onBeforeUnmount(() => {
   width: 34px;
   height: 34px;
   border-radius: 999px;
-  color: #374151;
+  color: var(--text-secondary);
   transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .upload-panel__icon-button:hover {
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--bg-input);
+  color: var(--accent);
 }
 
 .upload-panel__chevron {
@@ -1269,7 +1314,7 @@ onBeforeUnmount(() => {
 }
 
 .upload-panel__body {
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--border-color);
 }
 
 .upload-panel__summary-bar {
@@ -1278,14 +1323,14 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 18px;
-  background: #eef2f7;
-  color: #6b7280;
+  background: var(--bg-input);
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
 }
 
 .upload-panel__cancel {
-  color: #2563eb;
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -1296,7 +1341,7 @@ onBeforeUnmount(() => {
 .upload-panel__list {
   max-height: 280px;
   overflow-y: auto;
-  background: #ffffff;
+  background: var(--bg-elevated);
 }
 
 .upload-item {
@@ -1308,7 +1353,7 @@ onBeforeUnmount(() => {
 }
 
 .upload-item + .upload-item {
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--border-color);
 }
 
 .upload-item__file-icon {
@@ -1329,7 +1374,7 @@ onBeforeUnmount(() => {
 }
 
 .upload-item__name {
-  color: #374151;
+  color: var(--text-secondary);
   font-size: 15px;
   font-weight: 500;
   overflow: hidden;
@@ -1339,7 +1384,7 @@ onBeforeUnmount(() => {
 
 .upload-item__detail {
   margin-top: 4px;
-  color: #9ca3af;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
   overflow: hidden;
@@ -1353,8 +1398,8 @@ onBeforeUnmount(() => {
   width: 26px;
   height: 26px;
   border-radius: 999px;
-  border: 1.5px solid #d1d5db;
-  background: #fff;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-main);
 }
 
 .upload-item__indicator::before {
@@ -1362,33 +1407,33 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 3px;
   border-radius: 999px;
-  background: #fff;
+  background: var(--bg-main);
 }
 
 .upload-item__indicator.is-uploading,
 .upload-item__indicator.is-merging,
 .upload-item__indicator.is-canceling {
   border: none;
-  background: conic-gradient(#3b82f6 var(--progress), #dbeafe 0);
+  background: conic-gradient(var(--accent) var(--progress), var(--accent-soft) 0);
 }
 
 .upload-item__indicator.is-merging {
-  background: conic-gradient(#60a5fa var(--progress), #dbeafe 0);
+  background: conic-gradient(var(--accent-hover) var(--progress), var(--accent-soft) 0);
 }
 
 .upload-item__indicator.is-completed {
-  border-color: #93c5fd;
-  background: #eff6ff;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .upload-item__indicator.is-failed {
-  border-color: #fca5a5;
-  background: #fff1f2;
+  border-color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .upload-item__indicator.is-canceled {
-  border-color: #d1d5db;
-  background: #f8fafc;
+  border-color: var(--border-strong);
+  background: var(--bg-input);
 }
 
 .upload-item__indicator-symbol {
@@ -1397,18 +1442,18 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #2563eb;
+  color: var(--accent);
   font-size: 14px;
   font-weight: 900;
   z-index: 1;
 }
 
 .upload-item__indicator.is-failed .upload-item__indicator-symbol {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .upload-item__indicator.is-canceled .upload-item__indicator-symbol {
-  color: #6b7280;
+  color: var(--text-muted);
 }
 
 @media (max-width: 640px) {

@@ -1,627 +1,1216 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
-import { useAuthStore } from '@/stores/useAuthStore' // 경로 확인 필요
+import { computed, ref, watch } from "vue";
+import { RouterLink } from "vue-router";
+import { updateSettingsProfile, uploadSettingsProfileImage } from "@/api/featerApi";
+import { useAuthStore } from "@/stores/useAuthStore";
+import { useFileStore } from "@/stores/useFileStore";
 
-const authStore = useAuthStore()
 const props = defineProps({
   isOpen: {
     type: Boolean,
     default: false,
   },
-})
+  initialTab: {
+    type: String,
+    default: "profile",
+  },
+  settingsProfile: {
+    type: Object,
+    default: null,
+  },
+  isLoading: {
+    type: Boolean,
+    default: false,
+  },
+});
 
-const emit = defineEmits(['close', 'save'])
+const emit = defineEmits(["close", "saved"]);
+const authStore = useAuthStore();
+const fileStore = useFileStore();
 
-const activeTab = ref('profile')
-const isSaving = ref(false)
+const activeTab = ref("profile");
+const isSaving = ref(false);
+const isUploadingImage = ref(false);
+const saveError = ref("");
+const imageFeedback = ref("");
+const profileImageInput = ref(null);
+const mergeImageOnlyFromParent = ref(false);
+
+const profileForm = ref({
+  displayName: "",
+  email: "",
+  role: "",
+  localeCode: "KO",
+  regionCode: "KR",
+  marketingOptIn: true,
+  privateProfile: false,
+  emailNotification: true,
+  securityNotification: true,
+  profileImageUrl: "",
+  membershipLabel: "FREE MEMBER",
+  storagePlanLabel: "기본 20GB",
+  joinedAt: null,
+  updatedAt: null,
+  emailVerified: false,
+});
 
 const tabs = [
-  { id: 'profile', label: '기본 프로필', icon: 'fa-solid fa-circle-user' },
-  { id: 'security', label: '계정 및 보안', icon: 'fa-solid fa-shield-halved' },
-  { id: 'notif', label: '알림 설정', icon: 'fa-solid fa-bell' },
-  { id: 'region', label: '언어 및 지역', icon: 'fa-solid fa-globe' },
-  { id: 'billing', label: '구독 및 결제', icon: 'fa-solid fa-wallet' },
-]
+  { id: "profile", label: "기본 프로필", icon: "fa-solid fa-circle-user" },
+  { id: "security", label: "계정 및 보안", icon: "fa-solid fa-shield-halved" },
+  { id: "notification", label: "알림 설정", icon: "fa-solid fa-bell" },
+  { id: "language", label: "언어 및 지역", icon: "fa-solid fa-globe" },
+  { id: "billing", label: "구독 및 결제", icon: "fa-solid fa-wallet" },
+];
 
-const profile = ref({
-  name: '',
-  role: '사용자',
-  email: '',
-})
+const localeOptions = [
+  { code: "KO", label: "한국어" },
+  { code: "EN", label: "English" },
+  { code: "JA", label: "日本語" },
+];
 
-// 데이터를 가져와서 profile에 넣어주는 함수
-const syncProfile = () => {
-  if (authStore.user) {
-    console.log('현재 스토어 유저 정보:', authStore.user) // 콘솔에서 키값을 확인해보세요!
-    profile.value = {
-      name: authStore.user.name || authStore.user.userName || '', // 두 경우 모두 대비
-      role: authStore.user.role || '사용자',
-      email: authStore.user.email || '',
-    }
+const regionOptions = [
+  { code: "KR", label: "대한민국" },
+  { code: "US", label: "United States" },
+  { code: "JP", label: "Japan" },
+];
+
+const syncForm = (profile) => {
+  if (!profile) {
+    return;
   }
-}
 
-// 1. 컴포넌트 마운트 시 실행
-onMounted(() => {
-  authStore.checkLogin()
-  syncProfile()
-})
+  profileForm.value = {
+    displayName: profile.displayName || authStore.user?.name || "사용자",
+    email: profile.email || authStore.user?.email || "",
+    role: profile.role || authStore.user?.role || "ROLE_USER",
+    localeCode: profile.localeCode || "KO",
+    regionCode: profile.regionCode || "KR",
+    marketingOptIn: Boolean(profile.marketingOptIn),
+    privateProfile: Boolean(profile.privateProfile),
+    emailNotification: Boolean(profile.emailNotification),
+    securityNotification: Boolean(profile.securityNotification),
+    profileImageUrl: profile.profileImageUrl || "",
+    membershipLabel: profile.membershipLabel || "FREE MEMBER",
+    storagePlanLabel: profile.storagePlanLabel || "기본 20GB",
+    joinedAt: profile.joinedAt || null,
+    updatedAt: profile.updatedAt || null,
+    emailVerified: Boolean(profile.emailVerified),
+  };
+};
 
-// 2. 모달이 열릴 때마다 실행
+const mergeProfileImageIntoForm = (profile) => {
+  if (!profile) {
+    return;
+  }
+
+  profileForm.value = {
+    ...profileForm.value,
+    profileImageUrl: profile.profileImageUrl || "",
+    membershipLabel: profile.membershipLabel || profileForm.value.membershipLabel,
+    storagePlanLabel: profile.storagePlanLabel || profileForm.value.storagePlanLabel,
+    joinedAt: profile.joinedAt || profileForm.value.joinedAt,
+    updatedAt: profile.updatedAt || profileForm.value.updatedAt,
+    emailVerified: profile.emailVerified ?? profileForm.value.emailVerified,
+  };
+};
+
+watch(
+  () => props.initialTab,
+  (value) => {
+    activeTab.value = value || "profile";
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.settingsProfile,
+  (profile) => {
+    if (!profile) {
+      return;
+    }
+
+    if (mergeImageOnlyFromParent.value) {
+      mergeProfileImageIntoForm(profile);
+      mergeImageOnlyFromParent.value = false;
+      return;
+    }
+
+    syncForm(profile);
+  },
+  { immediate: true },
+);
+
 watch(
   () => props.isOpen,
   (isOpen) => {
-    if (isOpen) syncProfile()
+    if (!isOpen) {
+      return;
+    }
+
+    activeTab.value = props.initialTab || "profile";
+    saveError.value = "";
+    imageFeedback.value = "";
+
+    if (!fileStore.storageSummary && !fileStore.storageLoading) {
+      fileStore.fetchStorageSummary().catch(() => {});
+    }
   },
-)
+);
 
-// 3. 스토어 유저 정보가 바뀔 때 실행
-watch(
-  () => authStore.user,
-  () => {
-    syncProfile()
-  },
-  { deep: true },
-)
+const formatDate = (value) => {
+  if (!value) return "정보 없음";
 
-const preferences = ref({
-  marketing: true,
-  private: false,
-})
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
 
-const handleOverlayClick = () => {
-  emit('close')
-}
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+};
 
-const handleSave = () => {
-  isSaving.value = true
-  emit('save')
-  setTimeout(() => {
-    isSaving.value = false
-  }, 1000)
-}
+const formatBytes = (bytes) => {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const unitIndex = Math.min(
+    Math.floor(Math.log(size) / Math.log(1024)),
+    units.length - 1,
+  );
+  const value = size / 1024 ** unitIndex;
+  const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
+
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`;
+};
+
+const profileInitials = computed(() => {
+  const source = profileForm.value.displayName || authStore.user?.name || "User";
+  return source
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((token) => token[0]?.toUpperCase() || "")
+    .join("") || "U";
+});
+
+const storageSummary = computed(() => fileStore.storageSummary);
+const storageUsageWidth = computed(() => `${Math.min(100, Math.max(0, Number(storageSummary.value?.usagePercent || 0)))}%`);
+
+const applySavedProfile = (savedProfile, options = {}) => {
+  if (options.imageOnly) {
+    mergeProfileImageIntoForm(savedProfile);
+  } else {
+    syncForm(savedProfile);
+  }
+
+  const currentUser = authStore.user || {};
+  const updatedUser = {
+    ...currentUser,
+    name: options.imageOnly ? (profileForm.value.displayName || currentUser.name) : savedProfile.displayName,
+    userName: options.imageOnly ? (profileForm.value.displayName || currentUser.userName) : savedProfile.displayName,
+    email: savedProfile.email || currentUser.email,
+    role: savedProfile.role || currentUser.role,
+    localeCode: options.imageOnly ? (profileForm.value.localeCode || currentUser.localeCode) : savedProfile.localeCode,
+  };
+
+  authStore.user = updatedUser;
+  localStorage.setItem("USERINFO", JSON.stringify(updatedUser));
+};
+
+const openProfileImagePicker = () => {
+  profileImageInput.value?.click();
+};
+
+const handleProfileImageChange = async (event) => {
+  const file = event?.target?.files?.[0];
+  event.target.value = "";
+
+  if (!file) {
+    return;
+  }
+
+  const isSupportedType = ["image/png", "image/jpeg", "image/jpg"].includes(file.type);
+  if (!isSupportedType) {
+    imageFeedback.value = "JPG 또는 PNG 파일만 업로드할 수 있습니다.";
+    return;
+  }
+
+  imageFeedback.value = "";
+  isUploadingImage.value = true;
+
+  try {
+    const savedProfile = await uploadSettingsProfileImage(file);
+    mergeImageOnlyFromParent.value = true;
+    applySavedProfile(savedProfile, { imageOnly: true });
+    emit("saved", savedProfile);
+    imageFeedback.value = "프로필 이미지가 300 x 300px로 적용되었습니다.";
+  } catch (error) {
+    imageFeedback.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      "프로필 이미지를 업로드하지 못했습니다.";
+  } finally {
+    isUploadingImage.value = false;
+  }
+};
+
+const handleSave = async () => {
+  saveError.value = "";
+  isSaving.value = true;
+
+  try {
+    const savedProfile = await updateSettingsProfile({
+      displayName: profileForm.value.displayName,
+      localeCode: profileForm.value.localeCode,
+      regionCode: profileForm.value.regionCode,
+      marketingOptIn: profileForm.value.marketingOptIn,
+      privateProfile: profileForm.value.privateProfile,
+      emailNotification: profileForm.value.emailNotification,
+      securityNotification: profileForm.value.securityNotification,
+    });
+
+    applySavedProfile(savedProfile);
+    emit("saved", savedProfile);
+    emit("close");
+  } catch (error) {
+    saveError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      "설정을 저장하지 못했습니다.";
+  } finally {
+    isSaving.value = false;
+  }
+};
 </script>
 
 <template>
-  <div :class="['modal-overlay', { active: isOpen }]" @click="handleOverlayClick">
-    <div class="modal-content" @click.stop>
-      <!-- Modal Header -->
-      <div
-        class="p-6 border-b border-[var(--border-color)] flex justify-between items-center bg-[var(--bg-input)]/10"
-      >
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 bg-[#4cd5ff] rounded-lg flex items-center justify-center text-white">
-            <i class="fa-solid fa-user-gear text-sm"></i>
+  <div
+    :class="['settings-overlay', { active: isOpen }]"
+    @click="emit('close')"
+  >
+    <div class="settings-modal" @click.stop>
+      <div class="settings-modal__header">
+        <div class="settings-modal__title-wrap">
+          <div class="settings-modal__title-icon">
+            <i class="fa-solid fa-users-gear"></i>
           </div>
-          <h2 class="text-lg font-black tracking-tight">설정</h2>
+          <h2 class="settings-modal__title">설정</h2>
         </div>
+
         <button
+          type="button"
+          class="settings-modal__close"
           @click="emit('close')"
-          class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--bg-input)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
         >
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
 
-      <div class="flex flex-1 overflow-hidden">
-        <!-- Modal Sidebar -->
-        <aside
-          class="modal-sidebar w-56 border-r border-[var(--border-color)] p-4 space-y-1 shrink-0 bg-[var(--bg-input)]/5"
-        >
-          <div
+      <div class="settings-modal__body">
+        <aside class="settings-sidebar">
+          <button
             v-for="tab in tabs"
             :key="tab.id"
+            type="button"
+            class="settings-sidebar__item"
+            :class="{ 'is-active': activeTab === tab.id }"
             @click="activeTab = tab.id"
-            :class="['modal-sidebar-btn', { active: activeTab === tab.id }]"
           >
-            <i :class="tab.icon"></i> {{ tab.label }}
-          </div>
+            <i :class="tab.icon"></i>
+            <span>{{ tab.label }}</span>
+          </button>
         </aside>
 
-        <!-- Modal Content Area -->
-        <div class="flex-1 overflow-y-auto custom-scrollbar p-8">
-          <!-- Tab: Basic Profile -->
+        <section class="settings-content">
           <div
-            v-if="activeTab === 'profile'"
-            class="modal-tab-pane active max-w-2xl mx-auto space-y-10"
+            v-if="isLoading && !settingsProfile"
+            class="settings-placeholder"
           >
-            <section>
-              <h3
-                class="text-sm font-black text-[var(--text-muted)] uppercase tracking-widest mb-6"
-              >
-                프로필 이미지
-              </h3>
-              <div class="flex items-center gap-8">
-                <div class="relative group cursor-pointer">
-                  <img
-                    :src="`https://ui-avatars.com/api/?name=${profile.name}&background=4cd5ff&color=fff`"
-                    class="w-28 h-28 rounded-3xl shadow-2xl border-2 border-[var(--border-color)] transition-transform group-hover:scale-[1.02]"
-                  />
-                  <div
-                    class="absolute inset-0 bg-black/40 rounded-3xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <i class="fa-solid fa-camera text-white text-xl"></i>
-                  </div>
-                </div>
-                <div class="space-y-3">
-                  <div class="flex items-center gap-2">
-                    <span
-                      class="px-2 py-1 bg-gray-500/20 text-blue-500 text-[10px] font-black rounded uppercase"
-                    >
-                      {{ authStore.user?.grade || 'FREE MEMBER' }}
-                    </span>
-                    <span class="text-[11px] text-[var(--text-muted)]">가입일: 2023.10.15</span>
-                  </div>
-                  <p class="text-sm text-[var(--text-muted)]">
-                    정사각형 이미지를 권장합니다. (JPG, PNG)
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            <hr class="border-[var(--border-color)]" />
-
-            <section class="space-y-6">
-              <h3
-                class="text-sm font-black text-[var(--text-muted)] uppercase tracking-widest mb-4"
-              >
-                상세 정보
-              </h3>
-              <div class="grid grid-cols-2 gap-6">
-                <div class="space-y-2">
-                  <label class="text-[11px] font-bold text-[var(--text-muted)] uppercase ml-1"
-                    >사용자 성함</label
-                  >
-                  <input
-                    v-model="profile.name"
-                    type="text"
-                    class="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-xl py-3 px-4 outline-none text-sm focus:border-[var(--accent)] transition-all"
-                  />
-                </div>
-                <div class="space-y-2">
-                  <label class="text-[11px] font-bold text-[var(--text-muted)] uppercase ml-1"
-                    >직함 / 역할</label
-                  >
-                  <input
-                    v-model="profile.role"
-                    type="text"
-                    class="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-xl py-3 px-4 outline-none text-sm focus:border-[var(--accent)] transition-all"
-                  />
-                </div>
-                <div class="space-y-2 col-span-2">
-                  <label class="text-[11px] font-bold text-[var(--text-muted)] uppercase ml-1"
-                    >연락처 (이메일)</label
-                  >
-                  <div class="relative">
-                    <input
-                      v-model="profile.email"
-                      type="email"
-                      class="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-xl py-3 px-4 outline-none text-sm focus:border-[var(--accent)] transition-all pr-24"
-                    />
-                    <button
-                      class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-green-500 bg-green-500/10 px-2 py-1.5 rounded-lg"
-                    >
-                      인증됨
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <hr class="border-[var(--border-color)]" />
-
-            <section class="space-y-4">
-              <h3
-                class="text-sm font-black text-[var(--text-muted)] uppercase tracking-widest mb-4"
-              >
-                선호 설정
-              </h3>
-              <div
-                class="space-y-4 bg-[var(--bg-input)]/20 p-5 rounded-2xl border border-[var(--border-color)]"
-              >
-                <div class="flex items-center justify-between">
-                  <div>
-                    <p class="text-sm font-bold">마케팅 정보 수신</p>
-                    <p class="text-[11px] text-[var(--text-muted)]">
-                      새로운 기능 및 혜택 정보를 받아봅니다.
-                    </p>
-                  </div>
-                  <label class="switch">
-                    <input v-model="preferences.marketing" type="checkbox" />
-                    <span class="slider"></span>
-                  </label>
-                </div>
-                <div class="flex items-center justify-between">
-                  <div>
-                    <p class="text-sm font-bold">프로필 비공개</p>
-                    <p class="text-[11px] text-[var(--text-muted)]">
-                      팀원들에게 내 접속 상태를 숨깁니다.
-                    </p>
-                  </div>
-                  <label class="switch">
-                    <input v-model="preferences.private" type="checkbox" />
-                    <span class="slider"></span>
-                  </label>
-                </div>
-              </div>
-            </section>
+            설정 정보를 불러오는 중입니다.
           </div>
 
-          <!-- Tab: Billing -->
-          <div
-            v-if="activeTab === 'billing'"
-            class="modal-tab-pane active max-w-2xl mx-auto space-y-10"
-          >
-            <section>
-              <h3
-                class="text-sm font-black text-[var(--text-muted)] uppercase tracking-widest mb-6"
-              >
-                현재 플랜 정보
-              </h3>
-              <div
-                class="bg-gradient-to-br from-silver-500 to-blue-700 rounded-3xl p-8 text-white shadow-xl"
-              >
-                <div class="flex justify-between items-start mb-6">
-                  <div>
-                    <p class="text-xs font-bold opacity-80 uppercase tracking-widest">
-                      Active Plan
-                    </p>
-                    <h4 class="text-3xl font-black mt-1">Professional</h4>
+          <template v-else>
+            <div v-if="activeTab === 'profile'" class="settings-pane">
+              <section class="settings-section">
+                <h3 class="settings-section__title">프로필 이미지</h3>
+                <div class="settings-profile-hero">
+                  <div class="settings-avatar-card">
+                    <div class="settings-avatar-preview">
+                      <img
+                        v-if="profileForm.profileImageUrl"
+                        :src="profileForm.profileImageUrl"
+                        :alt="profileForm.displayName"
+                        class="settings-avatar-image"
+                      />
+                      <span v-else>{{ profileInitials }}</span>
+                    </div>
                   </div>
-                  <span class="px-3 py-1 bg-white/20 rounded-full text-[10px] font-bold"
-                    >Annual Billing</span
-                  >
+
+                  <div class="settings-profile-hero__meta">
+                    <div class="settings-profile-badges">
+                      <span class="badge badge-blue">{{ profileForm.membershipLabel }}</span>
+                      <span class="settings-meta-text">가입일: {{ formatDate(profileForm.joinedAt) }}</span>
+                    </div>
+                    <p class="settings-meta-copy">
+                      JPG, PNG 파일을 업로드하면 백엔드에서 300 x 300px 정사각형 이미지로 변환해 저장합니다.
+                    </p>
+                    <div class="settings-upload-row">
+                      <button
+                        type="button"
+                        class="settings-upload-btn"
+                        :disabled="isUploadingImage"
+                        @click="openProfileImagePicker"
+                      >
+                        <i class="fa-solid fa-arrow-up-from-bracket"></i>
+                        <span>{{ isUploadingImage ? "업로드 중..." : "프로필 이미지 업로드" }}</span>
+                      </button>
+                      <input
+                        ref="profileImageInput"
+                        type="file"
+                        class="settings-hidden-input"
+                        accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                        @change="handleProfileImageChange"
+                      />
+                    </div>
+                    <p v-if="imageFeedback" class="settings-upload-feedback">
+                      {{ imageFeedback }}
+                    </p>
+                  </div>
                 </div>
-                <p class="text-sm opacity-90 leading-relaxed mb-6">
-                  귀하의 플랜은 2024년 10월 15일에 갱신됩니다. 연간 구독으로 20% 할인 혜택을 받고
-                  계십니다.
-                </p>
-                <div class="flex gap-3">
-                  <RouterLink :to="{ name: 'payment' }" class="upgrade-link" @click="emit('close')">
+              </section>
+
+              <section class="settings-section">
+                <h3 class="settings-section__title">상세 정보</h3>
+                <div class="settings-grid settings-grid--two">
+                  <label class="settings-field">
+                    <span class="settings-field__label">사용자 성함</span>
+                    <input
+                      v-model="profileForm.displayName"
+                      type="text"
+                      class="settings-input"
+                    />
+                  </label>
+
+                  <label class="settings-field">
+                    <span class="settings-field__label">직함 / 역할</span>
+                    <input
+                      :value="profileForm.role"
+                      type="text"
+                      class="settings-input is-readonly"
+                      readonly
+                    />
+                  </label>
+
+                  <label class="settings-field settings-field--full">
+                    <span class="settings-field__label">연락처 (이메일)</span>
+                    <div class="settings-email-row">
+                      <input
+                        :value="profileForm.email"
+                        type="email"
+                        class="settings-input is-readonly"
+                        readonly
+                      />
+                      <span class="badge" :class="profileForm.emailVerified ? 'badge-green' : 'badge-gray'">
+                        {{ profileForm.emailVerified ? '인증됨' : '미인증' }}
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </section>
+
+              <section class="settings-section">
+                <h3 class="settings-section__title">선호 설정</h3>
+                <div class="settings-toggle-list">
+                  <label class="settings-toggle">
+                    <div>
+                      <p class="settings-toggle__title">마케팅 정보 수신</p>
+                      <p class="settings-toggle__desc">새로운 기능 및 혜택 정보를 받아봅니다.</p>
+                    </div>
+                    <input v-model="profileForm.marketingOptIn" type="checkbox" />
+                  </label>
+
+                  <label class="settings-toggle">
+                    <div>
+                      <p class="settings-toggle__title">프로필 비공개</p>
+                      <p class="settings-toggle__desc">다른 사용자에게 공개 범위를 제한합니다.</p>
+                    </div>
+                    <input v-model="profileForm.privateProfile" type="checkbox" />
+                  </label>
+                </div>
+              </section>
+            </div>
+
+            <div v-else-if="activeTab === 'security'" class="settings-pane">
+              <section class="settings-section">
+                <h3 class="settings-section__title">계정 및 보안</h3>
+                <div class="settings-card-list">
+                  <div class="settings-card">
+                    <p class="settings-card__title">로그인 이메일</p>
+                    <p class="settings-card__value">{{ profileForm.email }}</p>
+                  </div>
+                  <div class="settings-card">
+                    <p class="settings-card__title">이메일 인증 상태</p>
+                    <p class="settings-card__value">{{ profileForm.emailVerified ? "인증 완료" : "인증 필요" }}</p>
+                  </div>
+                  <div class="settings-card">
+                    <p class="settings-card__title">보안 알림</p>
+                    <label class="settings-inline-toggle">
+                      <span>보안 관련 활동 알림 받기</span>
+                      <input v-model="profileForm.securityNotification" type="checkbox" />
+                    </label>
+                  </div>
+                  <div class="settings-card">
+                    <p class="settings-card__title">비밀번호 변경</p>
+                    <p class="settings-card__subtext">현재는 로그인 계정의 비밀번호 변경 기능을 준비 중입니다.</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div v-else-if="activeTab === 'notification'" class="settings-pane">
+              <section class="settings-section">
+                <h3 class="settings-section__title">알림 설정</h3>
+                <div class="settings-toggle-list">
+                  <label class="settings-toggle">
+                    <div>
+                      <p class="settings-toggle__title">이메일 알림</p>
+                      <p class="settings-toggle__desc">파일 공유, 업로드 상태 등의 이메일 알림을 받습니다.</p>
+                    </div>
+                    <input v-model="profileForm.emailNotification" type="checkbox" />
+                  </label>
+
+                  <label class="settings-toggle">
+                    <div>
+                      <p class="settings-toggle__title">보안 이벤트 알림</p>
+                      <p class="settings-toggle__desc">로그인, 권한 변경 등의 보안 관련 알림을 받습니다.</p>
+                    </div>
+                    <input v-model="profileForm.securityNotification" type="checkbox" />
+                  </label>
+                </div>
+              </section>
+            </div>
+
+            <div v-else-if="activeTab === 'language'" class="settings-pane">
+              <section class="settings-section">
+                <h3 class="settings-section__title">언어 및 지역</h3>
+                <div class="settings-grid settings-grid--two">
+                  <label class="settings-field">
+                    <span class="settings-field__label">언어</span>
+                    <select v-model="profileForm.localeCode" class="settings-input">
+                      <option
+                        v-for="option in localeOptions"
+                        :key="option.code"
+                        :value="option.code"
+                      >
+                        {{ option.label }}
+                      </option>
+                    </select>
+                  </label>
+
+                  <label class="settings-field">
+                    <span class="settings-field__label">지역</span>
+                    <select v-model="profileForm.regionCode" class="settings-input">
+                      <option
+                        v-for="option in regionOptions"
+                        :key="option.code"
+                        :value="option.code"
+                      >
+                        {{ option.label }}
+                      </option>
+                    </select>
+                  </label>
+                </div>
+              </section>
+            </div>
+
+            <div v-else-if="activeTab === 'billing'" class="settings-pane">
+              <section class="settings-section">
+                <h3 class="settings-section__title">현재 플랜 정보</h3>
+                <div class="settings-plan-card">
+                  <div class="settings-plan-card__header">
+                    <div>
+                      <p class="settings-plan-card__eyebrow">ACTIVE PLAN</p>
+                      <h4 class="settings-plan-card__title">{{ profileForm.storagePlanLabel }}</h4>
+                    </div>
+                    <span class="badge badge-light">{{ profileForm.membershipLabel }}</span>
+                  </div>
+                  <p class="settings-plan-card__desc">
+                    현재 계정은 {{ profileForm.storagePlanLabel }} 플랜을 사용 중입니다.
+                  </p>
+                  <RouterLink
+                    :to="{ name: 'payment' }"
+                    class="settings-plan-card__cta"
+                    @click="emit('close')"
+                  >
                     플랜 업그레이드
                   </RouterLink>
-                  <button
-                    class="bg-orange-400/30 text-white px-6 py-2.5 rounded-xl text-xs font-bold hover:bg-orange-400/50 transition-colors"
-                  >
-                    구독 취소
-                  </button>
                 </div>
-              </div>
-            </section>
+              </section>
 
-            <hr class="border-[var(--border-color)]" />
-
-            <section class="space-y-4">
-              <h3
-                class="text-sm font-black text-[var(--text-muted)] uppercase tracking-widest mb-4"
-              >
-                리소스 사용량
-              </h3>
-              <div class="grid grid-cols-2 gap-4">
+              <section class="settings-section">
+                <h3 class="settings-section__title">리소스 사용량</h3>
                 <div
-                  class="p-5 bg-[var(--bg-input)]/20 border border-[var(--border-color)] rounded-2xl"
+                  v-if="storageSummary"
+                  class="settings-card-list"
                 >
-                  <div class="flex justify-between items-center mb-3">
-                    <span class="text-xs font-bold">Cloud Storage</span>
-                    <span class="text-xs text-[var(--accent)] font-bold">75%</span>
-                  </div>
-                  <div class="w-full bg-gray-700/30 h-1.5 rounded-full overflow-hidden">
-                    <div class="bg-[var(--accent)] h-full" style="width: 75%"></div>
-                  </div>
-                  <p class="text-[10px] text-[var(--text-muted)] mt-2">37.5 GB / 50 GB 사용 중</p>
-                </div>
-                <div
-                  class="p-5 bg-[var(--bg-input)]/20 border border-[var(--border-color)] rounded-2xl"
-                >
-                  <div class="flex justify-between items-center mb-3">
-                    <span class="text-xs font-bold">API Requests</span>
-                    <span class="text-xs text-blue-400 font-bold">12%</span>
-                  </div>
-                  <div class="w-full bg-gray-700/30 h-1.5 rounded-full overflow-hidden">
-                    <div class="bg-blue-400 h-full" style="width: 12%"></div>
-                  </div>
-                  <p class="text-[10px] text-[var(--text-muted)] mt-2">1,200 / 10,000 요청</p>
-                </div>
-              </div>
-            </section>
-
-            <hr class="border-[var(--border-color)]" />
-
-            <section class="space-y-4">
-              <div class="flex justify-between items-center mb-4">
-                <h3 class="text-sm font-black text-[var(--text-muted)] uppercase tracking-widest">
-                  결제 수단
-                </h3>
-                <button class="text-xs text-[var(--accent)] font-bold hover:underline">
-                  + 카드 추가
-                </button>
-              </div>
-              <div
-                class="p-4 bg-[var(--bg-input)]/20 border border-[var(--border-color)] rounded-2xl flex items-center justify-between"
-              >
-                <div class="flex items-center gap-4">
-                  <div
-                    class="w-12 h-8 bg-white/5 rounded flex items-center justify-center border border-white/10"
-                  >
-                    <i class="fa-brands fa-cc-visa text-blue-500 text-xl"></i>
-                  </div>
-                  <div>
-                    <p class="text-sm font-bold">Visa •••• 4242</p>
-                    <p class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                      Expires 12/26
+                  <div class="settings-card">
+                    <div class="settings-storage-head">
+                      <span>Cloud Storage</span>
+                      <strong>{{ storageSummary.usagePercent }}%</strong>
+                    </div>
+                    <div class="settings-storage-bar">
+                      <div :style="{ width: storageUsageWidth }"></div>
+                    </div>
+                    <p class="settings-card__subtext">
+                      {{ formatBytes(storageSummary.usedBytes) }} / {{ formatBytes(storageSummary.quotaBytes) }} 사용 중
                     </p>
                   </div>
+
+                  <div class="settings-card">
+                    <p class="settings-card__title">활성 파일</p>
+                    <p class="settings-card__value">{{ storageSummary.activeFileCount }}개</p>
+                    <p class="settings-card__subtext">휴지통 제외 기준</p>
+                  </div>
+
+                  <div class="settings-card">
+                    <p class="settings-card__title">휴지통 사용량</p>
+                    <p class="settings-card__value">{{ formatBytes(storageSummary.trashUsedBytes) }}</p>
+                    <p class="settings-card__subtext">휴지통 포함 총 용량 집계</p>
+                  </div>
                 </div>
-                <span
-                  class="px-2 py-1 bg-green-500/10 text-green-500 text-[9px] font-black rounded uppercase"
-                  >Default</span
-                >
-              </div>
-            </section>
 
-            <hr class="border-[var(--border-color)]" />
-
-            <section class="space-y-4">
-              <h3
-                class="text-sm font-black text-[var(--text-muted)] uppercase tracking-widest mb-4"
-              >
-                최근 결제 내역
-              </h3>
-              <div class="overflow-hidden border border-[var(--border-color)] rounded-2xl">
-                <table class="w-full text-left text-xs">
-                  <thead class="bg-[var(--bg-input)]/40 text-[var(--text-muted)] font-bold">
-                    <tr>
-                      <th class="px-5 py-3">Date</th>
-                      <th class="px-5 py-3">Description</th>
-                      <th class="px-5 py-3 text-right">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-[var(--border-color)]">
-                    <tr class="hover:bg-[var(--bg-input)]/10 transition-colors">
-                      <td class="px-5 py-3 text-[var(--text-muted)]">Oct 15, 2023</td>
-                      <td class="px-5 py-3 font-bold">Professional Plan - Annual</td>
-                      <td class="px-5 py-3 text-right font-black">$288.00</td>
-                    </tr>
-                    <tr class="hover:bg-[var(--bg-input)]/10 transition-colors">
-                      <td class="px-5 py-3 text-[var(--text-muted)]">Sep 15, 2022</td>
-                      <td class="px-5 py-3 font-bold">Professional Plan - Annual</td>
-                      <td class="px-5 py-3 text-right font-black">$288.00</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </div>
-
-          <!-- Other Tabs Placeholder -->
-          <div
-            v-if="activeTab === 'security'"
-            class="modal-tab-pane active max-w-2xl mx-auto py-20 text-center"
-          >
-            <i class="fa-solid fa-shield-halved text-4xl text-[var(--text-muted)] mb-4"></i>
-            <h4 class="text-lg font-bold">보안 설정 준비 중</h4>
-            <p class="text-sm text-[var(--text-muted)]">
-              이 기능은 다음 업데이트에 포함될 예정입니다.
-            </p>
-          </div>
-
-          <div
-            v-if="activeTab === 'notif'"
-            class="modal-tab-pane active max-w-2xl mx-auto py-20 text-center"
-          >
-            <i class="fa-solid fa-bell text-4xl text-[var(--text-muted)] mb-4"></i>
-            <h4 class="text-lg font-bold">알림 설정 준비 중</h4>
-            <p class="text-sm text-[var(--text-muted)]">
-              이 기능은 다음 업데이트에 포함될 예정입니다.
-            </p>
-          </div>
-
-          <div
-            v-if="activeTab === 'region'"
-            class="modal-tab-pane active max-w-2xl mx-auto py-20 text-center"
-          >
-            <i class="fa-solid fa-globe text-4xl text-[var(--text-muted)] mb-4"></i>
-            <h4 class="text-lg font-bold">언어 및 지역 준비 중</h4>
-            <p class="text-sm text-[var(--text-muted)]">
-              이 기능은 다음 업데이트에 포함될 예정입니다.
-            </p>
-          </div>
-        </div>
+                <div v-else class="settings-placeholder">
+                  저장 공간 통계를 불러오는 중입니다.
+                </div>
+              </section>
+            </div>
+          </template>
+        </section>
       </div>
 
-      <!-- Modal Footer -->
-      <div
-        class="p-6 bg-[var(--bg-input)]/10 border-t border-[var(--border-color)] flex justify-end gap-3 shrink-0"
-      >
-        <button
-          @click="emit('close')"
-          class="px-6 py-2.5 rounded-xl text-sm font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
-        >
-          취소
-        </button>
-        <button
-          @click="handleSave"
-          :disabled="isSaving"
-          class="btn-orange px-10 py-2.5 rounded-xl text-sm font-black shadow-lg shadow-orange-500/20 active:scale-95 transition-transform"
-        >
-          {{ isSaving ? '저장 중...' : '모든 변경사항 저장' }}
-        </button>
+      <div class="settings-modal__footer">
+        <p v-if="saveError" class="settings-save-error">{{ saveError }}</p>
+        <div class="settings-modal__footer-actions">
+          <button
+            type="button"
+            class="settings-secondary-btn"
+            @click="emit('close')"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            class="settings-primary-btn"
+            :disabled="isSaving || isLoading || isUploadingImage"
+            @click="handleSave"
+          >
+            {{ isSaving ? "저장 중..." : "모든 변경사항 저장" }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.upgrade-link {
-  /* 배경색과 둥근 모서리 */
-  background-color: white !important;
-  border-radius: 0.75rem; /* 12px (rounded-xl) */
-
-  /* 글자 스타일 */
-  color: #2563eb !important; /* 파란색으로 고정 */
-  font-size: 0.75rem; /* 12px (text-xs) */
-  font-weight: 900; /* font-black */
-  text-decoration: none !important; /* 밑줄 제거 */
-
-  /* 크기 및 정렬 */
-  padding: 0.625rem 1.5rem; /* px-6 py-2.5 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  /* 애니메이션 */
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-}
-
-.upgrade-link:hover {
-  background-color: #eff6ff !important; /* hover:bg-blue-50 */
-  transform: translateY(-1px);
-}
-.modal-overlay {
+.settings-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  inset: 0;
+  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(6px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
 }
 
-.modal-overlay.active {
+.settings-overlay.active {
   opacity: 1;
   pointer-events: auto;
 }
 
-.modal-content {
-  background: var(--bg-main, white);
-  width: 90vw;
-  max-width: 1200px;
-  height: 85vh;
-  border-radius: 24px;
-  overflow: hidden;
+.settings-modal {
   display: flex;
+  height: min(86vh, 780px);
+  width: min(92vw, 1200px);
   flex-direction: column;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  transform: scale(0.95);
-  transition: transform 0.2s ease;
+  overflow: hidden;
+  border-radius: 28px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
 }
 
-.modal-overlay.active .modal-content {
-  transform: scale(1);
+.settings-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
+  padding: 24px 24px 20px;
 }
 
-.modal-sidebar-btn {
-  padding: 12px 16px;
-  border-radius: 12px;
+.settings-modal__title-wrap {
   display: flex;
   align-items: center;
   gap: 12px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-  transition: all 0.15s ease;
 }
 
-.modal-sidebar-btn:hover {
-  background: var(--bg-input, #f3f4f6);
+.settings-modal__title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  width: 30px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #38bdf8 0%, #60a5fa 100%);
+  color: #fff;
+}
+
+.settings-modal__title {
+  font-size: 1.5rem;
+  font-weight: 800;
   color: var(--text-main);
 }
 
-.modal-sidebar-btn.active {
-  background: var(--accent, #44d3ff);
+.settings-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  width: 36px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.settings-modal__close:hover {
+  background: var(--bg-input);
+  color: var(--text-main);
+}
+
+.settings-modal__body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.settings-sidebar {
+  width: 224px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  padding: 18px 16px;
+}
+
+.settings-sidebar__item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  border-radius: 16px;
+  padding: 12px 14px;
+  color: var(--text-secondary);
+  font-size: 0.96rem;
+  font-weight: 700;
+  transition: all 0.18s ease;
+}
+
+.settings-sidebar__item:hover {
+  background: var(--bg-input);
+  color: var(--text-main);
+}
+
+.settings-sidebar__item.is-active {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(59, 130, 246, 0.18);
+}
+
+.settings-content {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 30px 36px;
+}
+
+.settings-pane {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.settings-section {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 28px;
+}
+
+.settings-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.settings-section__title {
+  margin-bottom: 18px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text-secondary);
+}
+
+.settings-profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.settings-avatar-card {
+  flex-shrink: 0;
+}
+
+.settings-avatar-preview {
+  display: flex;
+  height: 112px;
+  width: 112px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 28px;
+  background: linear-gradient(135deg, #4cc9f0 0%, #38bdf8 100%);
   color: white;
-}
-.modal-sidebar {
-  --accent: #2563eb;
-}
-.modal-sidebar-btn i {
-  width: 18px;
-  text-align: center;
+  font-size: 3rem;
+  font-weight: 700;
+  box-shadow: 0 18px 40px rgba(56, 189, 248, 0.26);
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
+.settings-avatar-image {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+.settings-profile-hero__meta {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--border-color, #e5e7eb);
-  border-radius: 4px;
+.settings-profile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted, #6b7280);
+.settings-meta-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
-.switch {
+.settings-meta-copy {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.settings-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #38bdf8 0%, #4cc9f0 100%);
+  padding: 12px 16px;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.22);
+}
+
+.settings-upload-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  box-shadow: none;
+}
+
+.settings-hidden-input {
+  display: none;
+}
+
+.settings-upload-feedback {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.settings-grid {
+  display: grid;
+  gap: 22px;
+}
+
+.settings-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-field--full {
+  grid-column: 1 / -1;
+}
+
+.settings-field__label {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.settings-input {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  font-size: 0.96rem;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.settings-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16);
+  background: var(--bg-main);
+}
+
+.settings-input.is-readonly {
+  cursor: default;
+  background: var(--bg-input);
+}
+
+.settings-email-row {
   position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 24px;
 }
 
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
+.settings-email-row .badge {
   position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: 0.3s;
-  border-radius: 24px;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
-.slider:before {
-  position: absolute;
-  content: '';
-  height: 18px;
+.settings-toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  background: var(--bg-secondary);
+  padding: 18px 20px;
+}
+
+.settings-toggle__title {
+  font-size: 0.96rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.settings-toggle__desc {
+  margin-top: 4px;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.settings-toggle input,
+.settings-inline-toggle input {
+  accent-color: #2563eb;
   width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.3s;
-  border-radius: 50%;
+  height: 18px;
 }
 
-input:checked + .slider {
-  background-color: #4cd5ff;
+.settings-card-list {
+  display: grid;
+  gap: 14px;
 }
 
-input:checked + .slider:before {
-  transform: translateX(20px);
+.settings-card {
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  background: var(--bg-secondary);
+  padding: 18px 20px;
 }
 
-.btn-orange {
-  background: linear-gradient(135deg, #4cd5ff 0%, #4cd5ff 100%);
-  color: white;
+.settings-card__title {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.settings-card__value {
+  margin-top: 8px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.settings-card__subtext {
+  margin-top: 8px;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.settings-inline-toggle {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+
+.settings-plan-card {
+  border-radius: 28px;
+  background: linear-gradient(135deg, #1d4ed8 0%, #38bdf8 100%);
+  padding: 26px 28px;
+  color: #fff;
+  box-shadow: 0 20px 40px rgba(37, 99, 235, 0.18);
+}
+
+.settings-plan-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.settings-plan-card__eyebrow {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  opacity: 0.82;
+}
+
+.settings-plan-card__title {
+  margin-top: 8px;
+  font-size: 1.9rem;
   font-weight: 900;
 }
 
-.btn-orange:hover {
-  transform: translateY(-1px);
+.settings-plan-card__desc {
+  margin-top: 16px;
+  max-width: 32rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  opacity: 0.94;
 }
 
-.btn-orange:disabled {
-  opacity: 0.6;
+.settings-plan-card__cta {
+  margin-top: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: #fff;
+  padding: 12px 18px;
+  color: #2563eb;
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.settings-storage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.settings-storage-bar {
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border-color);
+  height: 10px;
+}
+
+.settings-storage-bar > div {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb 0%, #38bdf8 100%);
+}
+
+.settings-placeholder {
+  display: flex;
+  min-height: 280px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: 20px;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.badge-blue {
+  background: rgba(59, 130, 246, 0.14);
+  color: #2563eb;
+}
+
+.badge-green {
+  background: rgba(34, 197, 94, 0.16);
+  color: #16a34a;
+}
+
+.badge-gray {
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.badge-light {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.settings-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--border-color);
+  padding: 20px 24px;
+  background: var(--bg-elevated);
+}
+
+.settings-save-error {
+  color: #ef4444;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.settings-modal__footer-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-secondary-btn {
+  padding: 12px 18px;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.settings-secondary-btn:hover {
+  background: var(--bg-input);
+}
+
+.settings-primary-btn {
+  border-radius: 16px;
+  background: linear-gradient(135deg, #38bdf8 0%, #4cc9f0 100%);
+  padding: 12px 22px;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 800;
+  box-shadow: 0 14px 28px rgba(56, 189, 248, 0.22);
+}
+
+.settings-primary-btn:disabled {
   cursor: not-allowed;
+  opacity: 0.65;
+  box-shadow: none;
+}
+
+@media (max-width: 980px) {
+  .settings-modal {
+    height: min(92vh, 860px);
+  }
+
+  .settings-modal__body {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    overflow-x: auto;
+    gap: 10px;
+  }
+
+  .settings-sidebar__item {
+    min-width: max-content;
+  }
+
+  .settings-grid--two {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .settings-modal {
+    width: calc(100vw - 24px);
+    border-radius: 24px;
+  }
+
+  .settings-content {
+    padding: 22px 18px 28px;
+  }
+
+  .settings-profile-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settings-modal__footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-modal__footer-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
 }
 </style>

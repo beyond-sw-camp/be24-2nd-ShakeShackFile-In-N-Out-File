@@ -15,8 +15,8 @@ const textPreview = ref(null);
 const textPreviewError = ref("");
 const isTextPreviewLoading = ref(false);
 
-const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic"]);
-const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v"]);
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic", "avif", "apng", "jfif", "tif", "tiff"]);
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp"]);
 const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "aac", "flac", "ogg", "m4a"]);
 const PDF_EXTENSIONS = new Set(["pdf"]);
 const TEXT_EXTENSIONS = new Set([
@@ -29,9 +29,13 @@ const extension = computed(() =>
   String(props.file?.extension || props.file?.fileFormat || "").toLowerCase(),
 );
 
+const contentType = computed(() =>
+  String(props.file?.contentType || props.file?.raw?.contentType || "").toLowerCase(),
+);
+
 const previewKind = computed(() => {
-  if (IMAGE_EXTENSIONS.has(extension.value)) return "image";
-  if (VIDEO_EXTENSIONS.has(extension.value)) return "video";
+  if (contentType.value.startsWith("image/") || IMAGE_EXTENSIONS.has(extension.value)) return "image";
+  if (contentType.value.startsWith("video/") || VIDEO_EXTENSIONS.has(extension.value)) return "video";
   if (AUDIO_EXTENSIONS.has(extension.value)) return "audio";
   if (PDF_EXTENSIONS.has(extension.value)) return "pdf";
   if (TEXT_EXTENSIONS.has(extension.value)) return "text";

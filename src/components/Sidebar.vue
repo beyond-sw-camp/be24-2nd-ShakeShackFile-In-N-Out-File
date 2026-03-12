@@ -63,12 +63,16 @@ const storageUsageText = computed(() => {
 
   return `${formatBytes(storageSummary.value.usedBytes)} / ${formatBytes(storageSummary.value.quotaBytes)} 사용`
 })
+
+const sidebarToggleStyle = computed(() => ({
+  left: isSidebarOpen.value ? 'calc(16rem - 0.75rem)' : '0.75rem',
+}))
 </script>
 
 <template>
   <div class="relative">
     <aside 
-      class="bg-[var(--bg-main)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
+      class="bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
       :class="[
         isSidebarOpen ? 'w-64 overflow-visible' : 'w-0 border-r-0 overflow-hidden'
       ]"
@@ -144,7 +148,7 @@ const storageUsageText = computed(() => {
         <div class="flex items-center gap-2">
           <RouterLink :to="{ name: 'workspace' }" @click.stop>
           <button 
-            class="p-1 rounded hover:bg-gray-200 text-[var(--text-muted)] hover:text-blue-500 transition-colors"
+            class="p-1 rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-blue-500"
           >
             <i class="fa-solid fa-plus text-[10px]"></i>
           </button>
@@ -253,8 +257,8 @@ const storageUsageText = computed(() => {
 
     <button
       @click="toggleSidebar"
-      class="absolute top-4 z-50 w-8 h-8 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded-lg flex items-center justify-center text-[var(--text-main)] shadow-lg transition-all duration-300 hover:bg-[var(--bg-input)] hover:scale-110"
-      :class="isSidebarOpen ? 'left-[15rem]' : 'left-2'"
+      class="sidebar-toggle absolute top-4 z-50 flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--bg-elevated)] text-[var(--text-main)] shadow-lg transition-all duration-300 hover:bg-[var(--bg-input)]"
+      :style="sidebarToggleStyle"
       :title="isSidebarOpen ? '사이드바 숨기기' : '사이드바 보이기'"
     >
       <i class="fas transition-transform duration-300" :class="isSidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
@@ -283,5 +287,15 @@ nav::-webkit-scrollbar-thumb:hover {
 .overflow-visible {
   /* 가로 넘침이 잘리지 않도록 설정 */
   overflow: visible !important; 
+}
+
+.sidebar-toggle {
+  transform: translateX(-50%);
+}
+
+@media (max-width: 1024px) {
+  .sidebar-toggle {
+    top: 0.75rem;
+  }
 }
 </style>

@@ -741,40 +741,40 @@ onMounted(() => {
 .file-filter__label {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #6b7280;
+  color: var(--text-muted);
 }
 
 .file-filter__input {
   width: 100%;
   border-radius: 0.9rem;
-  border: 1px solid #d1d5db;
-  background: #fff;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-main);
   padding: 0.7rem 0.9rem;
   font-size: 0.9rem;
-  color: #111827;
+  color: var(--text-main);
   outline: none;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
 }
 
 .file-filter__input:focus {
-  border-color: #60a5fa;
+  border-color: var(--accent);
   box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16);
 }
 
 .view-toggle {
   border-radius: 999px;
-  border: 1px solid #d1d5db;
-  background: #fff;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-main);
   padding: 0.68rem 0.95rem;
   font-size: 0.85rem;
   font-weight: 700;
-  color: #4b5563;
+  color: var(--text-secondary);
   transition: all 0.18s ease;
 }
 
 .view-toggle.is-active {
-  border-color: #2563eb;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 </style>
