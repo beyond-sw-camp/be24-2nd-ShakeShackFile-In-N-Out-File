@@ -76,14 +76,14 @@ const router = createRouter({
         {
           path: '/workspace', 
           name: 'workspace',
-          component: () => import('../views/WorkSpace.vue'),
+          component: () => import('@/views/workspace/WorkSpace.vue'),
           meta: { title: '워크스페이스', requiresAuth: true },
           children: [
             {
               // :id 뒤에 (\\d+)를 붙여 숫자만 매칭되도록 설정
               path: 'read/:id(\\d+)', 
               name: 'workspace_read',
-              component: () => import('../views/WorkSpace.vue'),
+              component: () => import('@/views/workspace/WorkSpace.vue'),
               meta: { title: '읽기 전용 ', requiresAuth: true },
 
               // 페이지 진입 전 실행되는 가드
@@ -92,6 +92,11 @@ const router = createRouter({
               }
             }
           ],
+        },
+        {
+          path: '/workspace/invite/:postIdx',
+          name: '워크스페이스 초대',
+          component: () => import('@/views/workspace/InviteHandler.vue')
         },
         // /main/* 하위의 잘못된 경로도 404로 보내기
         {

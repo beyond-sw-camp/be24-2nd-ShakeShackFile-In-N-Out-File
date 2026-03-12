@@ -5,10 +5,15 @@ import FileUpload from '@/components/function/FilesUpload.vue';
 import loadpost from '@/components/workspace/loadpost';
 import { useFileStore } from '@/stores/useFileStore';
 import postApi from '@/api/postApi';
+import ShareModal from '@/views/workspace/ShareModal.vue'; // {추가} 모달 컴포넌트 임포트
 
 const fileStore = useFileStore()
 const isSidebarOpen = ref(true) // 사이드바 토글 상태
 const openMenuId = ref(null) // 현재 열려있는 메뉴의 ID 관리
+
+// {추가} 공유 모달 관련 상태
+const isShareModalOpen = ref(false);
+const targetPostIdx = ref(null);
 
 // 1. loadpost에서 정의된 상태와 함수를 가져옵니다.
 const { 
@@ -93,6 +98,8 @@ const goToPost = (idx) => {
   if (!idx) return;
   router.push(`/workspace/read/${idx}`);
 };
+// 1. 선택된 게시글의 상태를 저장할 ref 추가
+const targetPostStatus = ref('Private');
 
 // 메뉴 액션 함수들
 const handleAction = async (action, idx) => {
@@ -108,6 +115,15 @@ const handleAction = async (action, idx) => {
       // 만약 현재 삭제한 페이지를 보고 있었다면 홈으로 이동시키는 로직을 추가할 수도 있습니다.
       router.push({ name: 'home' });
     }
+  }else if (action === 'share') {
+    // [수정] 현재 클릭한 아이템의 status를 찾아서 저장합니다.
+    const allItems = [...personalItems.value, ...sharedItems.value];
+    const selectedItem = allItems.find(item => item.post_idx === idx);
+
+    targetPostIdx.value = idx;
+    // 서버 데이터의 status('Private', 'Public' 등)를 모달에 넘겨줄 변수에 할당
+    targetPostStatus.value = selectedItem ? selectedItem.status : 'Private';
+    isShareModalOpen.value = true;
   } else {
     console.log(`${action} action on post: ${idx}`);
   }
@@ -117,6 +133,12 @@ const handleAction = async (action, idx) => {
 
 <template>
   <div class="relative">
+    <ShareModal 
+      :is-open="isShareModalOpen" 
+      :post-idx="targetPostIdx"
+      :initial-status="targetPostStatus" 
+      @close="isShareModalOpen = false"
+    />
     <aside 
       class="bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
       :class="[
