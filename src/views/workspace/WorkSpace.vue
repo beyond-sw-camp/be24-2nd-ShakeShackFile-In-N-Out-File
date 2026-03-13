@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { initEditor } from '@/components/workspace/editor' 
 import postApi from '@/api/postApi'
 
@@ -11,9 +11,10 @@ const remoteCursors = ref({})
 const isEditorLoading = ref(false) 
 
 const route = useRoute();
+const router = useRouter(); // 리다이렉트를 위한 라우터 추가
 const isValid = computed(() => title.value.trim().length > 0)
 
-// {핵심 추가} 중복 렌더링을 방지하기 위한 셋업 고유 ID
+// 중복 렌더링을 방지하기 위한 셋업 고유 ID
 let currentSetupId = 0;
 
 async function handleSave() {
@@ -55,22 +56,19 @@ async function prepareData() {
 }
 
 async function setupEditor() {
-  const setupId = ++currentSetupId; // {추가} 실행될 때마다 고유 ID 발급
+  const setupId = ++currentSetupId;
 
   if (!editorHolder.value) return;
 
   isEditorLoading.value = true;
   const data = await prepareData();
 
-  // {추가} 데이터를 받아오는 비동기 시간 동안 다른 셋업이 시작되었다면 즉시 중단
   if (setupId !== currentSetupId) return;
 
   title.value = data.title || '';
 
-  // 1. 기존 에디터 자원 해제
   if (editorApi.value) {
     try {
-      // {수정} 에디터가 비동기 렌더링 중일 때 파기하면 DOM에 찌꺼기가 남으므로 안전하게 대기
       if (editorApi.value.editor && editorApi.value.editor.isReady) {
         await editorApi.value.editor.isReady;
       }
@@ -79,14 +77,12 @@ async function setupEditor() {
     editorApi.value = null;
   }
 
-  // 2. DOM 청소 및 상태 초기화
   await nextTick();
   if (editorHolder.value) {
     editorHolder.value.innerHTML = "";
   }
 
   try {
-    // 3. 에디터 초기화
     const newEditorApi = await initEditor(
       editorHolder.value,
       `notion-room-${data.idx ? data.idx : 'new-' + Date.now()}`,
@@ -95,7 +91,6 @@ async function setupEditor() {
       data.title
     );
 
-    // {추가} 초기화 도중에 라우터가 또 변경되었다면 새로 만든 에디터 즉시 파기
     if (setupId !== currentSetupId) {
       if (newEditorApi.editor && newEditorApi.editor.isReady) {
         await newEditorApi.editor.isReady;
@@ -111,11 +106,38 @@ async function setupEditor() {
   } catch (error) {
     console.error('에디터 초기화 실패:', error);
   } finally {
-    // {수정} 현재 진행 중인 셋업일 때만 로딩 상태 해제
     if (setupId === currentSetupId) {
       isEditorLoading.value = false;
     }
   }
+}
+
+// --- 추가: UUID 리다이렉트 처리 로직 ---
+async function checkAndRedirectUuid() {
+  const uuid = route.query.uuid;
+  
+  // 경로에 '/invite'가 포함되어 있고 uuid 파라미터가 있는 경우
+  if (route.path.includes('/invite') && uuid) {
+    try {
+      // UUID를 기반으로 게시글 정보(idx)를 불러옴
+      const response = await postApi.getPostByUuid(uuid); 
+      const data = response.data || response;
+      
+      if (data && data.idx) {
+        // 성공적으로 idx를 찾았다면 해당 게시글 페이지로 리다이렉트 (뒤로가기 꼬임 방지를 위해 replace 사용)
+        await router.replace({ name: 'workspace_read', params: { id: data.idx } });
+        return true; 
+      } else {
+        throw new Error("게시글 정보가 없습니다.");
+      }
+    } catch (error) {
+      console.error('UUID로 게시글을 찾을 수 없습니다.', error);
+      // 찾을 수 없을 때는 빈 워크스페이스로 이동
+      await router.replace('/workspace');
+      return true;
+    }
+  }
+  return false; // 리다이렉트 조건에 해당하지 않음
 }
 
 onMounted(async () => {
@@ -123,7 +145,14 @@ onMounted(async () => {
   isDarkMode.value = savedTheme === 'dark' || 
     (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
   applyTheme(isDarkMode.value)
-  await setupEditor();
+  
+  // 1. UUID 리다이렉트 먼저 체크
+  const isRedirected = await checkAndRedirectUuid();
+  
+  // 2. 리다이렉트가 발생하지 않은 일반 진입일 경우에만 에디터 렌더링 시작
+  if (!isRedirected) {
+    await setupEditor();
+  }
 })
 
 watch(() => route.params.id, async () => {

@@ -80,6 +80,13 @@ const router = createRouter({
           meta: { title: '워크스페이스', requiresAuth: true },
           children: [
             {
+              // 추가된 부분: /invite 로 들어와도 WorkSpace 컴포넌트를 연결해줌
+              path: 'invite',
+              name: 'workspace_invite',
+              component: () => import('@/views/workspace/WorkSpace.vue'),
+              meta: { title: '초대 링크 이동 중', requiresAuth: true },
+            },
+            {
               // :id 뒤에 (\\d+)를 붙여 숫자만 매칭되도록 설정
               path: 'read/:id(\\d+)', 
               name: 'workspace_read',
