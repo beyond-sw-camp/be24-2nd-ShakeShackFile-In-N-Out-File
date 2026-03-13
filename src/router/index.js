@@ -93,11 +93,6 @@ const router = createRouter({
             }
           ],
         },
-        {
-          path: '/workspace/invite/:postIdx',
-          name: '워크스페이스 초대',
-          component: () => import('@/views/workspace/InviteHandler.vue')
-        },
         // /main/* 하위의 잘못된 경로도 404로 보내기
         {
           path: ':pathMatch(.*)*',
@@ -118,6 +113,13 @@ const router = createRouter({
       name: 'FindMember',
       component: () => import('../views/user/FindMember.vue'),
       meta: { title: '회원 찾기', requiresAuth: false },
+    },
+    {
+          path: '/workspace/verify',
+          name: 'WorkspaceVerify',
+          component: () => import('@/views/workspace/InviteVerify.vue'),
+          // postIdx가 꼭 경로에 필요하다면 아래처럼 쓸 수도 있지만, 
+          // 이메일 링크의 token 방식을 쓰려면 /workspace/verify 가 가장 깔끔합니다.
     },
     // 404 페이지 - 모든 잘못된 경로를 캐치 (반드시 맨 마지막!)
     {
