@@ -74,6 +74,12 @@ const router = createRouter({
           meta: { title: '저장용량', requiresAuth: true },
         },
         {
+          path: 'administrator',
+          name: 'administrator',
+          component: () => import('../views/dashboard/AdministratorView.vue'),
+          meta: { title: '관리자 페이지', requiresAuth: true, requiresAdmin: true },
+        },
+        {
           path: '/workspace', 
           name: 'workspace',
           component: () => import('@/views/workspace/WorkSpace.vue'),
@@ -147,7 +153,10 @@ router.beforeEach(async (to, from, next) => {
   }
 
   const hasTokenInUrl = to.query.accessToken || to.query.token
-  let isAuthenticated = !!authStore.token
+  const isAuthenticated = !!authStore.token
+  const isAdministrator =
+    authStore.user?.email === 'administrator@administrator.adm' &&
+    authStore.user?.role === 'ROLE_ADMIN'
 
   // 2. 인증 필요 페이지 접근 제어 및 Silent Refresh 로직
   if (to.meta.requiresAuth && !isAuthenticated && !hasTokenInUrl) {
@@ -161,6 +170,12 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
+  if (to.meta.requiresAdmin && !isAdministrator) {
+    return next({ name: isAuthenticated ? 'home' : 'login' })
+  }
+
+  // 4. 워크스페이스 데이터 로드 로직 (방법 3 통합)
+  // 대상이 workspace_read 페이지이고, ID가 바뀔 때만 실행
   // 3. 재발급 시도 이후에도 인증되지 않았다면 차단 방어 로직
   if (to.meta.requiresAuth && !isAuthenticated && !hasTokenInUrl) {
     return next({ name: 'login' })
