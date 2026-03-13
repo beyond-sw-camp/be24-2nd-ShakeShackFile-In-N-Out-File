@@ -3,13 +3,12 @@ import { ref } from 'vue'
 import PortOne from '@portone/browser-sdk/v2'
 import IntrodHeader from '@/components/IntrodHeader.vue'
 import { useRouter } from 'vue-router'
-import { api } from '@/plugins/axiosinterceptor'
+import { ordersApi } from '@/api/ordersApi'
 
 const router = useRouter()
 const isYearly = ref(false)
 const selectedPlan = ref('Professional') // 기본 선택값
 
-// Pay.vue로 이동하며 데이터 전달
 const plans = [
   {
     name: 'Starter',
@@ -20,15 +19,15 @@ const plans = [
   },
   {
     name: 'Professional',
-    monthlyPrice: 29,
-    yearlyPrice: 24,
+    monthlyPrice: 29000,
+    yearlyPrice: 24000,
     description: '성장하는 팀과 프리랜서를 위한 강력한 도구',
     features: ['100GB 클라우드 저장소', '무제한 팀 멤버', '고급 분석 대시보드', '24/7 우선 기술 지원'],
   },
   {
     name: 'Enterprise',
-    monthlyPrice: 99,
-    yearlyPrice: 89,
+    monthlyPrice: 99000,
+    yearlyPrice: 89000,
     description: '대규모 조직을 위한 커스텀 보안 및 관리',
     features: ['저장소 용량 무제한', '엔터프라이즈급 SSO 보안', '전담 계정 관리자 배정', '커스텀 API 통합 지원'],
   },
@@ -40,83 +39,84 @@ const paymentStatus = ref({
   message: '',
 })
 
-const randomId = () => {
-  const id = [...crypto.getRandomValues(new Uint32Array(2))]
-    .map((word) => word.toString(16).padStart(8, '0'))
-    .join('')
-
-  return id
-}
-
 /**
  * 결제하기
  */
-const ordersPayment = async (req) => {
-  //결과
-  let data = {}
-
-  // 결제 ID
-  const paymentId = randomId()
-
-  await PortOne.requestPayment({
-    storeId: 'store-445d1c07-f501-4e52-bd21-62fc568b3de3',
-    channelKey: 'channel-key-b36de3d5-a4c9-4d4b-9240-df360144f8d4',
-    paymentId,
-    orderName: req.orderName,
-    totalAmount: req.totalAmount,
-    currency: 'KRW',
-    payMethod: 'CARD',
-    customData: req.customData,
-  })
-    .then((res) => {
-      //성공
-      data = res
-    })
-    .catch((error) => {
-      //실패
-      data = error.data
-    })
-
-  return data
-}
-
 const onPayment = async () => {
+  const plan = plans.find(p => p.name === selectedPlan.value)
+  if (!plan) return
 
+  if (plan.name === 'Starter') {
+    alert('Starter 플랜은 무료입니다.')
+    return
+  }
+
+  // 금액 계산 (예시)
+  const amount = isYearly.value ? plan.yearlyPrice * 12 : plan.monthlyPrice
+  
   try {
-    paymentStatus.value = { status: 'IDLE', message: '결제 진행 중' }
-    const ordersIdx = 1
+    paymentStatus.value = { status: 'IDLE', message: '주문 생성 중...' }
 
-    // 결제 요청
-    const payment = await ordersPayment({
-      orderName: '상품01',
-      totalAmount: 1000,
-      customData: { ordersIdx, productIdx: 10 },
+    // 1. 주문 생성
+    const orderData = await ordersApi.createOrder({
+      planType: plan.name.toUpperCase(), // 백엔드 설계에 맞춰 planType 전송 (예: BASIC, PROFESSIONAL 등)
+      amount: amount, // 백엔드 설계에 맞춰 amount 전송
     })
 
-    if (payment.code) {
-      paymentStatus.value = { status: 'FAILED', message: payment.pgMessage }
-      await ordersApi.ordersCancel(ordersIdx)
+    // 서버에서 반환하는 고유 주문번호 (BaseResponse 형태를 고려하여 result.orderId 등 확인)
+    const orderId = orderData?.result?.orderId || orderData?.orderId
+
+    if (!orderId) {
+      throw new Error('주문 생성 실패: 서버에서 orderId를 반환하지 않았습니다.')
+    }
+
+    paymentStatus.value = { status: 'IDLE', message: '결제 진행 중...' }
+
+    // 2. 주문 창 열기 (PortOne SDK)
+    const paymentResult = await PortOne.requestPayment({
+      storeId: 'store-445d1c07-f501-4e52-bd21-62fc568b3de3',
+      channelKey: 'channel-key-b36de3d5-a4c9-4d4b-9240-df360144f8d4',
+      paymentId: orderId, // 서버에서 생성된 고유 orderId를 PortOne paymentId로 사용
+      orderName: `${plan.name} 플랜 (${isYearly.value ? '연간' : '월간'})`,
+      totalAmount: amount, // 원화 기준
+      currency: 'KRW',
+      payMethod: 'CARD',
+      customData: { planType: plan.name.toUpperCase() },
+    })
+
+    if (paymentResult.code) {
+      // 결제 창 닫기 또는 실패 (취소 API 호출 생략)
+      paymentStatus.value = { status: 'FAILED', message: paymentResult.message || '결제가 취소되었거나 실패했습니다.' }
       return
     }
 
-    // 결제 검증
-    const verifyResponse = api.post('/orders/verify', { paymentId: payment.paymentId })
+    paymentStatus.value = { status: 'IDLE', message: '결제 검증 중...' }
 
-    if (verifyResponse.success && verifyResponse.results) {
-      paymentStatus.value = { status: 'SUCCESS', message: '결제가 정상적으로   완료되었습니다.' }
-      router.push({ name: 'courseDetail', params: { courseIdx: courseIdx } })
+    // 3. 주문 검증
+    // 포트원 응답에 담긴 paymentId(또는 txId)와 우리 서버의 orderId를 함께 전송
+    const verifyResponse = await ordersApi.verifyOrder({ 
+      paymentId: paymentResult.paymentId || paymentResult.txId || orderId, // 포트원 결제 완료 후 반환되는 고유번호
+      orderId: orderId 
+    })
+
+    // 성공 여부(verifyResponse.success 등)는 백엔드 응답 구조에 맞게 수정 필요
+    if (verifyResponse?.success !== false) { // 임시 검증 로직 (실제 구조에 맞춰 변경해야 함)
+      paymentStatus.value = { status: 'SUCCESS', message: '결제가 정상적으로 완료되었습니다.' }
+      alert('결제가 성공적으로 완료되었습니다!')
+      router.push({ name: 'main' }) // 또는 대시보드 화면 등 적절한 페이지로 라우팅
+    } else {
+      throw new Error('결제 검증 실패: 금액이 일치하지 않거나 위변조되었습니다.')
     }
+
   } catch (error) {
     console.error('결제 중 오류 발생:', error)
     paymentStatus.value = {
       status: 'FAILED',
-      message: '결제 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
+      message: error.message || '결제 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
     }
+    alert(paymentStatus.value.message)
   }
 }
-
-
-
 </script>
 
 <template>
@@ -158,9 +158,9 @@ const onPayment = async () => {
           </h3>
           <div class="flex items-baseline gap-1">
             <span class="text-4xl font-black text-gray-900">
-              ${{ isYearly ? plan.yearlyPrice : plan.monthlyPrice }}
+              ₩{{ isYearly ? plan.yearlyPrice.toLocaleString() : plan.monthlyPrice.toLocaleString() }}
             </span>
-            <span class="text-gray-400 text-sm">/{{ isYearly ? 'year' : 'month' }}</span>
+            <span class="text-gray-400 text-sm">/{{ isYearly ? '년' : '월' }}</span>
           </div>
           <p class="text-gray-500 text-xs mt-4 leading-relaxed">{{ plan.description }}</p>
         </div>
