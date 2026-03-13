@@ -136,6 +136,19 @@ const verifyEmail = async (uuid, type) => {
     throw error;
   }
 }
+const getPostByUuid = async (uuid) => {
+  try {
+    const response = await api.post('/workspace/invite', null, {
+      params: {
+        uuid: uuid
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
 
 
 export default { 
@@ -147,5 +160,6 @@ export default {
   updateShareStatus,
   loadRole,
   saveRole,
-  verifyEmail
+  verifyEmail,
+  getPostByUuid
 }
