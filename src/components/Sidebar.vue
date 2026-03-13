@@ -29,6 +29,9 @@ const {
   side_list 
 } = loadpost;
 
+// ✨ 추가: 인터벌 ID를 저장할 변수
+let sideListTimer = null;
+
 const scrollToTop = () => {
   window.scrollTo({
     top: 0,
@@ -49,9 +52,20 @@ onMounted(() => {
   side_list();
   fileStore.fetchStorageSummary().catch(() => {})
   window.addEventListener('click', closeMenu);
+
+  // ✨ 추가: 30초마다 side_list 실행 (30000ms)
+  sideListTimer = setInterval(() => {
+    console.log('실시간 리스트 갱신 중...');
+    side_list();
+  }, 30000);
 })
 
 onBeforeUnmount(() => {
+  // ✨ 추가: 컴포넌트 언마운트 시 인터벌 해제
+  if (sideListTimer) {
+    clearInterval(sideListTimer);
+  }
+
   window.removeEventListener('click', closeMenu);
 })
  
@@ -80,9 +94,20 @@ const sidebarToggleStyle = computed(() => ({
   left: isSidebarOpen.value ? 'calc(16rem - 0.75rem)' : '0.75rem',
 }))
 const router = useRouter();
-const goToPost = (idx) => {
+const goToPost = async (idx) => {
   if (!idx) return;
-  router.push(`/workspace/read/${idx}`);
+
+  // 1. 현재 켜져 있는 에디터의 destroy를 먼저 실행
+  // (initEditor에서 반환받은 destroy 함수를 변수에 보관하고 있어야 합니다)
+  if (typeof window.__activeEditorDestroy === 'function') {
+    window.__activeEditorDestroy();
+    window.__activeEditorDestroy = null; // 실행 후 초기화
+  }
+
+  // 2. 웹소켓이 완전히 닫힐 시간을 아주 잠깐 준 뒤 이동
+  setTimeout(() => {
+    router.push(`/workspace/read/${idx}`);
+  }, 10);
 };
 
 const targetPostStatus = ref('Private');

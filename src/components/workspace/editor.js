@@ -1,5 +1,3 @@
-// useEditor.js 수정본
-
 import EditorJS from '@editorjs/editorjs'
 import Header from '@editorjs/header'
 import List from '@editorjs/list'
@@ -28,13 +26,16 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   if (!holderElement) throw new Error('holderElement is required')
 
   const ydoc = new Y.Doc()
-  const provider = new WebsocketProvider('ws://10.10.10.100:8080', room, ydoc)
-  const yText = ydoc.getText('contents')
+  const provider = new WebsocketProvider('ws://localhost:1234', room, ydoc)
+  
+  const yMap = ydoc.getMap('workspace_data')
   const yTitle = ydoc.getText('title')
 
-  if (initialTitle && yTitle.toString() === '') {
-    yTitle.insert(0, initialTitle)
-  }
+  provider.on('sync', (isSynced) => {
+    if (isSynced && initialTitle && yTitle.toString() === '') {
+      yTitle.insert(0, initialTitle)
+    }
+  })
 
   const awareness = provider.awareness
   const remoteCursorsRef = ref({})
@@ -42,7 +43,31 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   const colors = ['#FF6B6B','#6BCB77','#4D96FF','#FF7BD1','#FFD93D','#8E6BFF']
   const myId = Math.floor(Math.random() * colors.length)
   const myColor = colors[myId]
-  const myName = `사용자 ${myId + 1}`
+
+ // ✨ 수정: 토큰의 'name' 키를 참조하고 한글 깨짐 방지 로직 추가
+  let myName = `사용자 ${myId + 1}`
+  const token = localStorage.getItem('ACCESS_TOKEN') 
+  if (token) {
+    try {
+      const base64Url = token.split('.')[1]
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+      
+      // 한글(유니코드) 깨짐 방지를 위한 디코딩 처리
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+      
+      const payload = JSON.parse(jsonPayload)
+      
+      // 보내주신 페이로드 구조에 맞춰 payload.name을 최우선으로 가져옵니다.
+      myName = payload.name || payload.username || payload.nickname || myName
+      console.log(myName);
+    } catch (e) {
+      console.warn('토큰에서 사용자 정보를 읽어오는데 실패했습니다.', e)
+    }
+  }
+
+  awareness.setLocalState({ user: { name: myName, color: myColor } })
 
   awareness.setLocalState({ user: { name: myName, color: myColor } })
 
@@ -68,21 +93,24 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   let isRendering = false 
 
   async function renderFromY(yval) {
-    if (!editor || !yval || isRendering) return
-    
+    if (!editor || isRendering) return
+    if (!yval || yval === '""' || yval === '') return;
+
     try {
       await editor.isReady;
-      
-      const currentData = await editor.save();
-      if (JSON.stringify(currentData) === yval) return;
-
       const parsed = JSON.parse(yval)
       if (parsed && Array.isArray(parsed.blocks)) {
+        const currentData = await editor.save();
+        if (JSON.stringify(currentData.blocks) === JSON.stringify(parsed.blocks)) return;
+
         isRendering = true; 
-        suppressLocal = true
-        await editor.blocks.render(parsed.blocks)
-        suppressLocal = false
-        isRendering = false;
+        suppressLocal = true;
+        await editor.render(parsed);
+        
+        setTimeout(() => {
+          suppressLocal = false;
+          isRendering = false;
+        }, 100);
       }
     } catch (e) {
       console.warn('failed to parse yval', e)
@@ -93,13 +121,13 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
   let parsedData = { blocks: [] }; 
   try {
-    if (typeof initialData === 'string' && initialData.trim() !== '') {
+    if (typeof initialData === 'string' && initialData.trim() !== '' && initialData !== '""') {
       parsedData = JSON.parse(initialData);
-    } else if (initialData && typeof initialData === 'object' && Object.keys(initialData).length > 0) {
+    } else if (initialData && typeof initialData === 'object' && initialData.blocks) {
       parsedData = initialData;
     }
   } catch (e) {
-    console.warn('Data parsing failed', e);
+    console.warn('Initial data parsing failed', e);
   }
 
   editor = new EditorJS({
@@ -108,22 +136,22 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     data: parsedData,
     tools,
     onReady: async () => {
-      const initialY = yText.toString()
-      if (initialY && initialY !== JSON.stringify(parsedData)) {
+      const initialY = yMap.get('contents')
+      if (initialY) {
         await renderFromY(initialY)
+      } else if (parsedData.blocks && parsedData.blocks.length > 0) {
+        yMap.set('contents', JSON.stringify(parsedData))
       }
     },
     onChange: async () => {
       if (suppressLocal || isRendering) return
       try {
         const saved = await editor.save()
+        if (saved.blocks.length === 0) return;
         const newString = JSON.stringify(saved)
-        
-        if (yText.toString() === newString) return
-
+        if (yMap.get('contents') === newString) return
         ydoc.transact(() => {
-          yText.delete(0, yText.length)
-          yText.insert(0, newString)
+          yMap.set('contents', newString)
         })
       } catch (err) {
         console.error('editor save failed', err)
@@ -135,22 +163,19 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
   function bindTitleRef(titleRef) {
     if (!titleRef) return
-    const t0 = yTitle.toString()
-    if (t0 && titleRef.value !== t0) titleRef.value = t0
-
     yTitle.observe(() => {
       const t = yTitle.toString()
       if (titleRef.value !== t) titleRef.value = t
     })
+  }
 
-    titleRef.__updateOnLocal = (val) => {
-      const current = yTitle.toString()
-      if (current !== val) {
-        ydoc.transact(() => {
-          yTitle.delete(0, yTitle.length)
-          yTitle.insert(0, val)
-        })
-      }
+  function updateTitleFromLocal(val) {
+    const current = yTitle.toString()
+    if (current !== val) {
+      ydoc.transact(() => {
+        yTitle.delete(0, yTitle.length)
+        yTitle.insert(0, val)
+      })
     }
   }
 
@@ -159,13 +184,11 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     try {
       await editor.isReady;
       const savedData = await editor.save(); 
-
       const postData = {
         idx : idx ?? null,
         title: yTitle.toString(), 
         contents: JSON.stringify(savedData)
       };
-
       const response = await postApi.savePost(postData);
       await loadpost.side_list();
       return response;
@@ -181,7 +204,6 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       if (!state || !state.user || clientId === ydoc.clientID) return
       const mouse = state.mouse || {}
       const user = state.user || {}
-      
       remotes[clientId] = {
         name: user.name,
         color: user.color,
@@ -189,16 +211,15 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
           position: 'fixed',
           left: mouse.x ? `${mouse.x}px` : '-9999px',
           top: mouse.y ? `${mouse.y}px` : '-9999px',
-          transform: 'translate(-50%, -120%)'
         }
       }
     })
     remoteCursorsRef.value = remotes
   })
 
-  yText.observe(event => {
-    if (event.transaction.local) return 
-    renderFromY(yText.toString())
+  yMap.observe(() => {
+    const newContents = yMap.get('contents')
+    renderFromY(newContents)
   })
 
   function handleMouseMove(e) {
@@ -207,23 +228,25 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
   window.addEventListener('mousemove', handleMouseMove)
 
-  // {수정됨} 인스턴스가 존재하고 소멸 함수가 있을 때만 안전하게 실행되도록 변경
   function destroy() {
+    // 1. 마우스 이벤트 즉시 제거
     window.removeEventListener('mousemove', handleMouseMove)
-    try { if (editor && typeof editor.destroy === 'function') editor.destroy() } catch (e) { console.warn('editor destroy error:', e) }
-    try { if (provider && typeof provider.destroy === 'function') provider.destroy() } catch (e) {}
-    try { if (ydoc && typeof ydoc.destroy === 'function') ydoc.destroy() } catch (e) {}
-  }
+    
+    // 2. 웹소켓 연결을 즉시 물리적으로 끊음 (가장 중요)
+    try { 
+      if (provider) {
+        provider.disconnect() // 연결 먼저 끊기
+        provider.destroy() 
+      } 
+    } catch (e) {}
 
-  function updateTitleFromLocal(val) {
-    const current = yTitle.toString()
-    if (current !== val) {
-      ydoc.transact(() => {
-        yTitle.delete(0, yTitle.length)
-        yTitle.insert(0, val)
-      })
-    }
+    // 3. 에디터 및 문서 객체 정리
+    try { if (editor && typeof editor.destroy === 'function') editor.destroy() } catch (e) {}
+    try { if (ydoc) ydoc.destroy() } catch (e) {}
+    
+    console.log(`Room ${room} 연결이 종료되었습니다.`);
   }
+  window.__activeEditorDestroy = destroy;
 
   return { editor, destroy, remoteCursorsRef, bindTitleRef, updateTitleFromLocal, savePost }
 }

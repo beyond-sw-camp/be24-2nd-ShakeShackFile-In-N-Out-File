@@ -7,12 +7,16 @@ import postApi from '@/api/postApi'
 const editorHolder = ref(null)
 const editorApi = ref(null)
 const title = ref('')
-const remoteCursors = ref({})
 const isEditorLoading = ref(false) 
 
 const route = useRoute();
-const router = useRouter(); // 리다이렉트를 위한 라우터 추가
+const router = useRouter(); 
 const isValid = computed(() => title.value.trim().length > 0)
+
+// ✨ 수정 1: 커서 데이터를 실시간으로 감지하도록 computed로 변경
+const remoteCursors = computed(() => {
+  return editorApi.value?.remoteCursorsRef || {};
+})
 
 // 중복 렌더링을 방지하기 위한 셋업 고유 ID
 let currentSetupId = 0;
@@ -102,7 +106,9 @@ async function setupEditor() {
     editorApi.value = newEditorApi;
 
     if (editorApi.value?.bindTitleRef) editorApi.value.bindTitleRef(title);
-    if (editorApi.value?.remoteCursorsRef) remoteCursors.value = editorApi.value.remoteCursorsRef.value;
+    
+    // 기존에 있던 remoteCursors 복사 로직은 삭제했습니다 (computed가 알아서 처리함)
+    
   } catch (error) {
     console.error('에디터 초기화 실패:', error);
   } finally {
@@ -112,19 +118,15 @@ async function setupEditor() {
   }
 }
 
-// --- 추가: UUID 리다이렉트 처리 로직 ---
 async function checkAndRedirectUuid() {
   const uuid = route.query.uuid;
   
-  // 경로에 '/invite'가 포함되어 있고 uuid 파라미터가 있는 경우
   if (route.path.includes('/invite') && uuid) {
     try {
-      // UUID를 기반으로 게시글 정보(idx)를 불러옴
       const response = await postApi.getPostByUuid(uuid); 
       const data = response.data || response;
       
       if (data && data.idx) {
-        // 성공적으로 idx를 찾았다면 해당 게시글 페이지로 리다이렉트 (뒤로가기 꼬임 방지를 위해 replace 사용)
         await router.replace({ name: 'workspace_read', params: { id: data.idx } });
         return true; 
       } else {
@@ -132,12 +134,11 @@ async function checkAndRedirectUuid() {
       }
     } catch (error) {
       console.error('UUID로 게시글을 찾을 수 없습니다.', error);
-      // 찾을 수 없을 때는 빈 워크스페이스로 이동
       await router.replace('/workspace');
       return true;
     }
   }
-  return false; // 리다이렉트 조건에 해당하지 않음
+  return false; 
 }
 
 onMounted(async () => {
@@ -146,10 +147,8 @@ onMounted(async () => {
     (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
   applyTheme(isDarkMode.value)
   
-  // 1. UUID 리다이렉트 먼저 체크
   const isRedirected = await checkAndRedirectUuid();
   
-  // 2. 리다이렉트가 발생하지 않은 일반 진입일 경우에만 에디터 렌더링 시작
   if (!isRedirected) {
     await setupEditor();
   }
@@ -221,6 +220,8 @@ onBeforeUnmount(async () => {
 .cursor-label { color:white; font-size:12px; padding:4px 8px; border-radius:6px; }
 
 :deep(.ce-block h1) { font-size: 40px !important; font-weight: 700; }
-:deep(.ce-block{data-align="center"}) { text-align: center; }
-:deep(.ce-block{data-align="right"})  { text-align: right; }
+
+/* ✨ 수정 2: 중괄호 { } 대신 대괄호 [ ] 사용 (속성 선택자) */
+:deep(.ce-block[data-align="center"]) { text-align: center; }
+:deep(.ce-block[data-align="right"])  { text-align: right; }
 </style>
