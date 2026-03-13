@@ -50,17 +50,17 @@ const deletePost = async (idx) => {
  */
 const inviteUser = async (inviteData) => {
   try {
-    // @RequestParam으로 받기 위해 두 번째 인자(Body)는 null로 두고, 
-    // 세 번째 인자의 params 속성에 데이터를 전달합니다.
+    // params에 email을 추가하여 @RequestParam이 인식할 수 있게 합니다.
     const response = await api.post('/workspace/invite', null, {
       params: {
         uuid: inviteData.uuid,
-        type: inviteData.type
+        type: inviteData.type,
+        email: inviteData.email
       }
     });
     return response.data;
   } catch (error) {
-    console.error(error);
+    console.error('API Error (inviteUser):', error);
     throw error;
   }
 }
@@ -116,6 +116,27 @@ const saveRole = async (idx, roleData) => {
   }
 }
 
+/**
+ * 워크스페이스 초대 인증 확인 API
+ * @param {String} uuid - 이메일에서 넘어온 토큰값 (백엔드의 uuid)
+ * @param {String} type - accept 또는 reject
+ */
+const verifyEmail = async (uuid, type) => {
+  try {
+    // 백엔드 컨트롤러(@RequestParam("uuid"), @RequestParam("type"))에 맞춰 파라미터 전송
+    const response = await api.get('/workspace/verify', {
+      params: {
+        uuid: uuid,
+        type: type
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Verify Email Error:', error);
+    throw error;
+  }
+}
+
 
 export default { 
   savePost, 
@@ -125,5 +146,6 @@ export default {
   inviteUser, 
   updateShareStatus,
   loadRole,
-  saveRole
+  saveRole,
+  verifyEmail
 }

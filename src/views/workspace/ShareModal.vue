@@ -15,26 +15,33 @@ const emit = defineEmits(['close', 'refresh']);
 const privacyStatus = ref(props.initialStatus); 
 const email = ref('');
 
+// 모달이 열릴 때 초기 상태 동기화
 watch([() => props.isOpen, () => props.initialStatus], ([newOpen, newStatus]) => {
   if (newOpen) {
     privacyStatus.value = newStatus || 'Private';
   }
 }, { immediate: true });
 
+// 초대 링크 계산 (type에 따라 파라미터 동적 구성)
 const inviteUrl = computed(() => {
   const type = privacyStatus.value === 'Shared' ? 'email' : 'invite';
-  return `http://localhost:5173/workspace/invite?uuid=${props.uuid}&type=${type}`;
+  
+  if (type === 'email') {
+    // email.value를 사용하여 문자열에 올바르게 포함시킵니다.
+    return `http://localhost:5173/workspace/invite?uuid=${props.uuid}&type=${type}&email=${email.value}`;
+  }
+  
+  return `http://localhost:5173/workspace/invite?uuid=${props.uuid}`;
 });
 
 const copyLink = () => {
   if (privacyStatus.value !== 'Public') return;
-
   navigator.clipboard.writeText(inviteUrl.value);
   alert('링크가 클립보드에 복사되었습니다.');
 };
 
 /**
- * 1. 초대장 발송 API
+ * 1. 초대장 발송 API 호출
  */
 const handleInvite = async () => {
   if (!email.value) {
@@ -45,7 +52,7 @@ const handleInvite = async () => {
   try {
     const type = privacyStatus.value === 'Shared' ? 'email' : 'invite';
     
-    // postApi.js의 수정된 inviteUser 호출
+    // 이메일 주소, UUID, 타입을 객체로 묶어서 전달
     await postApi.inviteUser({
       email: email.value,
       uuid: props.uuid,
@@ -53,22 +60,23 @@ const handleInvite = async () => {
     });
     
     alert(`${email.value}님께 초대장을 보냈습니다.`);
-    email.value = ''; 
+    email.value = ''; // 발송 성공 후 입력창 초기화
   } catch (error) {
     console.error('Invite Error:', error);
-    alert('초대장 발송에 실패했습니다.');
+    alert('초대장 발송에 실패했습니다. (서버 오류)');
   }
 };
 
 /**
- * 2. 공유 상태 저장 API
+ * 2. 공유 상태(개인/공유/공개) 저장 API
  */
 const handleSaveStatus = async () => {
   try {
     await postApi.updateShareStatus(props.postIdx, privacyStatus.value);
-    
     alert('공유 설정이 저장되었습니다.');
-    await loadpost.side_list(); 
+    if (loadpost && loadpost.side_list) {
+      await loadpost.side_list(); 
+    }
     emit('close');
   } catch (error) {
     console.error('Save Status Error:', error);
@@ -162,7 +170,3 @@ const handleSaveStatus = async () => {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* 기존 스타일 유지 */
-</style>
