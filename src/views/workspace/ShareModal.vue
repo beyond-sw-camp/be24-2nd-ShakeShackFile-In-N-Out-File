@@ -1,39 +1,47 @@
 <script setup>
-import { ref, computed, watch } from 'vue'; // watch 추가
+import { ref, computed, watch } from 'vue'; 
 import postApi from '@/api/postApi'; 
 import loadpost from '@/components/workspace/loadpost';
 
 const props = defineProps({
   isOpen: Boolean,
   postIdx: [Number, String],
-  initialStatus: String // 부모로부터 받은 현재 상태 (예: 'Private', 'Shared')
+  uuid: String, 
+  initialStatus: String 
 });
 
 const emit = defineEmits(['close', 'refresh']);
 
-// 상태 관리: 백엔드 Enum 값과 동일하게 유지 (Private, Shared, Public)
 const privacyStatus = ref(props.initialStatus); 
 const email = ref('');
 
-// 서버에서 데이터가 갱신되어 내려오면 즉시 UI에 반영되도록 합니다.
+// 모달이 열릴 때 초기 상태 동기화
 watch([() => props.isOpen, () => props.initialStatus], ([newOpen, newStatus]) => {
   if (newOpen) {
     privacyStatus.value = newStatus || 'Private';
   }
 }, { immediate: true });
 
-// 동적으로 초대 URL 생성
+// 초대 링크 계산 (type에 따라 파라미터 동적 구성)
 const inviteUrl = computed(() => {
-  return `http://localhost:5173/workspace/invite/${props.postIdx}`;
+  const type = privacyStatus.value === 'Shared' ? 'email' : 'invite';
+  
+  if (type === 'email') {
+    // email.value를 사용하여 문자열에 올바르게 포함시킵니다.
+    return `http://localhost:5173/workspace/invite?uuid=${props.uuid}&type=${type}&email=${email.value}`;
+  }
+  
+  return `http://localhost:5173/workspace/invite?uuid=${props.uuid}`;
 });
 
 const copyLink = () => {
+  if (privacyStatus.value !== 'Public') return;
   navigator.clipboard.writeText(inviteUrl.value);
   alert('링크가 클립보드에 복사되었습니다.');
 };
 
 /**
- * 1. 초대장 발송 API
+ * 1. 초대장 발송 API 호출
  */
 const handleInvite = async () => {
   if (!email.value) {
@@ -42,29 +50,33 @@ const handleInvite = async () => {
   }
 
   try {
+    const type = privacyStatus.value === 'Shared' ? 'email' : 'invite';
+    
+    // 이메일 주소, UUID, 타입을 객체로 묶어서 전달
     await postApi.inviteUser({
       email: email.value,
-      post_idx: props.postIdx
+      uuid: props.uuid,
+      type: type
     });
     
     alert(`${email.value}님께 초대장을 보냈습니다.`);
-    email.value = ''; 
+    email.value = ''; // 발송 성공 후 입력창 초기화
   } catch (error) {
     console.error('Invite Error:', error);
-    alert('초대장 발송에 실패했습니다.');
+    alert('초대장 발송에 실패했습니다. (서버 오류)');
   }
 };
 
 /**
- * 2. 공유 상태 저장 API
+ * 2. 공유 상태(개인/공유/공개) 저장 API
  */
 const handleSaveStatus = async () => {
   try {
-    // privacyStatus.value는 'Private', 'Shared', 'Public' 중 하나임
     await postApi.updateShareStatus(props.postIdx, privacyStatus.value);
-    
     alert('공유 설정이 저장되었습니다.');
-    await loadpost.side_list(); 
+    if (loadpost && loadpost.side_list) {
+      await loadpost.side_list(); 
+    }
     emit('close');
   } catch (error) {
     console.error('Save Status Error:', error);
@@ -99,18 +111,20 @@ const handleSaveStatus = async () => {
       </div>
 
       <div class="p-6 space-y-6">
-        <div>
+        <div :class="{ 'opacity-50 pointer-events-none': privacyStatus !== 'Public' }">
           <label class="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2 tracking-wider">초대 링크</label>
           <div class="flex gap-2">
             <input 
               type="text" 
               readonly 
               :value="inviteUrl"
-              class="flex-1 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-main)] outline-none"
+              :disabled="privacyStatus !== 'Public'"
+              class="flex-1 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-main)] outline-none disabled:cursor-not-allowed"
             />
             <button 
               @click="copyLink"
-              class="bg-[var(--bg-input)] border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-700 text-[var(--text-main)] px-3 py-2 rounded-lg text-sm transition-colors"
+              :disabled="privacyStatus !== 'Public'"
+              class="bg-[var(--bg-input)] border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-700 text-[var(--text-main)] px-3 py-2 rounded-lg text-sm transition-colors disabled:cursor-not-allowed"
               title="링크 복사"
             >
               <i class="fa-solid fa-copy"></i>
@@ -156,7 +170,3 @@ const handleSaveStatus = async () => {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* 기존 스타일 유지 */
-</style>
