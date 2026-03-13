@@ -1,6 +1,6 @@
 import axios from 'axios'
-// Pinia 스토어 임포트 (경로는 본인의 프로젝트 구조에 맞게 확인)
 import { useAuthStore } from '@/stores/useAuthStore'
+
 
 export const api = axios.create({
   baseURL: 'http://localhost:8080',
@@ -45,30 +45,17 @@ api.interceptors.response.use(
       originalRequest._retry = true // 무한 루프 방지 플래그
 
       try {
-        // 백엔드의 재발급 API 호출 (withCredentials 덕분에 HttpOnly 쿠키가 자동 전송됨)
-        // 무한 루프를 막기 위해 api 인스턴스 대신 순수 axios 사용
-        const res = await axios.post('/auth/reissue', {}, { 
-          baseURL: 'http://localhost:8080', // 프록시 설정을 타도록 빈 값 또는 환경변수 설정
-          withCredentials: true 
-        })
+        // 스토어의 재발급 액션 호출 (비동기 대기)
+        const newAccessToken = await authStore.reissueToken()
         
-        // 새로 발급받은 Access Token을 헤더에서 추출 (소문자 authorization 주의)
-        const newAccessToken = res.headers['authorization']?.replace('Bearer ', '')
+        // 실패했던 기존 API 요청의 헤더를 새 토큰으로 교체
+        originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`
         
-        if (newAccessToken) {
-          // 스토어의 토큰 값 갱신
-          authStore.setToken(newAccessToken)
-          
-          // 실패했던 기존 요청의 헤더를 새 토큰으로 교체
-          originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`
-          
-          // 기존 요청 재실행
-          return api(originalRequest)
-        }
+        // 갱신된 헤더로 기존 API 요청 재실행
+        return api(originalRequest)
       } catch (refreshError) {
-        // Refresh Token마저 만료되었거나 조작된 경우 (완전한 로그아웃 처리)
+        // 재발급 실패 처리 (Store 내부에서 이미 logout 처리됨)
         console.error('토큰 재발급 실패. 다시 로그인해주세요.')
-        authStore.logout()
         window.location.href = '/login'
         return Promise.reject(refreshError)
       }

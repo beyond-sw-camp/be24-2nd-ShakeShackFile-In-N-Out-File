@@ -132,40 +132,44 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   
-  // 1. 초기화: 로컬 스토리지 데이터 복구
+  // 1. 초기화: 로컬 스토리지 데이터 복구 (동기)
   if (!authStore.token) {
     authStore.checkLogin()
   }
 
-  // 2. URL 파라미터에 accessToken이 있는지 확인 (소셜 로그인용)
-  // to.query는 라우터가 분석한 URL 쿼리 파라미터입니다.
   const hasTokenInUrl = to.query.accessToken || to.query.token
-  const isAuthenticated = !!authStore.token
+  let isAuthenticated = !!authStore.token
 
-  // 3. 네비게이션 가드 로직
-  if (to.meta.requiresAuth) {
-    // 인증이 필요한데 토큰이 없고, URL에도 토큰이 없다면 튕김
-    if (!isAuthenticated && !hasTokenInUrl) {
+  // 2. 인증 필요 페이지 접근 제어 및 Silent Refresh 로직
+  if (to.meta.requiresAuth && !isAuthenticated && !hasTokenInUrl) {
+    try {
+      // Access Token이 없지만 HttpOnly 쿠키의 Refresh Token으로 재발급 시도
+      await authStore.reissueToken()
+      isAuthenticated = true // 재발급 성공 시 상태 업데이트
+    } catch (error) {
+      // Refresh Token 만료 또는 쿠키 없음. 재발급 실패 시 로그인 페이지로 강제 이동
       return next({ name: 'login' })
     }
   }
 
-  // 4. 워크스페이스 데이터 로드 로직 (방법 3 통합)
-  // 대상이 workspace_read 페이지이고, ID가 바뀔 때만 실행
+  // 3. 재발급 시도 이후에도 인증되지 않았다면 차단 방어 로직
+  if (to.meta.requiresAuth && !isAuthenticated && !hasTokenInUrl) {
+    return next({ name: 'login' })
+  }
+
+  // 4. 워크스페이스 데이터 로드 로직 (기존 코드 유지)
   if (to.name === 'workspace_read' && to.params.id) {
-    // 이전 페이지와 ID가 다르거나, 아예 처음 진입하는 경우 데이터 호출
     if (to.params.id !== from.params.id) {
       try {
         const result = await loadpost.read_post(to.params.id);
         
         if (result && result.title !== undefined) {
-          // 데이터를 meta에 저장하여 컴포넌트에서 쓸 수 있게 함
           to.meta.initialData = {
             idx: result.idx,
             title: result.title,
             contents: result.contents
           };
-          return next(); // 데이터 로드 성공 시 이동
+          return next();
         } else {
           return next({ name: 'not_found' });
         }
@@ -176,7 +180,7 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
-  // 위 조건들에 해당하지 않는 일반적인 이동은 그대로 진행
+  // 일반적인 라우팅 처리 진행
   next()
 })
 
