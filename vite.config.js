@@ -9,6 +9,9 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   base:'/',
   plugins: [vue(), vueDevTools(), tailwindcss()],
+  define: {
+    global: 'globalThis', // ← 추가
+  },
   server: {
     host: '0.0.0.0',
   },
