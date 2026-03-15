@@ -80,6 +80,11 @@ const initChat = () => {
           isMe: data.senderIdx === authStore.user.idx
         })
         nextTick(() => scrollToBottom())
+        // 내가 보낸 메시지가 아닐 때만 알림 ← 추가
+        if (data.senderIdx !== authStore.user.idx) {
+      showNotification(data.senderNickname, data.contents)
+      markAsRead()
+      }
       })
     },
     (error) => {
@@ -104,6 +109,7 @@ const sendMessage = () => {
   )
 
   newMessage.value = ''
+  markAsRead()
 }
 
 const scrollToBottom = () => {
@@ -111,17 +117,48 @@ const scrollToBottom = () => {
     scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
   }
 }
+const markAsRead = async () => {
+  try {
+    await api.post(`/chat/${props.room.id}/read`)
+  } catch (e) {
+    console.error('읽음 처리 실패:', e)
+  }
+}
+
+// 브라우저 알림 권한 요청
+const requestNotificationPermission = async () => {
+  if ('Notification' in window && Notification.permission === 'default') {
+    await Notification.requestPermission()
+  }
+}
+
+// 브라우저 알림 표시
+const showNotification = (sender, message) => {
+  // 채팅 패널이 열려있고 현재 방을 보고 있으면 알림 안 띄움
+  if (document.hasFocus()) return
+  if (Notification.permission !== 'granted') return
+
+  new Notification(`${props.room.name}`, {
+    body: `${sender}: ${message}`,
+    icon: '/favicon.ico'
+  })
+}
 
 onMounted(() => {
+  requestNotificationPermission()
   fetchHistory()
   initChat()
+  markAsRead()
 })
 
 onUnmounted(() => {
+  markAsRead()
   if (stompClient) stompClient.disconnect()
+   
 })
 
 watch(() => props.room.id, () => {
+  markAsRead()
   fetchHistory()
   initChat()
 })

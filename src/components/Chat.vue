@@ -109,6 +109,7 @@ if (dataWrapper && dataWrapper.boardList) {
     lastMsg: room.lastMessage || '메시지가 없습니다.',
     time: room.lastMessageTime || '',
     userCount: room.participantCount || 0, 
+    unreadCount: room.unreadCount || 0,
     icon: 'fa-comments'
   }))
 

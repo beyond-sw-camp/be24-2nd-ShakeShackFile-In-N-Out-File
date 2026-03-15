@@ -56,6 +56,13 @@ onUnmounted(() => {
       <div class="flex-1 min-w-0">
         <div class="flex justify-between items-center">
           <p class="text-sm font-bold text-[var(--text-main)] truncate">{{ room.name }}</p>
+          <!-- 안 읽은 메시지 뱃지 -->
+    <span
+      v-if="room.unreadCount > 0"
+      class="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center"
+    >
+      {{ room.unreadCount > 99 ? '99+' : room.unreadCount }}
+    </span>
           <span class="text-[10px] text-[var(--text-muted)] whitespace-nowrap ml-2">
         {{ formatTime(room.time) }}
       </span>
