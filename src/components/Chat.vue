@@ -1,10 +1,10 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { computed, watch } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import ChatRoom from './ChatRoom.vue'
 import ChatList from './Chatlist.vue'
-import {useAuthStore} from '@/stores/useAuthStore'
-import api from '@/plugins/axiosinterceptor.js' // axios 인스턴스 임포트
+import { useAuthStore } from '@/stores/useAuthStore'
+import api from '@/plugins/axiosinterceptor.js'
+
 
 const props = defineProps({ isOpen: Boolean })
 const emit = defineEmits(['close'])
@@ -31,6 +31,7 @@ watch(() => props.isOpen, (newVal) => {
     }
   }
 })
+
 
 // 드래그 시작 함수
 const startResizing = (event) => {
@@ -73,47 +74,153 @@ const stopResizing = () => {
 const viewMode = ref('list')
 const selectedRoom = ref(null)
 const authStore = useAuthStore()
+const chatRooms = ref([])
 
 const currentUser = computed(() => ({ 
   name: authStore.user?.userName || 'Guest',
 }))
 
-const chatRooms = ref([])
+watch(viewMode, async (newMode) => {
+  if (newMode === 'list') {
+    console.log('목록으로 돌아옴: 데이터를 새로고침합니다.');
+    await fetchRooms();
+  }
+})
+// 1. 방 목록 가져오기 (실제 DB 연동)
 const fetchRooms = async () => {
   try {
-    const response = await api.api.get('/json/chat/chathistory')
-    const allData = response.data 
-
-    // JSON의 Key(room-1, room-2 등)를 순회
-    chatRooms.value = Object.keys(allData).map(roomId => {
-      const roomData = allData[roomId] // 방 정보 객체 { name, icon, messages }
-      const messages = roomData.messages || []
-      const lastMessage = messages[messages.length - 1]
-
-      return {
-        id: roomId,
-        name: roomData.name, // JSON에 있는 이름을 그대로 사용
-        icon: roomData.icon || 'fa-comments', // JSON에 있는 아이콘 사용
-        lastMsg: lastMessage ? lastMessage.text : '메시지가 없습니다.',
-        count: messages.length,
-        time: lastMessage ? lastMessage.time : ''
+    console.log("인터셉터 객체 확인:", api);
+    // 1. 백엔드 컨트롤러의 @RequestParam 설정에 맞춰 파라미터 전달
+    const response = await api.get('/chatRoom/list', {
+      params: {
+        page: 0, // 기본값 0
+        size: 5  // 컨트롤러 기본값 5
       }
     })
+    
+    // 2. 응답 구조 매칭
+    // 컨트롤러 응답: BaseResponse { success: true, data: { boardList: [...] } }
+    const dataWrapper = response.data.result 
+
+if (dataWrapper && dataWrapper.boardList) {
+  chatRooms.value = dataWrapper.boardList.map(room => ({
+    id: room.idx,
+    name: room.title || '이름 없는 채팅방',
+    lastMsg: room.lastMessage || '메시지가 없습니다.',
+    time: room.lastMessageTime || '',
+    userCount: room.participantCount || 0, 
+    icon: 'fa-comments'
+  }))
+
+    } else {
+      console.warn('List가 비어있거나 구조가 다릅니다:', result)
+      chatRooms.value = []
+    }
   } catch (error) {
     console.error('방 목록 로드 실패:', error)
   }
 }
-onMounted(() => {
-  fetchRooms()
-})
+
+// 2. 방 만들기 로직
+const handleCreateRoom = async () => {
+  const roomName = prompt('새로운 채팅방 이름을 입력해주세요.')
+  if (!roomName || !roomName.trim()) return
+
+  const inviteInput = prompt('초대할 유저의 IDX 번호들을 입력해주세요. (예: 1, 2, 3)\n비워두면 본인만 참여합니다.')
+  
+  // 입력받은 문자열을 숫자 배열로 변환
+  const participantsIdx = inviteInput 
+    ? inviteInput.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))
+    : []
+
+  try {
+    // 백엔드 ChatRoomsDto.ChatRoomsReq 구조에 맞춰 데이터 전송
+    await api.post('/chatRoom/create', {
+      title: roomName.trim(),
+      participantsIdx: participantsIdx // 수정된 부분: 입력받은 인원 ID 리스트 전달
+    })
+    
+    alert('채팅방이 생성되었습니다.')
+    await fetchRooms() // 목록 새로고침
+  } catch (error) {
+    console.error('방 생성 실패:', error)
+    alert('방 생성에 실패했습니다. 유저 ID를 확인해주세요.')
+  }
+}
+const onRenameRoom = async (room) => {
+  const newTitle = prompt('변경할 방 이름을 입력하세요.', room.name);
+  if (newTitle && newTitle.trim() !== room.name) {
+    try {
+      await api.patch(`/chatRoom/${room.id}/title`, { title: newTitle.trim() });
+      // 목록에서 즉시 반영
+      const target = chatRooms.value.find(r => r.id === room.id);
+      if (target) target.name = newTitle.trim();
+      if (selectedRoom.value?.id === room.id) selectedRoom.value.name = newTitle.trim();
+    } catch (error) {
+      console.error('이름 변경 실패:', error);
+    }
+  }
+}
+
+// 2. 방 나가기 로직 추가
+const onLeaveRoom = async (room) => {
+  if (!confirm(`'${room.name}' 방에서 나가시겠습니까?`)) return;
+
+  try {
+    // 백엔드 엔드포인트에 맞춰 호출 (예: DELETE /chatRoom/{idx}/leave)
+    await api.delete(`/chatRoom/${room.id}/exit`);
+    alert('방에서 나갔습니다.');
+    await fetchRooms(); // 목록 새로고침
+  } catch (error) {
+    console.error('방 나가기 실패:', error);
+    alert('방 나가기에 실패했습니다.');
+  }
+}
+// 초대 로직
+const handleInviteFromHeader = async () => {
+  const input = prompt('초대할 유저의 IDX를 입력하세요. (여러 명: 1, 2, 3)')
+  if (!input || !input.trim()) return
+
+  const userIdxList = input
+    .split(',')
+    .map(id => parseInt(id.trim()))
+    .filter(id => !isNaN(id))
+
+  if (userIdxList.length === 0) {
+    alert('올바른 IDX를 입력해주세요.')
+    return
+  }
+
+  try {
+    await api.post(`/chatRoom/${selectedRoom.value.id}/invite`, userIdxList)
+    alert(`${userIdxList.length}명을 초대했습니다.`)
+  } catch (error) {
+    console.error('초대 실패:', error)
+    alert('초대에 실패했습니다.')
+  }
+}
 
 const handleSelectRoom = (room) => {
   selectedRoom.value = room
   viewMode.value = 'room'
 }
+
+onMounted(async () => {
+  // 스토어에 토큰이 없는 경우 잠시 대기하거나 재로그인 유도
+  if (!authStore.token) {
+    // 10분 만료 후 새로고침 시, 첫 요청이 401을 트리거하여 
+    // 인터셉터가 토큰을 받아올 때까지 기다리는 로직이 필요할 수 있습니다.
+    setTimeout(async () => {
+      await fetchRooms();
+    }, 500); // 0.5초 정도 대기 후 목록 호출
+  } else {
+    await fetchRooms();
+  }
+});
 </script>
 
 <template>
+  
   <aside 
     class="chat-panel" 
     :class="isOpen ? 'chat-panel-open' : 'chat-panel-closed'"
@@ -138,17 +245,56 @@ const handleSelectRoom = (room) => {
           {{ viewMode === 'list' ? '채팅 목록' : selectedRoom.name }}
         </span>
       </div>
-      <button @click="emit('close')" class="close-button">
-        <i class="fa-solid fa-xmark"></i>
-      </button>
+
+      <div class="flex items-center gap-2">
+        <button 
+          v-if="viewMode === 'list'"
+          @click="handleCreateRoom" 
+          class="create-room-btn"
+        >
+          <i class="fa-solid fa-plus"></i>
+          방 만들기
+        </button>
+        <!-- 채팅방 안에서만 보이는 초대 버튼 -->
+    <button
+      v-if="viewMode === 'room'"
+      @click="handleInviteFromHeader"
+      class="create-room-btn"
+    >
+      <i class="fa-solid fa-user-plus"></i>
+      초대
+    </button>
+        <button @click="emit('close')" class="close-button">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
     </div>
 
-    <ChatList v-if="viewMode === 'list'" :rooms="chatRooms" @select-room="handleSelectRoom" />
+    <ChatList 
+  v-if="viewMode === 'list'" 
+  :rooms="chatRooms" 
+  @select-room="handleSelectRoom" 
+  @rename-room="onRenameRoom"   @leave-room="onLeaveRoom"     />
     <ChatRoom v-else :room="selectedRoom" :currentUser="currentUser" @back="viewMode = 'list'" />
   </aside>
 </template>
 
 <style scoped>
+/* 기존 스타일 유지 및 버튼 스타일 추가 */
+.create-room-btn {
+  font-size: 0.75rem;
+  background-color: #1cacff;
+  color: white;
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: background 0.2s;
+}
+.create-room-btn:hover {
+  background-color: #1999e3;
+}
 .chat-panel {
   position: relative;
   background-color: var(--bg-main);
