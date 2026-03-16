@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/useAuthStore' // 스토어 추가
 import Sidebar from '../components/Sidebar.vue'
 import Header from '../components/Header.vue'
 import Chat from '@/components/Chat.vue'
-
+import { registerPushNotification } from '@/utils/pushNotification.js'
 import { api } from '@/plugins/axiosinterceptor'
 
 const isChatOpen = ref(false)
@@ -13,7 +13,7 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
-onMounted(() => {
+onMounted(async() => {
   // 1. URL 쿼리 파라미터에서 token 추출 (백엔드가 주는 파라미터명 확인 필요)
   // 예: ?token=... 혹은 ?accessToken=...
   const token = route.query.token || route.query.accessToken
@@ -27,6 +27,14 @@ onMounted(() => {
     // 3. URL에서 토큰을 지워주기 위해 쿼리 파라미터를 제거한 주소로 replace
     // (보안 및 주소창 깔끔하게 유지)
     router.replace({ name: 'home' }) 
+  }
+  // 일반 로그인 + 소셜 로그인 모두 커버
+  if (authStore.token) {
+    try {
+      await registerPushNotification()
+    } catch (e) {
+      console.error('푸시 알림 등록 실패:', e)
+    }
   }
 })
 
