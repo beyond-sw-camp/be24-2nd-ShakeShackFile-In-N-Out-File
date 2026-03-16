@@ -67,7 +67,8 @@ const read_post = async (idx) => {
         currentPost.value = {
             idx: data.idx,
             title: data.title,
-            contents: parsedContents 
+            contents: parsedContents, 
+            type: data.type
         };
 
         return currentPost.value;

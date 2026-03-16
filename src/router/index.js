@@ -128,6 +128,13 @@ const router = createRouter({
           // postIdx가 꼭 경로에 필요하다면 아래처럼 쓸 수도 있지만, 
           // 이메일 링크의 token 방식을 쓰려면 /workspace/verify 가 가장 깔끔합니다.
     },
+    // {
+    //       path: '/test',
+    //       name: 'WorkspaceVerify',
+    //       component: () => import('@/views/test/test.vue'),
+    //       // postIdx가 꼭 경로에 필요하다면 아래처럼 쓸 수도 있지만, 
+    //       // 이메일 링크의 token 방식을 쓰려면 /workspace/verify 가 가장 깔끔합니다.
+    // },
     // 404 페이지 - 모든 잘못된 경로를 캐치 (반드시 맨 마지막!)
     {
       path: '/:pathMatch(.*)*',
@@ -166,7 +173,7 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'login' })
   }
 
-  // 4. 워크스페이스 데이터 로드 로직 (기존 코드 유지)
+  // 4. 워크스페이스 데이터 로드 로직 (기존 코드 유지 및 type 보강)
   if (to.name === 'workspace_read' && to.params.id) {
     if (to.params.id !== from.params.id) {
       try {
@@ -176,7 +183,8 @@ router.beforeEach(async (to, from, next) => {
           to.meta.initialData = {
             idx: result.idx,
             title: result.title,
-            contents: result.contents
+            contents: result.contents,
+            type: result.type // ✨ 데이터 포함 확인
           };
           return next();
         } else {
@@ -193,7 +201,7 @@ router.beforeEach(async (to, from, next) => {
   next()
 })
 
-// 1. 데이터 로드 로직을 별도 함수로 분리 (중복 방지)
+// ✨ 데이터 로드 로직 함수 수정 (type 필드 추가)
 const fetchWorkspaceData = async (to, next) => {
   try {
     const result = await loadpost.read_post(to.params.id);
@@ -203,7 +211,8 @@ const fetchWorkspaceData = async (to, next) => {
       to.meta.initialData = {
         idx: result.idx,
         title: result.title,
-        contents: result.contents
+        contents: result.contents,
+        type: result.type // ✨ 이 부분이 누락되어 협업 세션이 켜지지 않았습니다.
       };
       next();
     } else {
@@ -214,6 +223,5 @@ const fetchWorkspaceData = async (to, next) => {
     next({ name: 'not_found' });
   }
 };
-
 
 export default router

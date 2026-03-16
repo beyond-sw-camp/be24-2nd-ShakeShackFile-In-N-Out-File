@@ -93,6 +93,7 @@ const updateShareStatus = async (idx, status) => {
 const loadRole = async (idx) => {
   try {
     const response = await api.get(`/workspace/loadRole/${idx}`);
+    console.log(response);
     return response.data;
   } catch (error) {
     console.error(error);
