@@ -72,7 +72,7 @@ const goBack = () => {
             class="flex items-center gap-3 p-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl text-[var(--text-main)] text-sm font-medium transition-all duration-300 no-underline hover:bg-[var(--bg-input)] hover:border-[var(--accent)] hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(240,125,24,0.15)]"
           >
             <i class="fa-brands fa-google-drive text-xl text-[var(--accent)]"></i>
-            <span>내 드라이브</span>
+            <span>홈</span>
           </RouterLink>
           <RouterLink 
             :to="{ name: 'shareFile' }" 

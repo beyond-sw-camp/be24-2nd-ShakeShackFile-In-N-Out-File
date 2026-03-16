@@ -1,3 +1,4 @@
+import axios from "axios";
 import { api } from "@/plugins/axiosinterceptor";
 
 const normalizeFileFormat = (file) => {
@@ -24,6 +25,8 @@ const toUploadRequestList = (files, parentId = null) => {
       fileSize: file?.size ?? 0,
       contentType: file?.type || "application/octet-stream",
       parentId,
+      relativePath: file?.webkitRelativePath || file?.name || "unnamed-file",
+      lastModified: Number(file?.lastModified ?? 0) || 0,
     };
   });
 };
@@ -49,19 +52,78 @@ export const parseUploadResponse = (responseData) => {
   return extractArrayResult(responseData);
 };
 
-export function uploadFiles(files, parentId = null) {
+const resolveDownloadUrl = (fileOrUrl) => {
+  if (typeof fileOrUrl === "string") return fileOrUrl;
+  return fileOrUrl?.downloadUrl || fileOrUrl?.presignedDownloadUrl || "";
+};
+
+const resolveDownloadFileName = (fileOrUrl, fallbackFileName = "file") => {
+  if (typeof fileOrUrl === "string") return fallbackFileName;
+  return fileOrUrl?.name || fileOrUrl?.fileOriginName || fallbackFileName;
+};
+
+const triggerBlobDownload = (blobUrl, fileName) => {
+  const anchor = document.createElement("a");
+  anchor.href = blobUrl;
+  anchor.download = fileName || "file";
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+};
+
+export async function downloadFileAsset(fileOrUrl, fallbackFileName = "file") {
+  const downloadUrl = resolveDownloadUrl(fileOrUrl);
+  if (!downloadUrl) {
+    throw new Error("\uB2E4\uC6B4\uB85C\uB4DC\uD560 \uD30C\uC77C \uC8FC\uC18C\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
+  }
+
+  const fileName = resolveDownloadFileName(fileOrUrl, fallbackFileName);
+  const response = await axios.get(downloadUrl, {
+    responseType: "blob",
+  });
+
+  const objectUrl = window.URL.createObjectURL(response.data);
+  try {
+    triggerBlobDownload(objectUrl, fileName);
+  } finally {
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+  }
+}
+
+export function initUploadFiles(files, parentId = null) {
   const fileRequestList = toUploadRequestList(files, parentId);
   return api.post("/file/upload", fileRequestList);
 }
 
-export function completePartitionUpload(payload) {
+export function uploadFiles(files, parentId = null) {
+  return initUploadFiles(files, parentId);
+}
+
+export function completeUpload(payload) {
   return api.post("/file/upload/complete", payload, {
+    timeout: 600000,
+  });
+}
+
+export function abortUpload(payload) {
+  return api.post("/file/upload/abort", payload, {
     timeout: 600000,
   });
 }
 
 export async function fetchFileList() {
   const response = await api.get("/file/list");
+  return extractArrayResult(response?.data);
+}
+
+export async function fetchSharedFileList() {
+  const response = await api.get("/file/share/shared/list");
+  return extractArrayResult(response?.data);
+}
+
+export async function fetchFileShareInfo(fileId) {
+  const response = await api.get(`/file/share/${fileId}`);
   return extractArrayResult(response?.data);
 }
 
@@ -75,6 +137,18 @@ export async function createFolder(folderName, parentId = null) {
 
 export async function moveFileToTrash(fileId) {
   const response = await api.patch(`/file/${fileId}/trash`);
+  return extractObjectResult(response?.data);
+}
+
+export async function restoreFileFromTrash(fileId) {
+  const response = await api.patch(`/file/${fileId}/restore`);
+  return extractObjectResult(response?.data);
+}
+
+export async function restoreFilesFromTrash(fileIdList) {
+  const response = await api.patch("/file/restore", {
+    fileIdxList: fileIdList,
+  });
   return extractObjectResult(response?.data);
 }
 
@@ -110,6 +184,37 @@ export async function renameFolder(fileId, fileName) {
   return extractObjectResult(response?.data);
 }
 
+export async function setLockedFiles(fileIdList, locked) {
+  const response = await api.patch("/file/lock", {
+    fileIdxList: fileIdList,
+    locked,
+  });
+  return extractObjectResult(response?.data);
+}
+
+export async function shareFilesWithUser(fileIdList, recipientEmail) {
+  const response = await api.post("/file/share", {
+    fileIdxList: fileIdList,
+    recipientEmail,
+  });
+  return extractObjectResult(response?.data);
+}
+
+export async function cancelFileShares(fileIdList, recipientEmail) {
+  const response = await api.post("/file/share/cancel", {
+    fileIdxList: fileIdList,
+    recipientEmail,
+  });
+  return extractObjectResult(response?.data);
+}
+
+export async function saveSharedFileToDrive(fileId, parentId = null) {
+  const response = await api.post(`/file/share/shared/${fileId}/save`, {
+    parentId,
+  });
+  return extractObjectResult(response?.data);
+}
+
 export async function fetchFolderProperties(fileId) {
   const response = await api.get(`/file/${fileId}/properties`);
   return extractObjectResult(response?.data);
@@ -122,5 +227,10 @@ export async function fetchStorageSummary() {
 
 export async function fetchTextPreview(fileId) {
   const response = await api.get(`/file/${fileId}/text-preview`);
+  return extractObjectResult(response?.data);
+}
+
+export async function fetchSharedTextPreview(fileId) {
+  const response = await api.get(`/file/share/shared/${fileId}/text-preview`);
   return extractObjectResult(response?.data);
 }

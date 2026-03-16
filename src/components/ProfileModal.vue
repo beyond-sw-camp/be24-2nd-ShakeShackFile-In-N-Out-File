@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { updateSettingsProfile, uploadSettingsProfileImage } from "@/api/featerApi";
+import { STORAGE_ADDON_PRODUCTS, findMembershipProduct, formatKrw } from "@/constants/billingProducts";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useFileStore } from "@/stores/useFileStore";
 
@@ -34,32 +35,13 @@ const isUploadingImage = ref(false);
 const saveError = ref("");
 const imageFeedback = ref("");
 const profileImageInput = ref(null);
-const mergeImageOnlyFromParent = ref(false);
-
-const profileForm = ref({
-  displayName: "",
-  email: "",
-  role: "",
-  localeCode: "KO",
-  regionCode: "KR",
-  marketingOptIn: true,
-  privateProfile: false,
-  emailNotification: true,
-  securityNotification: true,
-  profileImageUrl: "",
-  membershipLabel: "FREE MEMBER",
-  storagePlanLabel: "기본 20GB",
-  joinedAt: null,
-  updatedAt: null,
-  emailVerified: false,
-});
 
 const tabs = [
-  { id: "profile", label: "기본 프로필", icon: "fa-solid fa-circle-user" },
-  { id: "security", label: "계정 및 보안", icon: "fa-solid fa-shield-halved" },
-  { id: "notification", label: "알림 설정", icon: "fa-solid fa-bell" },
-  { id: "language", label: "언어 및 지역", icon: "fa-solid fa-globe" },
-  { id: "billing", label: "구독 및 결제", icon: "fa-solid fa-wallet" },
+  { id: "profile", label: "프로필", icon: "fa-solid fa-circle-user" },
+  { id: "security", label: "보안", icon: "fa-solid fa-shield-halved" },
+  { id: "notification", label: "알림", icon: "fa-solid fa-bell" },
+  { id: "language", label: "언어", icon: "fa-solid fa-globe" },
+  { id: "billing", label: "결제", icon: "fa-solid fa-wallet" },
 ];
 
 const localeOptions = [
@@ -74,12 +56,49 @@ const regionOptions = [
   { code: "JP", label: "Japan" },
 ];
 
-const syncForm = (profile) => {
-  if (!profile) {
-    return;
+const resolveMembershipLabel = (membershipCode) => {
+  switch (String(membershipCode || "FREE").toUpperCase()) {
+    case "PLUS":
+      return "플러스 멤버십";
+    case "PREMIUM":
+      return "프리미엄 멤버십";
+    default:
+      return "기본 멤버십";
   }
+};
+
+const createDefaultProfileForm = () => ({
+  displayName: "",
+  email: "",
+  role: "ROLE_USER",
+  localeCode: "KO",
+  regionCode: "KR",
+  marketingOptIn: true,
+  privateProfile: false,
+  emailNotification: true,
+  securityNotification: true,
+  profileImageUrl: "",
+  membershipCode: "FREE",
+  membershipLabel: "기본 멤버십",
+  storagePlanLabel: "기본 20GB",
+  storageQuotaBytes: 0,
+  storageBaseQuotaBytes: 0,
+  storageAddonBytes: 0,
+  joinedAt: null,
+  updatedAt: null,
+  emailVerified: false,
+});
+
+const profileForm = ref(createDefaultProfileForm());
+
+const syncForm = (profile) => {
+  if (!profile) return;
+
+  const membershipCode = profile.membershipCode || "FREE";
+  const membershipProduct = findMembershipProduct(membershipCode);
 
   profileForm.value = {
+    ...createDefaultProfileForm(),
     displayName: profile.displayName || authStore.user?.name || "사용자",
     email: profile.email || authStore.user?.email || "",
     role: profile.role || authStore.user?.role || "ROLE_USER",
@@ -90,27 +109,15 @@ const syncForm = (profile) => {
     emailNotification: Boolean(profile.emailNotification),
     securityNotification: Boolean(profile.securityNotification),
     profileImageUrl: profile.profileImageUrl || "",
-    membershipLabel: profile.membershipLabel || "FREE MEMBER",
-    storagePlanLabel: profile.storagePlanLabel || "기본 20GB",
+    membershipCode,
+    membershipLabel: profile.membershipLabel || resolveMembershipLabel(membershipCode),
+    storagePlanLabel: profile.storagePlanLabel || membershipProduct.label,
+    storageQuotaBytes: Number(profile.storageQuotaBytes || 0),
+    storageBaseQuotaBytes: Number(profile.storageBaseQuotaBytes || 0),
+    storageAddonBytes: Number(profile.storageAddonBytes || 0),
     joinedAt: profile.joinedAt || null,
     updatedAt: profile.updatedAt || null,
     emailVerified: Boolean(profile.emailVerified),
-  };
-};
-
-const mergeProfileImageIntoForm = (profile) => {
-  if (!profile) {
-    return;
-  }
-
-  profileForm.value = {
-    ...profileForm.value,
-    profileImageUrl: profile.profileImageUrl || "",
-    membershipLabel: profile.membershipLabel || profileForm.value.membershipLabel,
-    storagePlanLabel: profile.storagePlanLabel || profileForm.value.storagePlanLabel,
-    joinedAt: profile.joinedAt || profileForm.value.joinedAt,
-    updatedAt: profile.updatedAt || profileForm.value.updatedAt,
-    emailVerified: profile.emailVerified ?? profileForm.value.emailVerified,
   };
 };
 
@@ -125,16 +132,7 @@ watch(
 watch(
   () => props.settingsProfile,
   (profile) => {
-    if (!profile) {
-      return;
-    }
-
-    if (mergeImageOnlyFromParent.value) {
-      mergeProfileImageIntoForm(profile);
-      mergeImageOnlyFromParent.value = false;
-      return;
-    }
-
+    if (!profile) return;
     syncForm(profile);
   },
   { immediate: true },
@@ -143,27 +141,37 @@ watch(
 watch(
   () => props.isOpen,
   (isOpen) => {
-    if (!isOpen) {
-      return;
-    }
-
-    activeTab.value = props.initialTab || "profile";
+    if (!isOpen) return;
     saveError.value = "";
     imageFeedback.value = "";
-
+    activeTab.value = props.initialTab || "profile";
     if (!fileStore.storageSummary && !fileStore.storageLoading) {
       fileStore.fetchStorageSummary().catch(() => {});
     }
   },
 );
 
+const profileInitials = computed(() => {
+  const source = profileForm.value.displayName || authStore.user?.name || "User";
+  return (
+    source
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((token) => token[0]?.toUpperCase() || "")
+      .join("") || "U"
+  );
+});
+
+const storageSummary = computed(() => fileStore.storageSummary);
+const storageUsageWidth = computed(() => `${Math.min(100, Math.max(0, Number(storageSummary.value?.usagePercent || 0)))}%`);
+const currentMembershipProduct = computed(() => findMembershipProduct(profileForm.value.membershipCode));
+
 const formatDate = (value) => {
   if (!value) return "정보 없음";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
+  if (Number.isNaN(date.getTime())) return String(value);
 
   return new Intl.DateTimeFormat("ko-KR", {
     year: "numeric",
@@ -174,49 +182,25 @@ const formatDate = (value) => {
 
 const formatBytes = (bytes) => {
   const size = Number(bytes || 0);
-  if (!Number.isFinite(size) || size <= 0) {
-    return "0 B";
-  }
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
 
   const units = ["B", "KB", "MB", "GB", "TB"];
-  const unitIndex = Math.min(
-    Math.floor(Math.log(size) / Math.log(1024)),
-    units.length - 1,
-  );
+  const unitIndex = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
   const value = size / 1024 ** unitIndex;
   const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
-
   return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`;
 };
 
-const profileInitials = computed(() => {
-  const source = profileForm.value.displayName || authStore.user?.name || "User";
-  return source
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((token) => token[0]?.toUpperCase() || "")
-    .join("") || "U";
-});
-
-const storageSummary = computed(() => fileStore.storageSummary);
-const storageUsageWidth = computed(() => `${Math.min(100, Math.max(0, Number(storageSummary.value?.usagePercent || 0)))}%`);
-
-const applySavedProfile = (savedProfile, options = {}) => {
-  if (options.imageOnly) {
-    mergeProfileImageIntoForm(savedProfile);
-  } else {
-    syncForm(savedProfile);
-  }
+const applySavedProfile = (savedProfile) => {
+  syncForm(savedProfile);
 
   const currentUser = authStore.user || {};
   const updatedUser = {
     ...currentUser,
-    name: options.imageOnly ? (profileForm.value.displayName || currentUser.name) : savedProfile.displayName,
-    userName: options.imageOnly ? (profileForm.value.displayName || currentUser.userName) : savedProfile.displayName,
+    name: savedProfile.displayName || currentUser.name,
+    userName: savedProfile.displayName || currentUser.userName,
     email: savedProfile.email || currentUser.email,
     role: savedProfile.role || currentUser.role,
-    localeCode: options.imageOnly ? (profileForm.value.localeCode || currentUser.localeCode) : savedProfile.localeCode,
   };
 
   authStore.user = updatedUser;
@@ -227,17 +211,72 @@ const openProfileImagePicker = () => {
   profileImageInput.value?.click();
 };
 
-const handleProfileImageChange = async (event) => {
-  const file = event?.target?.files?.[0];
-  event.target.value = "";
-
-  if (!file) {
-    return;
+const downscaleProfileImage = async (file) => {
+  if (!file || !file.type?.startsWith("image/")) {
+    return file;
   }
 
-  const isSupportedType = ["image/png", "image/jpeg", "image/jpg"].includes(file.type);
-  if (!isSupportedType) {
-    imageFeedback.value = "JPG 또는 PNG 파일만 업로드할 수 있습니다.";
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const target = new Image();
+      target.onload = () => resolve(target);
+      target.onerror = () => reject(new Error("이미지를 불러올 수 없습니다."));
+      target.src = objectUrl;
+    });
+
+    const maxDimension = 1600;
+    const width = image.width || 1;
+    const height = image.height || 1;
+    const scale = Math.min(1, maxDimension / Math.max(width, height));
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+
+    if (scale === 1) {
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return file;
+    }
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob((result) => resolve(result), "image/png", 0.92);
+    });
+
+    if (!blob) {
+      return file;
+    }
+
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "")}.png`, {
+      type: "image/png",
+      lastModified: Date.now(),
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+};
+
+const handleProfileImageChange = async (event) => {
+  const file = event?.target?.files?.[0];
+  if (event?.target) {
+    event.target.value = "";
+  }
+
+  if (!file) return;
+
+  if (!["image/png", "image/jpeg", "image/jpg"].includes(file.type)) {
+    imageFeedback.value = "PNG 또는 JPG 이미지만 업로드할 수 있습니다.";
     return;
   }
 
@@ -245,11 +284,14 @@ const handleProfileImageChange = async (event) => {
   isUploadingImage.value = true;
 
   try {
-    const savedProfile = await uploadSettingsProfileImage(file);
-    mergeImageOnlyFromParent.value = true;
-    applySavedProfile(savedProfile, { imageOnly: true });
+    const preparedFile = await downscaleProfileImage(file);
+    const savedProfile = await uploadSettingsProfileImage(preparedFile);
+    applySavedProfile(savedProfile);
     emit("saved", savedProfile);
-    imageFeedback.value = "프로필 이미지가 300 x 300px로 적용되었습니다.";
+    imageFeedback.value =
+      preparedFile === file
+        ? "프로필 이미지를 적용했습니다."
+        : "프로필 이미지를 축소해 적용했습니다.";
   } catch (error) {
     imageFeedback.value =
       error?.response?.data?.message ||
@@ -290,27 +332,17 @@ const handleSave = async () => {
 </script>
 
 <template>
-  <div
-    :class="['settings-overlay', { active: isOpen }]"
-    @click="emit('close')"
-  >
+  <div class="settings-overlay" :class="{ active: isOpen }" @click="emit('close')">
     <div class="settings-modal" @click.stop>
-      <div class="settings-modal__header">
-        <div class="settings-modal__title-wrap">
-          <div class="settings-modal__title-icon">
-            <i class="fa-solid fa-users-gear"></i>
-          </div>
+      <header class="settings-modal__header">
+        <div>
+          <p class="settings-modal__eyebrow">Account Center</p>
           <h2 class="settings-modal__title">설정</h2>
         </div>
-
-        <button
-          type="button"
-          class="settings-modal__close"
-          @click="emit('close')"
-        >
+        <button type="button" class="settings-close" @click="emit('close')">
           <i class="fa-solid fa-xmark"></i>
         </button>
-      </div>
+      </header>
 
       <div class="settings-modal__body">
         <aside class="settings-sidebar">
@@ -328,292 +360,193 @@ const handleSave = async () => {
         </aside>
 
         <section class="settings-content">
-          <div
-            v-if="isLoading && !settingsProfile"
-            class="settings-placeholder"
-          >
-            설정 정보를 불러오는 중입니다.
-          </div>
+          <div v-if="isLoading && !settingsProfile" class="settings-empty">설정 정보를 불러오는 중입니다.</div>
 
           <template v-else>
-            <div v-if="activeTab === 'profile'" class="settings-pane">
-              <section class="settings-section">
-                <h3 class="settings-section__title">프로필 이미지</h3>
-                <div class="settings-profile-hero">
-                  <div class="settings-avatar-card">
-                    <div class="settings-avatar-preview">
-                      <img
-                        v-if="profileForm.profileImageUrl"
-                        :src="profileForm.profileImageUrl"
-                        :alt="profileForm.displayName"
-                        class="settings-avatar-image"
-                      />
-                      <span v-else>{{ profileInitials }}</span>
-                    </div>
-                  </div>
-
-                  <div class="settings-profile-hero__meta">
-                    <div class="settings-profile-badges">
-                      <span class="badge badge-blue">{{ profileForm.membershipLabel }}</span>
-                      <span class="settings-meta-text">가입일: {{ formatDate(profileForm.joinedAt) }}</span>
-                    </div>
-                    <p class="settings-meta-copy">
-                      JPG, PNG 파일을 업로드하면 백엔드에서 300 x 300px 정사각형 이미지로 변환해 저장합니다.
-                    </p>
-                    <div class="settings-upload-row">
-                      <button
-                        type="button"
-                        class="settings-upload-btn"
-                        :disabled="isUploadingImage"
-                        @click="openProfileImagePicker"
-                      >
-                        <i class="fa-solid fa-arrow-up-from-bracket"></i>
-                        <span>{{ isUploadingImage ? "업로드 중..." : "프로필 이미지 업로드" }}</span>
-                      </button>
-                      <input
-                        ref="profileImageInput"
-                        type="file"
-                        class="settings-hidden-input"
-                        accept=".png,.jpg,.jpeg,image/png,image/jpeg"
-                        @change="handleProfileImageChange"
-                      />
-                    </div>
-                    <p v-if="imageFeedback" class="settings-upload-feedback">
-                      {{ imageFeedback }}
-                    </p>
-                  </div>
+            <section v-if="activeTab === 'profile'" class="settings-pane">
+              <div class="profile-hero">
+                <div class="profile-avatar">
+                  <img
+                    v-if="profileForm.profileImageUrl"
+                    :src="profileForm.profileImageUrl"
+                    :alt="profileForm.displayName"
+                    class="profile-avatar__image"
+                  />
+                  <span v-else>{{ profileInitials }}</span>
                 </div>
-              </section>
+                <div class="profile-hero__copy">
+                  <span class="settings-pill settings-pill--blue">{{ profileForm.membershipLabel }}</span>
+                  <h3>{{ profileForm.displayName }}</h3>
+                  <p>{{ profileForm.email }}</p>
+                  <div class="profile-hero__actions">
+                    <button type="button" class="settings-ghost-button" :disabled="isUploadingImage" @click="openProfileImagePicker">
+                      {{ isUploadingImage ? "이미지 적용 중..." : "프로필 이미지 변경" }}
+                    </button>
+                    <input ref="profileImageInput" type="file" accept="image/png,image/jpeg" hidden @change="handleProfileImageChange" />
+                    <span class="settings-meta">가입일 : {{ formatDate(profileForm.joinedAt) }}</span>
+                  </div>
+                  <p v-if="imageFeedback" class="settings-feedback">{{ imageFeedback }}</p>
+                </div>
+              </div>
 
-              <section class="settings-section">
-                <h3 class="settings-section__title">상세 정보</h3>
+              <div class="settings-grid settings-grid--two">
+                <label class="settings-field">
+                  <span class="settings-field__label">표시 이름</span>
+                  <input v-model="profileForm.displayName" class="settings-input" maxlength="100" />
+                </label>
+                <label class="settings-field">
+                  <span class="settings-field__label">이메일</span>
+                  <input :value="profileForm.email" class="settings-input" disabled />
+                </label>
+              </div>
+            </section>
+
+            <section v-else-if="activeTab === 'security'" class="settings-pane">
+              <div class="settings-card">
+                <h3 class="settings-section__title">보안 상태</h3>
                 <div class="settings-grid settings-grid--two">
-                  <label class="settings-field">
-                    <span class="settings-field__label">사용자 성함</span>
-                    <input
-                      v-model="profileForm.displayName"
-                      type="text"
-                      class="settings-input"
-                    />
-                  </label>
-
-                  <label class="settings-field">
-                    <span class="settings-field__label">직함 / 역할</span>
-                    <input
-                      :value="profileForm.role"
-                      type="text"
-                      class="settings-input is-readonly"
-                      readonly
-                    />
-                  </label>
-
-                  <label class="settings-field settings-field--full">
-                    <span class="settings-field__label">연락처 (이메일)</span>
-                    <div class="settings-email-row">
-                      <input
-                        :value="profileForm.email"
-                        type="email"
-                        class="settings-input is-readonly"
-                        readonly
-                      />
-                      <span class="badge" :class="profileForm.emailVerified ? 'badge-green' : 'badge-gray'">
-                        {{ profileForm.emailVerified ? '인증됨' : '미인증' }}
-                      </span>
-                    </div>
-                  </label>
-                </div>
-              </section>
-
-              <section class="settings-section">
-                <h3 class="settings-section__title">선호 설정</h3>
-                <div class="settings-toggle-list">
-                  <label class="settings-toggle">
-                    <div>
-                      <p class="settings-toggle__title">마케팅 정보 수신</p>
-                      <p class="settings-toggle__desc">새로운 기능 및 혜택 정보를 받아봅니다.</p>
-                    </div>
-                    <input v-model="profileForm.marketingOptIn" type="checkbox" />
-                  </label>
-
-                  <label class="settings-toggle">
-                    <div>
-                      <p class="settings-toggle__title">프로필 비공개</p>
-                      <p class="settings-toggle__desc">다른 사용자에게 공개 범위를 제한합니다.</p>
-                    </div>
-                    <input v-model="profileForm.privateProfile" type="checkbox" />
-                  </label>
-                </div>
-              </section>
-            </div>
-
-            <div v-else-if="activeTab === 'security'" class="settings-pane">
-              <section class="settings-section">
-                <h3 class="settings-section__title">계정 및 보안</h3>
-                <div class="settings-card-list">
-                  <div class="settings-card">
-                    <p class="settings-card__title">로그인 이메일</p>
-                    <p class="settings-card__value">{{ profileForm.email }}</p>
+                  <div class="settings-info-box">
+                    <span class="settings-info-box__label">이메일 인증</span>
+                    <strong>{{ profileForm.emailVerified ? "완료" : "대기" }}</strong>
                   </div>
-                  <div class="settings-card">
-                    <p class="settings-card__title">이메일 인증 상태</p>
-                    <p class="settings-card__value">{{ profileForm.emailVerified ? "인증 완료" : "인증 필요" }}</p>
-                  </div>
-                  <div class="settings-card">
-                    <p class="settings-card__title">보안 알림</p>
-                    <label class="settings-inline-toggle">
-                      <span>보안 관련 활동 알림 받기</span>
-                      <input v-model="profileForm.securityNotification" type="checkbox" />
-                    </label>
-                  </div>
-                  <div class="settings-card">
-                    <p class="settings-card__title">비밀번호 변경</p>
-                    <p class="settings-card__subtext">현재는 로그인 계정의 비밀번호 변경 기능을 준비 중입니다.</p>
+                  <div class="settings-info-box">
+                    <span class="settings-info-box__label">보안 알림</span>
+                    <strong>{{ profileForm.securityNotification ? "켜짐" : "꺼짐" }}</strong>
                   </div>
                 </div>
-              </section>
-            </div>
+                <p class="settings-help">
+                  비밀번호 변경은 기존 로그인 화면에서 진행해 주세요. 여기에서는 프로필 공개 범위와
+                  보안 알림 수신 여부를 관리할 수 있습니다.
+                </p>
+              </div>
 
-            <div v-else-if="activeTab === 'notification'" class="settings-pane">
-              <section class="settings-section">
-                <h3 class="settings-section__title">알림 설정</h3>
-                <div class="settings-toggle-list">
-                  <label class="settings-toggle">
-                    <div>
-                      <p class="settings-toggle__title">이메일 알림</p>
-                      <p class="settings-toggle__desc">파일 공유, 업로드 상태 등의 이메일 알림을 받습니다.</p>
-                    </div>
-                    <input v-model="profileForm.emailNotification" type="checkbox" />
-                  </label>
+              <label class="settings-check">
+                <input v-model="profileForm.privateProfile" type="checkbox" />
+                <span>프로필을 비공개로 유지</span>
+              </label>
+              <label class="settings-check">
+                <input v-model="profileForm.securityNotification" type="checkbox" />
+                <span>보안 알림 메일 받기</span>
+              </label>
+            </section>
 
-                  <label class="settings-toggle">
-                    <div>
-                      <p class="settings-toggle__title">보안 이벤트 알림</p>
-                      <p class="settings-toggle__desc">로그인, 권한 변경 등의 보안 관련 알림을 받습니다.</p>
-                    </div>
-                    <input v-model="profileForm.securityNotification" type="checkbox" />
-                  </label>
+            <section v-else-if="activeTab === 'notification'" class="settings-pane">
+              <label class="settings-check">
+                <input v-model="profileForm.emailNotification" type="checkbox" />
+                <span>파일 및 공유 알림 메일 받기</span>
+              </label>
+              <label class="settings-check">
+                <input v-model="profileForm.marketingOptIn" type="checkbox" />
+                <span>새 기능 및 혜택 안내 받기</span>
+              </label>
+            </section>
+
+            <section v-else-if="activeTab === 'language'" class="settings-pane">
+              <div class="settings-grid settings-grid--two">
+                <label class="settings-field">
+                  <span class="settings-field__label">언어</span>
+                  <select v-model="profileForm.localeCode" class="settings-input">
+                    <option v-for="option in localeOptions" :key="option.code" :value="option.code">{{ option.label }}</option>
+                  </select>
+                </label>
+                <label class="settings-field">
+                  <span class="settings-field__label">지역</span>
+                  <select v-model="profileForm.regionCode" class="settings-input">
+                    <option v-for="option in regionOptions" :key="option.code" :value="option.code">{{ option.label }}</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section v-else-if="activeTab === 'billing'" class="settings-pane">
+              <div class="billing-summary">
+                <div>
+                  <p class="settings-modal__eyebrow">Current Plan</p>
+                  <h3 class="settings-section__title">{{ profileForm.storagePlanLabel }}</h3>
+                  <p class="settings-help">{{ currentMembershipProduct.description }}</p>
                 </div>
-              </section>
-            </div>
-
-            <div v-else-if="activeTab === 'language'" class="settings-pane">
-              <section class="settings-section">
-                <h3 class="settings-section__title">언어 및 지역</h3>
-                <div class="settings-grid settings-grid--two">
-                  <label class="settings-field">
-                    <span class="settings-field__label">언어</span>
-                    <select v-model="profileForm.localeCode" class="settings-input">
-                      <option
-                        v-for="option in localeOptions"
-                        :key="option.code"
-                        :value="option.code"
-                      >
-                        {{ option.label }}
-                      </option>
-                    </select>
-                  </label>
-
-                  <label class="settings-field">
-                    <span class="settings-field__label">지역</span>
-                    <select v-model="profileForm.regionCode" class="settings-input">
-                      <option
-                        v-for="option in regionOptions"
-                        :key="option.code"
-                        :value="option.code"
-                      >
-                        {{ option.label }}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-              </section>
-            </div>
-
-            <div v-else-if="activeTab === 'billing'" class="settings-pane">
-              <section class="settings-section">
-                <h3 class="settings-section__title">현재 플랜 정보</h3>
-                <div class="settings-plan-card">
-                  <div class="settings-plan-card__header">
-                    <div>
-                      <p class="settings-plan-card__eyebrow">ACTIVE PLAN</p>
-                      <h4 class="settings-plan-card__title">{{ profileForm.storagePlanLabel }}</h4>
-                    </div>
-                    <span class="badge badge-light">{{ profileForm.membershipLabel }}</span>
-                  </div>
-                  <p class="settings-plan-card__desc">
-                    현재 계정은 {{ profileForm.storagePlanLabel }} 플랜을 사용 중입니다.
-                  </p>
-                  <RouterLink
-                    :to="{ name: 'payment' }"
-                    class="settings-plan-card__cta"
-                    @click="emit('close')"
-                  >
-                    플랜 업그레이드
-                  </RouterLink>
-                </div>
-              </section>
-
-              <section class="settings-section">
-                <h3 class="settings-section__title">리소스 사용량</h3>
-                <div
-                  v-if="storageSummary"
-                  class="settings-card-list"
+                <RouterLink
+                  :to="{ name: 'payment', query: { category: 'membership', product: 'PLUS' } }"
+                  class="settings-primary-link"
+                  @click="emit('close')"
                 >
-                  <div class="settings-card">
-                    <div class="settings-storage-head">
-                      <span>Cloud Storage</span>
-                      <strong>{{ storageSummary.usagePercent }}%</strong>
-                    </div>
-                    <div class="settings-storage-bar">
-                      <div :style="{ width: storageUsageWidth }"></div>
-                    </div>
-                    <p class="settings-card__subtext">
-                      {{ formatBytes(storageSummary.usedBytes) }} / {{ formatBytes(storageSummary.quotaBytes) }} 사용 중
-                    </p>
-                  </div>
+                  멤버십 변경
+                </RouterLink>
+              </div>
 
-                  <div class="settings-card">
-                    <p class="settings-card__title">활성 파일</p>
-                    <p class="settings-card__value">{{ storageSummary.activeFileCount }}개</p>
-                    <p class="settings-card__subtext">휴지통 제외 기준</p>
-                  </div>
+              <div class="settings-card">
+                <h3 class="settings-section__title">현재 멤버십 기능</h3>
+                <p class="settings-help">멤버십 플랜은 기본 저장 공간과 사용할 수 있는 파일 기능을 함께 결정합니다.</p>
+                <ul class="plan-feature-list">
+                  <li v-for="feature in currentMembershipProduct.features" :key="feature">{{ feature }}</li>
+                </ul>
+              </div>
 
-                  <div class="settings-card">
-                    <p class="settings-card__title">휴지통 사용량</p>
-                    <p class="settings-card__value">{{ formatBytes(storageSummary.trashUsedBytes) }}</p>
-                    <p class="settings-card__subtext">휴지통 포함 총 용량 집계</p>
+              <div v-if="storageSummary" class="storage-panel">
+                <div class="storage-panel__head">
+                  <span>저장 공간 사용량</span>
+                  <strong>{{ storageSummary.usagePercent }}%</strong>
+                </div>
+                <div class="storage-panel__bar">
+                  <div :style="{ width: storageUsageWidth }"></div>
+                </div>
+                <p class="settings-help">{{ formatBytes(storageSummary.usedBytes) }} / {{ formatBytes(storageSummary.quotaBytes) }} 사용 중</p>
+
+                <div class="settings-grid settings-grid--three">
+                  <div class="settings-info-box">
+                    <span class="settings-info-box__label">기본 용량</span>
+                    <strong>{{ formatBytes(storageSummary.addonQuotaBytes || profileForm.storageAddonBytes) }}</strong>
+                    
+                  </div>
+                  <div class="settings-info-box">
+                    <span class="settings-info-box__label">추가 용량</span>
+                    <strong>{{ formatBytes(storageSummary.baseQuotaBytes || profileForm.storageBaseQuotaBytes) }}</strong>
+                  </div>
+                  <div class="settings-info-box">
+                    <span class="settings-info-box__label">활성 파일</span>
+                    <strong>{{ storageSummary.activeFileCount }}개</strong>
                   </div>
                 </div>
+              </div>
 
-                <div v-else class="settings-placeholder">
-                  저장 공간 통계를 불러오는 중입니다.
-                </div>
-              </section>
-            </div>
+              <div class="settings-card">
+                <h3 class="settings-section__title">추가 저장용량</h3>
+                <p class="settings-help">추가 저장용량은 멤버십 기능을 바꾸지 않고 순수 저장 공간만 더합니다.</p>
+              </div>
+
+              <div class="addon-grid">
+                <article v-for="product in STORAGE_ADDON_PRODUCTS" :key="product.code" class="addon-card">
+                  <div>
+                    <span class="settings-pill settings-pill--amber">{{ product.badge }}</span>
+                    <h4>{{ product.label }}</h4>
+                    <p>{{ product.description }}</p>
+                  </div>
+                  <div class="addon-card__footer">
+                    <strong>{{ formatKrw(product.price) }}/ KRW</strong>
+                    <RouterLink
+                      :to="{ name: 'payment', query: { category: 'storage', product: product.code } }"
+                      class="settings-ghost-button"
+                      @click="emit('close')"
+                    >
+                      용량만 구입
+                    </RouterLink>
+                  </div>
+                </article>
+              </div>
+            </section>
           </template>
         </section>
       </div>
 
-      <div class="settings-modal__footer">
-        <p v-if="saveError" class="settings-save-error">{{ saveError }}</p>
-        <div class="settings-modal__footer-actions">
-          <button
-            type="button"
-            class="settings-secondary-btn"
-            @click="emit('close')"
-          >
-            취소
-          </button>
-          <button
-            type="button"
-            class="settings-primary-btn"
-            :disabled="isSaving || isLoading || isUploadingImage"
-            @click="handleSave"
-          >
-            {{ isSaving ? "저장 중..." : "모든 변경사항 저장" }}
+      <footer class="settings-modal__footer">
+        <p v-if="saveError" class="settings-error">{{ saveError }}</p>
+        <div class="settings-modal__actions">
+          <button type="button" class="settings-secondary-button" @click="emit('close')">닫기</button>
+          <button type="button" class="settings-primary-button" :disabled="isSaving || isLoading || isUploadingImage" @click="handleSave">
+            {{ isSaving ? "저장 중..." : "설정 저장" }}
           </button>
         </div>
-      </div>
+      </footer>
     </div>
   </div>
 </template>
@@ -626,11 +559,11 @@ const handleSave = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-overlay);
-  backdrop-filter: blur(6px);
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(10px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.18s ease;
 }
 
 .settings-overlay.active {
@@ -640,577 +573,414 @@ const handleSave = async () => {
 
 .settings-modal {
   display: flex;
-  height: min(86vh, 780px);
-  width: min(92vw, 1200px);
+  max-height: 88vh;
+  width: min(1080px, 92vw);
   flex-direction: column;
   overflow: hidden;
-  border-radius: 28px;
-  background: var(--bg-elevated);
+  border-radius: 2rem;
   border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-lg);
+  background: var(--bg-elevated);
+  box-shadow: 0 32px 80px rgba(15, 23, 42, 0.22);
 }
 
-.settings-modal__header {
+.settings-modal__header,
+.settings-modal__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
+  padding: 1.3rem 1.5rem;
   border-bottom: 1px solid var(--border-color);
-  padding: 24px 24px 20px;
 }
 
-.settings-modal__title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.settings-modal__footer {
+  border-top: 1px solid var(--border-color);
+  border-bottom: none;
 }
 
-.settings-modal__title-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 30px;
-  width: 30px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #38bdf8 0%, #60a5fa 100%);
-  color: #fff;
+.settings-modal__eyebrow {
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0ea5e9;
 }
 
 .settings-modal__title {
-  font-size: 1.5rem;
-  font-weight: 800;
+  margin-top: 0.3rem;
+  font-size: 1.6rem;
+  font-weight: 900;
   color: var(--text-main);
 }
 
-.settings-modal__close {
+.settings-close {
   display: inline-flex;
+  height: 2.6rem;
+  width: 2.6rem;
   align-items: center;
   justify-content: center;
-  height: 36px;
-  width: 36px;
   border-radius: 999px;
   color: var(--text-muted);
   transition: background-color 0.18s ease, color 0.18s ease;
 }
 
-.settings-modal__close:hover {
+.settings-close:hover {
   background: var(--bg-input);
   color: var(--text-main);
 }
 
 .settings-modal__body {
-  display: flex;
+  display: grid;
   min-height: 0;
   flex: 1;
+  grid-template-columns: 220px minmax(0, 1fr);
 }
 
 .settings-sidebar {
-  width: 224px;
-  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
   border-right: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  padding: 18px 16px;
+  padding: 1.2rem;
+  background: rgba(248, 250, 252, 0.72);
 }
 
 .settings-sidebar__item {
   display: flex;
-  width: 100%;
   align-items: center;
-  gap: 12px;
-  border-radius: 16px;
-  padding: 12px 14px;
+  gap: 0.8rem;
+  border-radius: 1rem;
+  padding: 0.85rem 0.95rem;
   color: var(--text-secondary);
-  font-size: 0.96rem;
+  font-size: 0.92rem;
   font-weight: 700;
-  transition: all 0.18s ease;
-}
-
-.settings-sidebar__item:hover {
-  background: var(--bg-input);
-  color: var(--text-main);
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .settings-sidebar__item.is-active {
-  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
-  color: #fff;
-  box-shadow: 0 12px 24px rgba(59, 130, 246, 0.18);
+  background: rgba(14, 165, 233, 0.12);
+  color: #0369a1;
 }
 
 .settings-content {
   min-height: 0;
-  flex: 1;
   overflow-y: auto;
-  padding: 28px 30px 36px;
+  padding: 1.35rem 1.5rem;
 }
 
 .settings-pane {
-  max-width: 720px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 1.2rem;
 }
 
-.settings-section {
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 28px;
+.profile-hero,
+.billing-summary,
+.storage-panel,
+.settings-card {
+  border-radius: 1.5rem;
+  border: 1px solid var(--border-color);
+  background: white;
+  padding: 1.25rem;
 }
 
-.settings-section:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.settings-section__title {
-  margin-bottom: 18px;
-  font-size: 1.05rem;
-  font-weight: 800;
-  color: var(--text-secondary);
-}
-
-.settings-profile-hero {
+.profile-hero {
   display: flex;
+  gap: 1.25rem;
   align-items: center;
-  gap: 28px;
 }
 
-.settings-avatar-card {
-  flex-shrink: 0;
-}
-
-.settings-avatar-preview {
-  display: flex;
-  height: 112px;
-  width: 112px;
+.profile-avatar {
+  display: inline-flex;
+  height: 5.4rem;
+  width: 5.4rem;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 28px;
-  background: linear-gradient(135deg, #4cc9f0 0%, #38bdf8 100%);
+  border-radius: 1.5rem;
+  background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
   color: white;
-  font-size: 3rem;
-  font-weight: 700;
-  box-shadow: 0 18px 40px rgba(56, 189, 248, 0.26);
+  font-size: 1.4rem;
+  font-weight: 900;
 }
 
-.settings-avatar-image {
+.profile-avatar__image {
   height: 100%;
   width: 100%;
   object-fit: cover;
 }
 
-.settings-profile-hero__meta {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 12px;
+.profile-hero__copy h3,
+.settings-section__title {
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: var(--text-main);
 }
 
-.settings-profile-badges {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.settings-meta-text {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.settings-meta-copy {
-  font-size: 0.95rem;
+.profile-hero__copy p,
+.settings-help,
+.addon-card p {
   color: var(--text-muted);
   line-height: 1.6;
 }
 
-.settings-upload-row {
+.profile-hero__actions,
+.addon-card__footer,
+.settings-modal__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
 }
 
-.settings-upload-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #38bdf8 0%, #4cc9f0 100%);
-  padding: 12px 16px;
-  color: #fff;
-  font-size: 0.92rem;
-  font-weight: 800;
-  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.22);
-}
-
-.settings-upload-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-  box-shadow: none;
-}
-
-.settings-hidden-input {
-  display: none;
-}
-
-.settings-upload-feedback {
-  font-size: 0.84rem;
+.settings-feedback {
+  margin-top: 0.7rem;
+  color: #0f766e;
+  font-size: 0.88rem;
   font-weight: 700;
-  color: var(--accent);
 }
 
 .settings-grid {
   display: grid;
-  gap: 22px;
+  gap: 1rem;
 }
 
 .settings-grid--two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.settings-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .settings-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.45rem;
 }
 
-.settings-field--full {
-  grid-column: 1 / -1;
-}
-
-.settings-field__label {
+.settings-field__label,
+.settings-info-box__label,
+.settings-meta {
   font-size: 0.8rem;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--text-muted);
 }
 
 .settings-input {
   width: 100%;
-  border: 1px solid var(--border-strong);
-  border-radius: 16px;
-  padding: 14px 16px;
-  background: var(--bg-secondary);
-  color: var(--text-main);
-  font-size: 0.96rem;
-  outline: none;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
-}
-
-.settings-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16);
+  border-radius: 1rem;
+  border: 1px solid var(--border-color);
   background: var(--bg-main);
-}
-
-.settings-input.is-readonly {
-  cursor: default;
-  background: var(--bg-input);
-}
-
-.settings-email-row {
-  position: relative;
-}
-
-.settings-email-row .badge {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.settings-toggle-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.settings-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  border: 1px solid var(--border-color);
-  border-radius: 20px;
-  background: var(--bg-secondary);
-  padding: 18px 20px;
-}
-
-.settings-toggle__title {
-  font-size: 0.96rem;
-  font-weight: 800;
+  padding: 0.8rem 0.95rem;
   color: var(--text-main);
 }
 
-.settings-toggle__desc {
-  margin-top: 4px;
-  font-size: 0.84rem;
-  color: var(--text-muted);
-}
-
-.settings-toggle input,
-.settings-inline-toggle input {
-  accent-color: #2563eb;
-  width: 18px;
-  height: 18px;
-}
-
-.settings-card-list {
-  display: grid;
-  gap: 14px;
-}
-
-.settings-card {
-  border: 1px solid var(--border-color);
-  border-radius: 20px;
-  background: var(--bg-secondary);
-  padding: 18px 20px;
-}
-
-.settings-card__title {
-  font-size: 0.85rem;
-  font-weight: 800;
-  color: var(--text-muted);
-}
-
-.settings-card__value {
-  margin-top: 8px;
-  font-size: 1.05rem;
-  font-weight: 800;
-  color: var(--text-main);
-}
-
-.settings-card__subtext {
-  margin-top: 8px;
-  font-size: 0.84rem;
-  color: var(--text-muted);
-}
-
-.settings-inline-toggle {
-  margin-top: 12px;
+.settings-check {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  font-size: 0.92rem;
+  gap: 0.8rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border-color);
+  background: white;
+  padding: 1rem 1.1rem;
+  font-weight: 700;
   color: var(--text-secondary);
 }
 
-.settings-plan-card {
-  border-radius: 28px;
-  background: linear-gradient(135deg, #1d4ed8 0%, #38bdf8 100%);
-  padding: 26px 28px;
-  color: #fff;
-  box-shadow: 0 20px 40px rgba(37, 99, 235, 0.18);
+.settings-check input {
+  height: 1rem;
+  width: 1rem;
 }
 
-.settings-plan-card__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-}
-
-.settings-plan-card__eyebrow {
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.18em;
-  opacity: 0.82;
-}
-
-.settings-plan-card__title {
-  margin-top: 8px;
-  font-size: 1.9rem;
+.settings-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.72rem;
+  font-size: 0.72rem;
   font-weight: 900;
 }
 
-.settings-plan-card__desc {
-  margin-top: 16px;
-  max-width: 32rem;
-  font-size: 0.95rem;
-  line-height: 1.6;
-  opacity: 0.94;
+.settings-pill--blue {
+  background: #e0f2fe;
+  color: #0369a1;
 }
 
-.settings-plan-card__cta {
-  margin-top: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 16px;
-  background: #fff;
-  padding: 12px 18px;
-  color: #2563eb;
-  font-size: 0.85rem;
-  font-weight: 800;
-  text-decoration: none;
+.settings-pill--amber {
+  background: #fef3c7;
+  color: #b45309;
 }
 
-.settings-storage-head {
+.storage-panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  font-size: 0.92rem;
+  gap: 0.8rem;
+  font-size: 0.94rem;
   font-weight: 800;
   color: var(--text-main);
 }
 
-.settings-storage-bar {
-  margin-top: 14px;
+.storage-panel__bar {
+  margin: 0.9rem 0 0.8rem;
   overflow: hidden;
   border-radius: 999px;
-  background: var(--border-color);
-  height: 10px;
+  background: #e2e8f0;
 }
 
-.settings-storage-bar > div {
-  height: 100%;
+.storage-panel__bar > div {
+  height: 0.8rem;
   border-radius: 999px;
-  background: linear-gradient(135deg, #2563eb 0%, #38bdf8 100%);
+  background: linear-gradient(90deg, #0ea5e9 0%, #2563eb 100%);
 }
 
-.settings-placeholder {
+.settings-info-box {
+  border-radius: 1.1rem;
+  background: #f8fafc;
+  padding: 1rem;
+}
+
+.settings-info-box strong,
+.addon-card strong {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: var(--text-main);
+}
+
+.plan-feature-list {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.plan-feature-list li {
   display: flex;
-  min-height: 280px;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed var(--border-strong);
-  border-radius: 20px;
-  color: var(--text-muted);
-  background: var(--bg-secondary);
+  gap: 0.6rem;
+  align-items: flex-start;
 }
 
-.badge {
+.plan-feature-list li::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-top: 0.42rem;
+  border-radius: 999px;
+  background: #0ea5e9;
+  flex-shrink: 0;
+}
+
+.addon-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.addon-card {
+  display: flex;
+  min-height: 12rem;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1rem;
+  border-radius: 1.4rem;
+  border: 1px solid var(--border-color);
+  background: white;
+  padding: 1.1rem;
+}
+
+.addon-card h4 {
+  margin-top: 0.65rem;
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: var(--text-main);
+}
+
+.settings-primary-link,
+.settings-primary-button,
+.settings-secondary-button,
+.settings-ghost-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 0.68rem;
-  font-weight: 800;
+  padding: 0.75rem 1rem;
+  font-size: 0.86rem;
+  font-weight: 900;
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
-.badge-blue {
-  background: rgba(59, 130, 246, 0.14);
-  color: #2563eb;
+.settings-primary-link,
+.settings-primary-button {
+  background: #0284c7;
+  color: white;
 }
 
-.badge-green {
-  background: rgba(34, 197, 94, 0.16);
-  color: #16a34a;
+.settings-primary-link:hover,
+.settings-primary-button:hover {
+  background: #0369a1;
 }
 
-.badge-gray {
+.settings-secondary-button,
+.settings-ghost-button {
+  border: 1px solid var(--border-color);
+  background: white;
+  color: var(--text-secondary);
+}
+
+.settings-secondary-button:hover,
+.settings-ghost-button:hover {
   background: var(--bg-input);
+}
+
+.settings-error {
+  color: #dc2626;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.settings-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 12rem;
+  border-radius: 1.5rem;
+  border: 1px dashed var(--border-color);
+  background: rgba(248, 250, 252, 0.72);
   color: var(--text-muted);
 }
 
-.badge-light {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-}
-
-.settings-modal__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border-top: 1px solid var(--border-color);
-  padding: 20px 24px;
-  background: var(--bg-elevated);
-}
-
-.settings-save-error {
-  color: #ef4444;
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.settings-modal__footer-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.settings-secondary-btn {
-  padding: 12px 18px;
-  color: var(--text-secondary);
-  font-size: 0.92rem;
-  font-weight: 700;
-}
-
-.settings-secondary-btn:hover {
-  background: var(--bg-input);
-}
-
-.settings-primary-btn {
-  border-radius: 16px;
-  background: linear-gradient(135deg, #38bdf8 0%, #4cc9f0 100%);
-  padding: 12px 22px;
-  color: #fff;
-  font-size: 0.92rem;
-  font-weight: 800;
-  box-shadow: 0 14px 28px rgba(56, 189, 248, 0.22);
-}
-
-.settings-primary-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-  box-shadow: none;
-}
-
-@media (max-width: 980px) {
+@media (max-width: 960px) {
   .settings-modal {
-    height: min(92vh, 860px);
+    width: min(96vw, 720px);
   }
 
   .settings-modal__body {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .settings-sidebar {
-    width: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border-color);
-    display: flex;
+    flex-direction: row;
     overflow-x: auto;
-    gap: 10px;
   }
 
-  .settings-sidebar__item {
-    min-width: max-content;
-  }
-
-  .settings-grid--two {
+  .settings-grid--two,
+  .settings-grid--three,
+  .addon-grid {
     grid-template-columns: 1fr;
   }
-}
 
-@media (max-width: 768px) {
-  .settings-modal {
-    width: calc(100vw - 24px);
-    border-radius: 24px;
-  }
-
-  .settings-content {
-    padding: 22px 18px 28px;
-  }
-
-  .settings-profile-hero {
+  .profile-hero,
+  .billing-summary {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .settings-modal__footer {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .settings-modal__footer-actions {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-end;
   }
 }
 </style>
