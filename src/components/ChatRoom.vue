@@ -82,8 +82,7 @@ const initChat = () => {
         nextTick(() => scrollToBottom())
         // 내가 보낸 메시지가 아닐 때만 알림 ← 추가
         if (data.senderIdx !== authStore.user.idx) {
-      showNotification(data.senderNickname, data.contents)
-      markAsRead()
+            markAsRead()
       }
       })
     },
@@ -134,25 +133,24 @@ const requestNotificationPermission = async () => {
 
 // 브라우저 알림 표시
 const showNotification = (sender, message) => {
-  // 채팅 패널이 열려있고 현재 방을 보고 있으면 알림 안 띄움
-  if (document.hasFocus()) return
-  if (Notification.permission !== 'granted') return
+    // 방에 들어와 있으면 알림 안 띄움 (포커스 여부 상관없이)
+    if (Notification.permission !== 'granted') return
 
-  new Notification(`${props.room.name}`, {
-    body: `${sender}: ${message}`,
-    icon: '/favicon.ico'
-  })
+    new Notification(`${props.room.name}`, {
+        body: `${sender}: ${message}`,
+        icon: '/favicon.ico'
+    })
 }
 
-onMounted(() => {
+onMounted(async() => {
+  await api.post(`/chatRoom/${props.room.id}/enter`)
   requestNotificationPermission()
   fetchHistory()
   initChat()
   markAsRead()
 })
 
-onUnmounted(() => {
-  markAsRead()
+onUnmounted(async() => {
   if (stompClient) stompClient.disconnect()
    
 })

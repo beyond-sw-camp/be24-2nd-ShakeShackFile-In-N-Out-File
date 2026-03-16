@@ -205,8 +205,46 @@ const handleSelectRoom = (room) => {
   selectedRoom.value = room
   viewMode.value = 'room'
 }
+const handleBack = async () => {
+  if (selectedRoom.value) {
+    try {
+      await api.post(`/chat/${selectedRoom.value.id}/read`)
+      await api.post(`/chatRoom/${selectedRoom.value.id}/leave`)
+      const target = chatRooms.value.find(r => r.id === selectedRoom.value.id)
+      if (target) target.unreadCount = 0
+    } catch (e) {
+      console.error('읽음 처리 실패:', e)
+    }
+  }
+  viewMode.value = 'list'
+}
+onMounted(() => {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    // 1. 알림 클릭 시 특정 채팅방 열기 (OPEN_CHAT_ROOM)
+    if (e.data.type === 'OPEN_CHAT_ROOM') {
+      const room = chatRooms.value.find(r => r.id === e.data.roomIdx);
+      if (room) {
+        handleSelectRoom(room); // 오타 수정: handleselectRoom -> handleSelectRoom
+      }
+    }
 
-onMounted(async () => {
+    // 2. 새 메시지 수신 시 목록 실시간 업데이트 (NEW_MESSAGE)
+    // 이 if문은 반드시 리스너 중괄호 { } 안에 있어야 합니다.
+    if (e.data.type === 'NEW_MESSAGE') {
+      const target = chatRooms.value.find(r => r.id === e.data.roomIdx);
+      if (target) {
+        target.lastMsg = e.data.lastMsg;
+        target.unreadCount = e.data.unreadCount;
+        
+        // [선택] 최신 메시지가 온 방을 목록 맨 위로 올리고 싶다면:
+        // chatRooms.value.sort((a, b) => (a.id === e.data.roomIdx ? -1 : 1));
+      } else {
+        // 목록에 없는 새로운 방의 알림이라면 목록 전체 새로고침
+        fetchRooms();
+      }
+    }
+  });
+
   // 스토어에 토큰이 없는 경우 잠시 대기하거나 재로그인 유도
   if (!authStore.token) {
     // 10분 만료 후 새로고침 시, 첫 요청이 401을 트리거하여 
@@ -215,7 +253,7 @@ onMounted(async () => {
       await fetchRooms();
     }, 500); // 0.5초 정도 대기 후 목록 호출
   } else {
-    await fetchRooms();
+    fetchRooms();
   }
 });
 </script>
@@ -237,7 +275,7 @@ onMounted(async () => {
       <div class="flex items-center gap-2">
         <button
           v-if="viewMode === 'room'"
-          @click="viewMode = 'list'"
+          @click="handleBack"
           class="back-button"
         >
           <i class="fa-solid fa-chevron-left"></i>
@@ -246,7 +284,7 @@ onMounted(async () => {
           {{ viewMode === 'list' ? '채팅 목록' : selectedRoom.name }}
         </span>
       </div>
-
+      
       <div class="flex items-center gap-2">
         <button 
           v-if="viewMode === 'list'"
