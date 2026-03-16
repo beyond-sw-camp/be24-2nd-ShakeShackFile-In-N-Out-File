@@ -1,4 +1,33 @@
-import api from '@/plugins/axiosinterceptor' 
+import api from '@/plugins/axiosinterceptor'
+
+/**
+ * Web Push 구독 및 서버 전송
+ */
+const subscribeWebPush = async () => {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+  try {
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: 'BLHgfPga02L2u89uc4xjhbUFTy_U04rQCjGq7o24oxtqfVmAPHTxOmp6xndSHZtGQpmt7gqTFdMXco2gRNP7_p8'
+    });
+
+    const subObj = JSON.parse(JSON.stringify(subscription));
+    
+    // 백엔드 NotificationDto.Subscribe 구조에 맞춰 전송
+    const response = await api.post('/notification/subscribe', {
+      endpoint: subObj.endpoint,
+      keys: subObj.keys
+    });
+    
+    console.log("알림 구독 성공");
+    return response.data;
+  } catch (error) {
+    console.error("알림 구독 실패:", error);
+    throw error;
+  }
+};
 
 // 게시글 저장
 const savePost = async (formData) => {
@@ -56,7 +85,8 @@ const inviteUser = async (inviteData) => {
         uuid: inviteData.uuid,
         type: inviteData.type,
         email: inviteData.email
-      }
+      },
+      timeout : 15000
     });
     return response.data;
   } catch (error) {
@@ -86,6 +116,7 @@ const updateShareStatus = async (idx, status) => {
     throw error;
   }
 }
+
 /**
  * 권한 리스트 불러오기 API
  * @param {Number|String} idx - 게시글 인덱스
@@ -137,6 +168,7 @@ const verifyEmail = async (uuid, type) => {
     throw error;
   }
 }
+
 const getPostByUuid = async (uuid) => {
   try {
     const response = await api.post('/workspace/invite', null, {
@@ -151,8 +183,8 @@ const getPostByUuid = async (uuid) => {
   }
 }
 
-
 export default { 
+  subscribeWebPush,
   savePost, 
   getPost, 
   allPosts, 

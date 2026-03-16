@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { fetchSettingsProfile } from "@/api/featerApi";
 import ProfileModal from "./ProfileModal.vue";
+import postApi from "@/api/postApi"; // 통합된 api 객체
 
 const emit = defineEmits(["toggle-chat", "toggle-theme", "switch-view"]);
 const router = useRouter();
@@ -17,6 +18,10 @@ const themeIcon = ref("fa-solid fa-moon");
 const settingsTab = ref("profile");
 const settingsProfile = ref(null);
 const isSettingsLoading = ref(false);
+
+// --- 알림 관련 상태 ---
+const notifications = ref([]);
+const hasNewNotif = computed(() => notifications.value.length > 0);
 
 const userName = computed(() => {
   return settingsProfile.value?.displayName || authStore.user?.userName || authStore.user?.name || "사용자";
@@ -55,7 +60,6 @@ const initTheme = () => {
 
 const loadSettingsProfile = async () => {
   isSettingsLoading.value = true;
-
   try {
     settingsProfile.value = await fetchSettingsProfile();
   } catch {
@@ -65,9 +69,33 @@ const loadSettingsProfile = async () => {
   }
 };
 
+// 실시간 메시지 수신 (Service Worker와 통신)
+const setupNotificationChannel = () => {
+  const bc = new BroadcastChannel('notif_channel');
+  bc.onmessage = (event) => {
+    // 실시간으로 수신된 데이터를 알림 목록 최상단에 추가
+    notifications.value.unshift({
+      id: Date.now(),
+      title: event.data.title,
+      message: event.data.message,
+      time: '방금 전'
+    });
+  };
+};
+
 onMounted(() => {
-  initTheme();
   authStore.checkLogin();
+  
+  if (authStore.user) {
+    // 웹 푸시 구독 시도 후 성공하면 채널 개설
+    postApi.subscribeWebPush().then(res => {
+      if (res) setupNotificationChannel();
+    }).catch((error) => {
+       console.error("알림 구독 실패 또는 거부:", error);
+    });
+  }
+
+  initTheme();
   loadSettingsProfile();
   document.addEventListener("click", handleClickOutside);
 });
@@ -75,6 +103,7 @@ onMounted(() => {
 const toggleNotifMenu = () => {
   showNotifDropdown.value = !showNotifDropdown.value;
   showProfileDropdown.value = false;
+  // 알림창을 열면 배지가 사라지게 하고 싶다면 여기서 로직 추가 가능
 };
 
 const toggleProfileMenu = () => {
@@ -159,14 +188,24 @@ onBeforeUnmount(() => {
         <div class="relative" id="notif-container">
           <button @click="toggleNotifMenu" class="icon-button bell-button">
             <i class="fa-solid fa-bell"></i>
+            <span v-if="hasNewNotif" class="notif-badge"></span>
           </button>
 
           <div v-if="showNotifDropdown" class="dropdown-container active">
             <div class="dropdown-header">
               <p class="dropdown-header__label">알림</p>
             </div>
-            <div class="py-2">
-              <div class="dropdown-item">
+            <div class="py-2 max-h-64 overflow-y-auto">
+              <template v-if="notifications.length > 0">
+                <div v-for="n in notifications" :key="n.id" class="dropdown-item notification-item">
+                  <div class="flex flex-col gap-1">
+                    <p class="notif-title">{{ n.title }}</p>
+                    <p class="notif-message">{{ n.message }}</p>
+                    <span class="notif-time">{{ n.time }}</span>
+                  </div>
+                </div>
+              </template>
+              <div v-else class="dropdown-item">
                 <span class="dropdown-muted">새로운 알림이 없습니다</span>
               </div>
             </div>
@@ -237,6 +276,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 제공해주신 기존 스타일을 그대로 유지합니다 */
 .header-container {
   min-height: 4rem;
   background-color: var(--bg-main);
@@ -301,6 +341,45 @@ onBeforeUnmount(() => {
   padding: 0.5rem;
   border-radius: 0.75rem;
   position: relative;
+}
+
+.notif-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  background-color: #ff4d4f;
+  border-radius: 50%;
+  border: 1.5px solid var(--bg-main);
+}
+
+.notification-item {
+  padding: 0.8rem 1.1rem;
+  border-bottom: 1px solid var(--border-color);
+  cursor: default;
+}
+
+.notification-item:last-child {
+  border-bottom: none;
+}
+
+.notif-title {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.notif-message {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.notif-time {
+  font-size: 0.65rem;
+  color: #999;
+  margin-top: 2px;
 }
 
 @keyframes bell-swing {
@@ -487,11 +566,9 @@ onBeforeUnmount(() => {
   .header-container {
     padding: 0 1rem;
   }
-
   .profile-trigger__copy {
     display: none;
   }
-
   .profile-trigger {
     max-width: none;
   }
@@ -504,13 +581,11 @@ onBeforeUnmount(() => {
     padding-top: 0.75rem;
     padding-bottom: 0.75rem;
   }
-
   .header-search-wrap {
     order: 2;
     flex-basis: 100%;
     max-width: 100%;
   }
-
   .header-actions {
     width: 100%;
     justify-content: flex-end;
