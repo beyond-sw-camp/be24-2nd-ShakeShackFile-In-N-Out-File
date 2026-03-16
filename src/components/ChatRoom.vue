@@ -24,26 +24,19 @@ const formatTime = (isoString) => {
   }).format(date)
 }
 
-// 1. 과거 내역 가져오기 (DB 연동)
 const fetchHistory = async () => {
   try {
-    // 백엔드: GET /chat/{roomIdx}
     const response = await api.get(`/chat/${props.room.id}/history`)
-    
-    // 백엔드 응답 구조: BaseResponse.result.boardList
     if (response.data.success && response.data.result.messageList) {
       chatMessages.value = response.data.result.messageList.map(msg => ({
         id: msg.idx,
         sender: msg.senderNickname,
         text: msg.contents,
         time: msg.createdAt,
-        // 현재 로그인한 유저의 idx와 메시지 작성자의 senderIdx 비교
-        isMe: msg.senderIdx === authStore.user.idx 
+        isMe: msg.senderIdx === authStore.user.idx,
+        messageUnreadCount: msg.messageUnreadCount // ← 추가
       }))
-      
-      // 메시지를 시간순(과거 -> 현재)으로 보여주기 위해 정렬이 필요할 수 있습니다.
-      // 만약 백엔드에서 역순으로 준다면 .reverse()를 붙여주세요.
-      chatMessages.value.reverse(); 
+      chatMessages.value.reverse()
     }
     await nextTick()
     scrollToBottom()
@@ -52,28 +45,32 @@ const fetchHistory = async () => {
   }
 }
 
-// 2. STOMP 웹소켓 연결
 const initChat = () => {
   if (stompClient) stompClient.disconnect()
 
-  // 설정된 엔드포인트 "/ws" 사용 (withSockJS가 없으므로 순수 WebSocket 사용)
   const socket = new SockJS('http://localhost:8080/ws-stomp')
   stompClient = Stomp.over(socket)
 
-  // 디버그 로그가 너무 많으면 아래 주석 해제
-  // stompClient.debug = null 
-
   stompClient.connect(
-    { Authorization: `Bearer ${authStore.token}` }, 
+    { Authorization: `Bearer ${authStore.token}` },
     () => {
       console.log('STOMP 연결 성공')
-      
-      // 구독 경로: SimpleBroker "/topic" + roomIdx
+
       stompClient.subscribe(`/sub/chat/room/${props.room.id}`, (sdkEvent) => {
         const data = JSON.parse(sdkEvent.body)
-        
+
+        // 읽음 업데이트 이벤트 → 안읽은 수 감소
+        if (data.type === 'READ_UPDATE') {
+          chatMessages.value.forEach(msg => {
+            if (!msg.isPending && msg.messageUnreadCount > 0) {
+              msg.messageUnreadCount -= 1 // 누군가 읽었으니 안읽은 수 -1
+            }
+          })
+          return
+        }
+
+        // 내가 보낸 메시지 → 임시 메시지 교체
         if (data.senderIdx === authStore.user.idx) {
-        // 내가 보낸 메시지면 임시 메시지를 실제 메시지로 교체
           const tempIdx = chatMessages.value.findLastIndex(m => m.isPending && m.isMe)
           if (tempIdx !== -1) {
             chatMessages.value[tempIdx] = {
@@ -82,24 +79,27 @@ const initChat = () => {
               text: data.contents,
               time: data.createdAt,
               isMe: true,
-              isPending: false
+              isPending: false,
+              messageUnreadCount: data.messageUnreadCount // ← 추가
             }
             return
           }
-      }
-        
+        }
+
+        // 상대방 메시지
         chatMessages.value.push({
           id: data.idx,
           sender: data.senderNickname,
           text: data.contents,
           time: data.createdAt,
-          isMe: flase
+          isMe: false,
+          messageUnreadCount: data.messageUnreadCount // ← 추가
         })
         nextTick(() => scrollToBottom())
-        // 내가 보낸 메시지가 아닐 때만 알림 ← 추가
+
         if (data.senderIdx !== authStore.user.idx) {
-            markAsRead()
-      }
+          markAsRead()
+        }
       })
     },
     (error) => {
@@ -108,11 +108,10 @@ const initChat = () => {
   )
 }
 
-// 3. 메시지 전송
 const sendMessage = () => {
   if (!newMessage.value.trim() || !stompClient) return
 
-  const text = newMessage.value.trim() // ← 이 줄이 tempMsg보다 위에 있어야 함
+  const text = newMessage.value.trim()
 
   const tempMsg = {
     id: 'temp-' + Date.now(),
@@ -120,7 +119,8 @@ const sendMessage = () => {
     text: text,
     time: new Date().toISOString(),
     isMe: true,
-    isPending: true
+    isPending: true,
+    messageUnreadCount: 0
   }
   chatMessages.value.push(tempMsg)
   nextTick(() => scrollToBottom())
@@ -132,7 +132,7 @@ const sendMessage = () => {
   )
 
   newMessage.value = ''
-  markAsRead()
+  
 }
 
 const scrollToBottom = () => {
@@ -140,6 +140,7 @@ const scrollToBottom = () => {
     scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
   }
 }
+
 const markAsRead = async () => {
   try {
     await api.post(`/chat/${props.room.id}/read`)
@@ -148,25 +149,13 @@ const markAsRead = async () => {
   }
 }
 
-// 브라우저 알림 권한 요청
 const requestNotificationPermission = async () => {
   if ('Notification' in window && Notification.permission === 'default') {
     await Notification.requestPermission()
   }
 }
 
-// 브라우저 알림 표시
-const showNotification = (sender, message) => {
-    // 방에 들어와 있으면 알림 안 띄움 (포커스 여부 상관없이)
-    if (Notification.permission !== 'granted') return
-
-    new Notification(`${props.room.name}`, {
-        body: `${sender}: ${message}`,
-        icon: '/favicon.ico'
-    })
-}
-
-onMounted(async() => {
+onMounted(async () => {
   await api.post(`/chatRoom/${props.room.id}/enter`)
   requestNotificationPermission()
   fetchHistory()
@@ -174,9 +163,9 @@ onMounted(async() => {
   markAsRead()
 })
 
-onUnmounted(async() => {
+onUnmounted(() => {
+  api.post(`/chatRoom/${props.room.id}/leave`).catch(() => {})
   if (stompClient) stompClient.disconnect()
-   
 })
 
 watch(() => props.room.id, () => {
@@ -187,7 +176,7 @@ watch(() => props.room.id, () => {
 </script>
 
 <template>
- <div class="flex flex-col h-full overflow-hidden">
+  <div class="flex flex-col h-full overflow-hidden">
     <div ref="scrollContainer" class="flex-1 overflow-y-auto p-5 space-y-4">
       <div
         v-for="msg in chatMessages"
@@ -196,20 +185,30 @@ watch(() => props.room.id, () => {
       >
         <div :class="['flex flex-col max-w-[85%]', msg.isMe ? 'items-end' : 'items-start']">
           <p class="text-[10px] font-bold text-[var(--text-muted)] mb-1">{{ msg.sender }}</p>
-          
+
           <div :class="['flex items-end gap-2', msg.isMe ? 'flex-row-reverse' : '']">
             <div
               :class="[
                 'p-3 rounded-2xl text-xs break-words',
                 msg.isMe ? 'bg-[#4169E1] text-white' : 'bg-[var(--bg-input)] text-[var(--text-main)]',
+                msg.isPending ? 'opacity-60' : ''
               ]"
             >
               {{ msg.text }}
             </div>
-            
-            <span class="text-[9px] text-gray-400 whitespace-nowrap mb-1">
-              {{ formatTime(msg.time) }}
-            </span>
+
+            <div :class="['flex flex-col gap-0.5', msg.isMe ? 'items-end' : 'items-start']">
+              <!-- 카톡처럼 안읽은 수 표시 (0이면 안보임) -->
+              <span
+                v-if="msg.messageUnreadCount > 0"
+                class="text-[9px] text-blue-400 font-bold whitespace-nowrap"
+              >
+                {{ msg.messageUnreadCount }}
+              </span>
+              <span class="text-[9px] text-gray-400 whitespace-nowrap">
+                {{ formatTime(msg.time) }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
