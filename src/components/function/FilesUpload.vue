@@ -34,14 +34,14 @@
         >
           <RouterLink :to="{ name: 'workspace' }">
             <div class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-t-xl text-gray-800 dark:text-gray-200">
-              파일 생성
+              문서 작성
             </div>
           </RouterLink>
           <div
             @click="createNewFolder"
             class="px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer rounded-b-xl text-gray-800 dark:text-gray-200"
           >
-            폴더 생성
+            새 폴더 만들기
           </div>
         </div>
       </div>
@@ -106,6 +106,9 @@
             {{ count }}
           </option>
         </select>
+        <p class="mt-2 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
+          {{ `현재 멤버십 한도: 한 번에 최대 ${maxUploadCount}개, 파일당 ${formatUploadLimitBytes(maxUploadFileBytes)}` }}
+        </p>
       </div>
     </div>
 
@@ -254,7 +257,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import axios from "axios"
-import { completePartitionUpload, parseUploadResponse, uploadFiles } from "@/api/filesApi.js"
+import { abortUpload, completeUpload, fetchUploadSessions, initUploadFiles, parseUploadResponse } from "@/api/filesApi.js"
 import { useFileStore } from "@/stores/useFileStore"
 
 const isDropdownOpen = ref(false)
@@ -272,9 +275,11 @@ const uploadSessionStartedAt = ref(null)
 const nowTick = ref(Date.now())
 const isCancelRequested = ref(false)
 const fileStore = useFileStore()
+const planCapabilities = computed(() => fileStore.planCapabilities)
+const maxUploadCount = computed(() => Number(planCapabilities.value?.maxUploadCount || 30))
+const maxUploadFileBytes = computed(() => Number(planCapabilities.value?.maxUploadFileBytes || 5 * 1024 * 1024 * 1024))
 
 const emit = defineEmits(["upload-complete", "upload-fail"])
-const MAX_UPLOAD_COUNT = 1000
 const PARTITION_SIZE_BYTES = 100 * 1024 * 1024
 const CHUNK_SIZE_BYTES = 80 * 1024 * 1024
 const DEFAULT_UPLOAD_CONCURRENCY = 3
@@ -288,6 +293,17 @@ const MAX_SPEED_SAMPLES = 8
 const MIN_PROGRESS_SAMPLE_INTERVAL_MS = 400
 
 let tickTimerId = null
+
+const formatUploadLimitBytes = (bytes) => {
+  const size = Number(bytes || 0)
+  if (!Number.isFinite(size) || size <= 0) return "0 B"
+
+  const units = ["B", "KB", "MB", "GB", "TB"]
+  const unitIndex = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1)
+  const value = size / 1024 ** unitIndex
+  const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
+}
 
 const normalizeUploadConcurrency = (value) => {
   const parsedValue = Number(value)
@@ -333,12 +349,31 @@ const activeUploadCountComputed = computed(() =>
   uploadItems.value.filter((item) => ACTIVE_UPLOAD_STATUSES.has(item.status)).length,
 )
 
+const resumableUploadCount = computed(() =>
+  uploadItems.value.filter(
+    (item) => item.status === "resumable" || item.status === "awaiting-complete",
+  ).length,
+)
+
 const failedUploadCount = computed(() =>
   uploadItems.value.filter((item) => item.status === "failed").length,
 )
 
 const canceledUploadCount = computed(() =>
   uploadItems.value.filter((item) => item.status === "canceled").length,
+)
+
+const abortableSessionIds = computed(() =>
+  Array.from(
+    new Set(
+      uploadItems.value
+        .filter((item) =>
+          item?.sessionId &&
+          !["completed", "failed", "canceled"].includes(item.status),
+        )
+        .map((item) => item.sessionId),
+    ),
+  ),
 )
 
 const totalTrackedBytes = computed(() =>
@@ -389,7 +424,7 @@ const overallEstimatedSeconds = computed(() => {
 
 const uploadPanelTitle = computed(() => {
   if (activeUploadCountComputed.value > 0) {
-    return `${activeUploadCountComputed.value}개 항목 업로드 중`
+    return `${activeUploadCountComputed.value}개 업로드 중`
   }
 
   if (failedUploadCount.value > 0 && completedUploadCount.value > 0) {
@@ -397,7 +432,7 @@ const uploadPanelTitle = computed(() => {
   }
 
   if (failedUploadCount.value > 0) {
-    return `${failedUploadCount.value}개 항목 업로드 실패`
+    return `${failedUploadCount.value}개 업로드 실패`
   }
 
   if (canceledUploadCount.value > 0) {
@@ -405,7 +440,7 @@ const uploadPanelTitle = computed(() => {
   }
 
   if (completedUploadCount.value > 0) {
-    return `${completedUploadCount.value}개 항목 업로드 완료`
+    return `${completedUploadCount.value}개 업로드 완료`
   }
 
   return "업로드 상태"
@@ -417,15 +452,15 @@ const uploadPanelSubtitle = computed(() => {
   }
 
   if (failedUploadCount.value > 0) {
-    return "실패한 파일을 확인해 주세요"
+    return "실패한 파일을 확인해 주세요."
   }
 
   if (canceledUploadCount.value > 0) {
-    return "중단된 업로드가 있습니다"
+    return "중단된 업로드가 있습니다."
   }
 
   if (completedUploadCount.value > 0) {
-    return "모든 업로드가 끝났습니다"
+    return "모든 업로드가 완료되었습니다."
   }
 
   return ""
@@ -434,7 +469,7 @@ const uploadPanelSubtitle = computed(() => {
 const uploadPanelEtaText = computed(() => {
   if (activeUploadCountComputed.value === 0) {
     if (failedUploadCount.value > 0) {
-      return "업로드가 중단되었거나 실패했습니다."
+      return "업로드가 중단되었거나 일부 파일이 실패했습니다."
     }
 
     if (canceledUploadCount.value > 0) {
@@ -445,13 +480,13 @@ const uploadPanelEtaText = computed(() => {
   }
 
   if (mergingUploadCount.value > 0) {
-    return "서버에서 업로드를 마무리하는 중..."
+    return "서버에서 업로드를 마무리하는 중입니다..."
   }
 
   if (overallEstimatedSeconds.value == null) {
     return overallTransferSpeedText.value
-      ? `${overallTransferSpeedText.value} 측정 중`
-      : "남은 시간 계산 중..."
+      ? `${overallTransferSpeedText.value} 전송 중`
+      : "남은 시간을 계산 중입니다..."
   }
 
   const speedSuffix = overallTransferSpeedText.value
@@ -462,7 +497,7 @@ const uploadPanelEtaText = computed(() => {
 })
 
 const canCancelUploads = computed(() =>
-  isUploading.value && activeUploadCountComputed.value > 0,
+  abortableSessionIds.value.length > 0,
 )
 
 const applyUploadPanelSafeArea = () => {
@@ -475,9 +510,9 @@ const applyUploadPanelSafeArea = () => {
 
   if (hasUploadItems.value) {
     if (uploadPanelVisible.value && !uploadPanelCollapsed.value) {
-      safeSpace = window.innerWidth < 768 ? "320px" : "420px"
+      safeSpace = window.innerWidth < 768 ? "220px" : "260px"
     } else {
-      safeSpace = "96px"
+      safeSpace = "72px"
     }
   }
 
@@ -604,7 +639,7 @@ const updateUploadItemProgress = (itemId, uploadedBytes) => {
       ? formatTransferSpeed(averageBytesPerSecond)
       : ""
     const etaText = estimatedSeconds != null
-      ? `${formatRemainingTime(estimatedSeconds)} 남음`
+        ? `${formatRemainingTime(estimatedSeconds)} 남음`
       : ""
 
     nextPatch.statusText = [progress > 0 ? `${progress}%` : "업로드 중", speedText, etaText]
@@ -627,21 +662,21 @@ const formatRemainingTime = (seconds) => {
   }
 
   if (seconds < 60) {
-    return `약 ${Math.ceil(seconds)}초`
+    return `${Math.ceil(seconds)}초`
   }
 
   if (seconds < 3600) {
-    return `약 ${Math.ceil(seconds / 60)}분`
+    return `${Math.ceil(seconds / 60)}분`
   }
 
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.ceil((seconds % 3600) / 60)
 
   if (minutes === 0) {
-    return `약 ${hours}시간`
+    return `${hours}시간`
   }
 
-  return `약 ${hours}시간 ${minutes}분`
+  return `${hours}시간 ${minutes}분`
 }
 
 const formatTransferSpeed = (bytesPerSecond) => {
@@ -685,7 +720,7 @@ const dismissUploadPanel = () => {
 }
 
 const createNewFolder = () => {
-  const folderName = prompt("폴더 이름을 입력해 주세요.")
+  const folderName = prompt("폴더 이름을 입력해 주세요")
   if (folderName) {
     fileStore.createFolder(folderName).catch((error) => {
       uploadError.value =
@@ -819,6 +854,32 @@ const buildUploadJobs = (selectedFiles, presignedResponses, createdItems) => {
   return uploadJobs
 }
 
+const buildAbortPayload = (uploadMetas) => {
+  const metaList = Array.isArray(uploadMetas) ? uploadMetas : []
+  const firstMeta = metaList[0]
+  const objectKeys = metaList.map((meta) => meta?.objectKey).filter(Boolean)
+  const finalObjectKey = firstMeta?.finalObjectKey || firstMeta?.objectKey || null
+  const chunkObjectKeys = firstMeta?.partitioned === true ? objectKeys : []
+
+  return {
+    finalObjectKey,
+    chunkObjectKeys,
+  }
+}
+
+const abortUploadedFile = async (uploadMetas) => {
+  const payload = buildAbortPayload(uploadMetas)
+
+  if (!payload.finalObjectKey) {
+    return
+  }
+
+  try {
+    await abortUpload(payload)
+  } catch {
+  }
+}
+
 const uploadFileByChunks = async (file, uploadMetas, uploadItemId) => {
   const uploadChunkCount = Array.isArray(uploadMetas) ? uploadMetas.length : 0
 
@@ -882,43 +943,40 @@ const uploadFileByChunks = async (file, uploadMetas, uploadItemId) => {
 }
 
 const completeUploadedFile = async (file, uploadMetas, partitioned, uploadItemId, parentId) => {
-  if (!partitioned) {
-    setUploadItemState(uploadItemId, {
-      status: "completed",
-      statusText: "업로드 완료",
-      progress: 100,
-      uploadedBytes: file.size || 0,
-    })
-    return
-  }
-
-  const firstMeta = uploadMetas[0]
-  const finalObjectKey = firstMeta?.finalObjectKey
-  const chunkObjectKeys = uploadMetas.map((meta) => meta?.objectKey).filter(Boolean)
+  const firstMeta = uploadMetas?.[0]
+  const finalObjectKey = firstMeta?.finalObjectKey || firstMeta?.objectKey
+  const chunkObjectKeys = partitioned
+    ? uploadMetas.map((meta) => meta?.objectKey).filter(Boolean)
+    : []
 
   if (!finalObjectKey) {
-    throw new Error(`${file.name} 완료 정보가 올바르지 않습니다.`)
+    throw new Error(`${file.name} 업로드 완료 정보를 확인할 수 없습니다.`)
   }
 
-  if (chunkObjectKeys.length !== uploadMetas.length) {
+  if (partitioned && chunkObjectKeys.length !== uploadMetas.length) {
     throw new Error(`${file.name} 청크 정보가 올바르지 않습니다.`)
   }
 
   setUploadItemState(uploadItemId, {
-    status: "merging",
-    statusText: "서버에서 파일 병합 중",
+    status: partitioned ? "merging" : "uploading",
+    statusText: partitioned ? "서버에서 파일을 병합하는 중..." : "업로드 완료를 확인하는 중...",
     progress: 100,
     uploadedBytes: file.size || 0,
   })
 
-  await completePartitionUpload({
-    fileOriginName: file.name,
-    fileFormat: getFileFormat(file),
-    fileSize: file.size,
-    finalObjectKey,
-    chunkObjectKeys,
-    parentId,
-  })
+  try {
+    await completeUpload({
+      fileOriginName: file.name,
+      fileFormat: getFileFormat(file),
+      fileSize: file.size,
+      finalObjectKey,
+      chunkObjectKeys,
+      parentId,
+    })
+  } catch (error) {
+    await abortUploadedFile(uploadMetas)
+    throw error
+  }
 
   setUploadItemState(uploadItemId, {
     status: "completed",
@@ -927,7 +985,6 @@ const completeUploadedFile = async (file, uploadMetas, partitioned, uploadItemId
     uploadedBytes: file.size || 0,
   })
 }
-
 const runUploadJobs = async (uploadJobs, concurrency, parentId) => {
   const successList = new Array(uploadJobs.length)
   const workerCount = Math.min(concurrency, uploadJobs.length)
@@ -984,6 +1041,7 @@ const runUploadJobs = async (uploadJobs, concurrency, parentId) => {
         completedUploadCount.value += 1
         successList[currentJobIndex] = currentJob.file.name
       } catch (error) {
+        await abortUploadedFile(currentJob.uploadMetas)
         if (isAbortError(error)) {
           setUploadItemState(currentJob.uploadItemId, {
             status: "canceled",
@@ -1045,7 +1103,7 @@ const markUnfinishedUploadsStopped = (reasonText) => {
 }
 
 const toNormalizedError = (error) => {
-  if (!error) return "업로드에 실패했습니다."
+  if (!error) return "업로드 중 오류가 발생했습니다."
   if (typeof error === "string") return error
 
   if (isAbortError(error)) {
@@ -1062,7 +1120,7 @@ const toNormalizedError = (error) => {
     if (error.response.data?.result?.message) {
       return error.response.data.result.message
     }
-    return `업로드에 실패했습니다. 상태 코드: ${error.response.status}`
+    return `업로드 중 오류가 발생했습니다. 상태 코드: ${error.response.status}`
   }
 
   if (error.message) return error.message
@@ -1072,6 +1130,36 @@ const toNormalizedError = (error) => {
 const handleUpload = async (event, uploadTypeLabel) => {
   const selectedFiles = Array.from(event?.target?.files || [])
   if (!selectedFiles.length) return
+
+  if (!fileStore.storageSummary && !fileStore.storageLoading) {
+    await fileStore.fetchStorageSummary().catch(() => {})
+  }
+
+  if (selectedFiles.length > maxUploadCount.value) {
+    const message = `\uD55C \uBC88\uC5D0 \uCD5C\uB300 ${maxUploadCount.value}\uAC1C\uAE4C\uC9C0 \uC5C5\uB85C\uB4DC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.`
+    uploadError.value = message
+    emit("upload-fail", message)
+
+    if (event?.target) {
+      event.target.value = ""
+    }
+
+    return
+  }
+
+  const oversizedFile = selectedFiles.find((file) => Number(file?.size || 0) > maxUploadFileBytes.value)
+  if (oversizedFile) {
+    const message = `\"${oversizedFile.name}\" \uD30C\uC77C\uC740 \uD604\uC7AC \uBA64\uBC84\uC2ED \uD55C\uB3C4(${formatUploadLimitBytes(maxUploadFileBytes.value)})\uB97C \uCD08\uACFC\uD574 \uC5C5\uB85C\uB4DC\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.`
+    uploadError.value = message
+    emit("upload-fail", message)
+
+    if (event?.target) {
+      event.target.value = ""
+    }
+
+    return
+  }
+
   const uploadParentId = fileStore.currentFolderId
 
   uploadError.value = ""
@@ -1088,9 +1176,6 @@ const handleUpload = async (event, uploadTypeLabel) => {
   uploadItems.value = selectedFiles.map((file, index) => createUploadItem(file, index))
 
   try {
-    if (selectedFiles.length > MAX_UPLOAD_COUNT) {
-      throw new Error(`한 번에 최대 ${MAX_UPLOAD_COUNT}개까지 업로드할 수 있습니다.`)
-    }
 
     const invalidName = selectedFiles.find(
       (file) => !file?.name || typeof file.name !== "string",
@@ -1211,8 +1296,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .upload-panel-chip {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
+  right: 20px;
+  bottom: 20px;
   z-index: 10000;
   display: inline-flex;
   align-items: center;
@@ -1239,10 +1324,10 @@ onBeforeUnmount(() => {
 
 .upload-panel {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
+  right: 20px;
+  bottom: 20px;
   z-index: 10000;
-  width: 380px;
+  width: 340px;
   max-width: calc(100vw - 32px);
   border-radius: 22px;
   overflow: hidden;
@@ -1464,7 +1549,7 @@ onBeforeUnmount(() => {
   }
 
   .upload-panel {
-    width: min(100vw - 24px, 380px);
+    width: min(100vw - 24px, 340px);
   }
 }
 </style>

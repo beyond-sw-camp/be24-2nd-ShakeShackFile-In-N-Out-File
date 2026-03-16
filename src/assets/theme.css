@@ -24,26 +24,26 @@
 
 .dark {
   color-scheme: dark;
-  --bg-main: #0f172a;
-  --bg-secondary: #020817;
-  --bg-elevated: #111c30;
-  --bg-input: #1e293b;
-  --bg-sidebar: #0b1220;
-  --bg-overlay: rgba(2, 6, 23, 0.76);
-  --text-main: #f8fafc;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
-  --text-inverse: #020617;
-  --border-color: #334155;
-  --border-strong: #475569;
-  --accent: #38bdf8;
-  --accent-hover: #7dd3fc;
-  --accent-soft: rgba(56, 189, 248, 0.16);
+  --bg-main: #0d1524;
+  --bg-secondary: #060c17;
+  --bg-elevated: #121d30;
+  --bg-input: #1a2740;
+  --bg-sidebar: #09121f;
+  --bg-overlay: rgba(2, 6, 23, 0.82);
+  --text-main: #f8fbff;
+  --text-secondary: #d7e2f0;
+  --text-muted: #9cafc6;
+  --text-inverse: #07101d;
+  --border-color: #26354b;
+  --border-strong: #3b4d69;
+  --accent: #66c8ff;
+  --accent-hover: #8ed9ff;
+  --accent-soft: rgba(102, 200, 255, 0.18);
   --danger: #fb7185;
   --danger-soft: rgba(244, 63, 94, 0.18);
-  --shadow-sm: 0 4px 14px rgba(2, 6, 23, 0.34);
-  --shadow-md: 0 18px 42px rgba(2, 6, 23, 0.42);
-  --shadow-lg: 0 28px 74px rgba(2, 6, 23, 0.54);
+  --shadow-sm: 0 6px 18px rgba(2, 6, 23, 0.32);
+  --shadow-md: 0 20px 48px rgba(2, 6, 23, 0.46);
+  --shadow-lg: 0 30px 82px rgba(2, 6, 23, 0.58);
 }
 
 html,
@@ -55,6 +55,12 @@ body {
   background-color: var(--bg-secondary);
   color: var(--text-main);
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark body {
+  background-image:
+    radial-gradient(circle at top left, rgba(102, 200, 255, 0.07), transparent 28%),
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.05), transparent 24%);
 }
 
 * {
@@ -85,13 +91,21 @@ body {
 .dark textarea,
 .dark select {
   background-color: var(--bg-input);
-  border-color: var(--border-color);
+  border-color: var(--border-strong);
   color: var(--text-main);
+  caret-color: var(--accent);
 }
 
 .dark input::placeholder,
 .dark textarea::placeholder {
   color: var(--text-muted);
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(102, 200, 255, 0.12);
 }
 
 .dark button {
@@ -131,6 +145,11 @@ body {
   background-color: var(--bg-main) !important;
 }
 
+.dark .bg-white\/90,
+.dark .bg-white\/80 {
+  background-color: color-mix(in srgb, var(--bg-elevated) 86%, transparent) !important;
+}
+
 .dark .bg-gray-50,
 .dark .bg-slate-50 {
   background-color: var(--bg-secondary) !important;
@@ -141,8 +160,15 @@ body {
   background-color: var(--bg-input) !important;
 }
 
-.dark .bg-gray-200 {
+.dark .bg-gray-200,
+.dark .bg-gray-300,
+.dark .bg-slate-200 {
   background-color: var(--border-color) !important;
+}
+
+.dark .bg-gray-800,
+.dark .bg-slate-800 {
+  background-color: var(--bg-elevated) !important;
 }
 
 .dark .bg-slate-900,
@@ -151,25 +177,60 @@ body {
 }
 
 .dark .bg-blue-50,
-.dark .bg-blue-100 {
+.dark .bg-blue-100,
+.dark .bg-indigo-50,
+.dark .bg-indigo-100 {
   background-color: var(--accent-soft) !important;
 }
 
+.dark .bg-cyan-50,
+.dark .bg-cyan-100 {
+  background-color: rgba(34, 211, 238, 0.16) !important;
+}
+
+.dark .bg-emerald-50,
+.dark .bg-emerald-100,
+.dark .bg-green-50,
+.dark .bg-green-100 {
+  background-color: rgba(52, 211, 153, 0.15) !important;
+}
+
+.dark .bg-amber-50,
+.dark .bg-amber-100,
+.dark .bg-yellow-50,
+.dark .bg-yellow-100,
+.dark .bg-orange-50,
+.dark .bg-orange-100 {
+  background-color: rgba(251, 191, 36, 0.17) !important;
+}
+
+.dark .bg-purple-50,
+.dark .bg-purple-100 {
+  background-color: rgba(167, 139, 250, 0.17) !important;
+}
+
+.dark .bg-red-50,
 .dark .bg-rose-50 {
   background-color: var(--danger-soft) !important;
 }
 
 .dark .text-black,
+.dark .text-gray-100,
+.dark .text-gray-200,
 .dark .text-gray-800,
 .dark .text-gray-900,
+.dark .text-slate-100,
+.dark .text-slate-200,
 .dark .text-slate-800,
 .dark .text-slate-900,
 .dark .text-slate-950 {
   color: var(--text-main) !important;
 }
 
+.dark .text-gray-300,
 .dark .text-gray-600,
 .dark .text-gray-700,
+.dark .text-slate-300,
 .dark .text-slate-600,
 .dark .text-slate-700 {
   color: var(--text-secondary) !important;
@@ -177,17 +238,48 @@ body {
 
 .dark .text-gray-400,
 .dark .text-gray-500,
-.dark .text-slate-300,
 .dark .text-slate-400,
 .dark .text-slate-500 {
   color: var(--text-muted) !important;
 }
 
 .dark .text-blue-600,
-.dark .text-blue-700 {
-  color: #7dd3fc !important;
+.dark .text-blue-700,
+.dark .text-indigo-500,
+.dark .text-indigo-600,
+.dark .text-indigo-700 {
+  color: #8ed9ff !important;
 }
 
+.dark .text-blue-500,
+.dark .text-cyan-600,
+.dark .text-cyan-700 {
+  color: #67e8f9 !important;
+}
+
+.dark .text-emerald-600,
+.dark .text-emerald-700,
+.dark .text-green-600,
+.dark .text-green-700 {
+  color: #6ee7b7 !important;
+}
+
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-yellow-600,
+.dark .text-yellow-700,
+.dark .text-orange-600,
+.dark .text-orange-700 {
+  color: #fcd34d !important;
+}
+
+.dark .text-purple-500,
+.dark .text-purple-600 {
+  color: #c4b5fd !important;
+}
+
+.dark .text-red-500,
+.dark .text-red-600,
 .dark .text-rose-500,
 .dark .text-rose-600 {
   color: #fda4af !important;
@@ -196,25 +288,90 @@ body {
 .dark .border-gray-100,
 .dark .border-gray-200,
 .dark .border-gray-300,
+.dark .border-gray-600,
+.dark .border-gray-700,
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-slate-300,
 .dark .border-slate-700,
 .dark .border-slate-800,
+.dark .border-slate-900 {
+  border-color: var(--border-color) !important;
+}
+
 .dark .border-blue-200,
+.dark .border-indigo-200 {
+  border-color: rgba(102, 200, 255, 0.24) !important;
+}
+
+.dark .border-emerald-200,
+.dark .border-green-200 {
+  border-color: rgba(52, 211, 153, 0.26) !important;
+}
+
+.dark .border-amber-200,
+.dark .border-yellow-200,
+.dark .border-orange-200 {
+  border-color: rgba(251, 191, 36, 0.26) !important;
+}
+
+.dark .border-red-200,
 .dark .border-rose-200 {
+  border-color: rgba(251, 113, 133, 0.28) !important;
+}
+
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--border-color) !important;
 }
 
 .dark .hover\:bg-gray-50:hover,
 .dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-gray-200:hover,
 .dark .hover\:bg-slate-100:hover,
-.dark .hover\:bg-blue-50:hover,
-.dark .hover\:bg-rose-50:hover {
+.dark .hover\:bg-slate-200:hover {
   background-color: var(--bg-input) !important;
+}
+
+.dark .hover\:bg-blue-50:hover,
+.dark .hover\:bg-blue-100:hover,
+.dark .hover\:bg-indigo-50:hover,
+.dark .hover\:bg-indigo-100:hover {
+  background-color: var(--accent-soft) !important;
+}
+
+.dark .hover\:bg-cyan-50:hover,
+.dark .hover\:bg-cyan-100:hover {
+  background-color: rgba(34, 211, 238, 0.16) !important;
+}
+
+.dark .hover\:bg-emerald-50:hover,
+.dark .hover\:bg-emerald-100:hover {
+  background-color: rgba(52, 211, 153, 0.16) !important;
+}
+
+.dark .hover\:bg-amber-50:hover,
+.dark .hover\:bg-amber-100:hover {
+  background-color: rgba(251, 191, 36, 0.18) !important;
+}
+
+.dark .hover\:bg-red-50:hover,
+.dark .hover\:bg-rose-50:hover {
+  background-color: var(--danger-soft) !important;
 }
 
 .dark .hover\:text-gray-700:hover,
 .dark .hover\:text-gray-800:hover,
 .dark .hover\:text-gray-900:hover {
   color: var(--text-main) !important;
+}
+
+.dark .shadow-blue-100,
+.dark .shadow-blue-200,
+.dark .shadow-indigo-100,
+.dark .shadow-indigo-200 {
+  box-shadow: var(--shadow-md) !important;
 }
 
 .dark .shadow-sm,

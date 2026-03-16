@@ -1,28 +1,21 @@
-<script setup>
-import { computed } from 'vue'
-import BaseFileView from '@/components/BaseFileView.vue'
-import { useFileStore } from '@/stores/useFileStore'
+﻿<script setup>
+import { computed } from "vue";
+import BaseFileView from "@/components/BaseFileView.vue";
+import { useFileStore } from "@/stores/useFileStore";
 
-const fileStore = useFileStore()
+const fileStore = useFileStore();
+const thirtyDaysAgo = new Date();
+thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-// 날짜 계산 로직
-const thirtyDaysAgo = new Date()
-thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-
-const recentFilesMonth = computed(() => 
-  fileStore.recentFiles.filter(f => new Date(f.lastModified) >= thirtyDaysAgo)
-)
-const olderFiles = computed(() => 
-  fileStore.recentFiles.filter(f => new Date(f.lastModified) < thirtyDaysAgo)
-)
+const recentFilesMonth = computed(() =>
+  fileStore.recentFiles.filter((file) => new Date(file.lastModified) >= thirtyDaysAgo),
+);
 </script>
 
 <template>
-  <div class="space-y-10">
-    <BaseFileView 
-      title="최근 문서함" 
-      :files="recentFilesMonth" 
-      @delete="fileStore.moveToTrash" 
-    />
-  </div>
+  <BaseFileView
+    title="최근 파일"
+    :files="recentFilesMonth"
+    @delete="fileStore.moveToTrash"
+  />
 </template>
