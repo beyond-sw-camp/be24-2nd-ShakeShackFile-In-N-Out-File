@@ -86,6 +86,7 @@ watch(viewMode, async (newMode) => {
     await fetchRooms();
   }
 })
+const fetchError = ref(false)
 // 1. 방 목록 가져오기 (실제 DB 연동)
 const fetchRooms = async () => {
   try {
@@ -96,7 +97,7 @@ const fetchRooms = async () => {
         page: 0, // 기본값 0
         size: 5  // 컨트롤러 기본값 5
       }
-    })
+    }) 
     
     // 2. 응답 구조 매칭
     // 컨트롤러 응답: BaseResponse { success: true, data: { boardList: [...] } }
@@ -119,6 +120,7 @@ if (dataWrapper && dataWrapper.boardList) {
     }
   } catch (error) {
     console.error('방 목록 로드 실패:', error)
+    fetchError.value = true // ← 실패 시 true
   }
 }
 
@@ -308,7 +310,11 @@ onMounted(() => {
         </button>
       </div>
     </div>
-
+<div v-if="fetchError && viewMode === 'list'" class="fetch-error">
+  <i class="fa-solid fa-circle-exclamation"></i>
+  <p>목록을 불러오지 못했습니다.</p>
+  <button @click="fetchRooms">새로고침</button>
+</div>
     <ChatList 
   v-if="viewMode === 'list'" 
   :rooms="chatRooms" 
@@ -413,5 +419,35 @@ onMounted(() => {
 
 .close-button:hover {
   color: var(--text-main);
+}
+
+.fetch-error {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.fetch-error i {
+  font-size: 2rem;
+  color: #f87171;
+}
+
+.fetch-error button {
+  margin-top: 0.25rem;
+  padding: 0.4rem 1rem;
+  background-color: #1cacff;
+  color: white;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  transition: background 0.2s;
+}
+
+.fetch-error button:hover {
+  background-color: #1999e3;
 }
 </style>
