@@ -72,12 +72,28 @@ const initChat = () => {
       stompClient.subscribe(`/sub/chat/room/${props.room.id}`, (sdkEvent) => {
         const data = JSON.parse(sdkEvent.body)
         
+        if (data.senderIdx === authStore.user.idx) {
+        // 내가 보낸 메시지면 임시 메시지를 실제 메시지로 교체
+          const tempIdx = chatMessages.value.findLastIndex(m => m.isPending && m.isMe)
+          if (tempIdx !== -1) {
+            chatMessages.value[tempIdx] = {
+              id: data.idx,
+              sender: data.senderNickname,
+              text: data.contents,
+              time: data.createdAt,
+              isMe: true,
+              isPending: false
+            }
+            return
+          }
+      }
+        
         chatMessages.value.push({
           id: data.idx,
           sender: data.senderNickname,
           text: data.contents,
           time: data.createdAt,
-          isMe: data.senderIdx === authStore.user.idx
+          isMe: flase
         })
         nextTick(() => scrollToBottom())
         // 내가 보낸 메시지가 아닐 때만 알림 ← 추가
@@ -96,15 +112,23 @@ const initChat = () => {
 const sendMessage = () => {
   if (!newMessage.value.trim() || !stompClient) return
 
-  const sendPayload = {
-    contents: newMessage.value.trim()
-  }
+  const text = newMessage.value.trim() // ← 이 줄이 tempMsg보다 위에 있어야 함
 
-  // 전송 경로: ApplicationDestinationPrefix "/app" + MessageMapping "/chat/{roomIdx}"
+  const tempMsg = {
+    id: 'temp-' + Date.now(),
+    sender: authStore.user?.userName || authStore.user?.name,
+    text: text,
+    time: new Date().toISOString(),
+    isMe: true,
+    isPending: true
+  }
+  chatMessages.value.push(tempMsg)
+  nextTick(() => scrollToBottom())
+
   stompClient.send(
-    `/pub/chat/${props.room.id}`, 
-    { Authorization: `Bearer ${authStore.token}` }, 
-    JSON.stringify(sendPayload)
+    `/pub/chat/${props.room.id}`,
+    { Authorization: `Bearer ${authStore.token}` },
+    JSON.stringify({ contents: text })
   )
 
   newMessage.value = ''
