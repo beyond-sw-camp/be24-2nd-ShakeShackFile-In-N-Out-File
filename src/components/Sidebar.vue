@@ -355,14 +355,7 @@ const handleAction = async (action, idx) => {
               <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300" :style="{ width: storageUsageWidth }"></div>
             </div>
             <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
-            
-            <RouterLink
-              :to="{ name: 'trash' }"
-              class="w-full flex items-center gap-3.5 px-3 py-2.5 text-sm text-[var(--text-secondary)] rounded-xl transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline"
-            >
-              <i class="fa-solid fa-trash w-5 text-center flex-shrink-0 text-lg"></i>
-              <span>휴지통</span>
-            </RouterLink>
+          
 
             <RouterLink
               v-if="isAdministrator"
@@ -373,38 +366,6 @@ const handleAction = async (action, idx) => {
               <i class="fa-solid fa-user-shield w-5 text-center flex-shrink-0 text-lg"></i>
               <span>관리자 페이지</span>
             </RouterLink>
-
-            <div class="p-3 pt-2">
-              <RouterLink 
-                :to="{ name: 'storage' }" 
-                class="flex items-center gap-3.5 text-[var(--text-secondary)] mb-3 transition-all duration-200 hover:text-[var(--text-main)] no-underline"
-              >
-                <i class="fa-solid fa-cloud w-5 text-center flex-shrink-0 text-lg"></i>
-                <span class="text-sm">저장용량</span>
-              </RouterLink>
-
-              <div class="w-full bg-[var(--bg-input)] rounded-full h-1.5 mb-2 overflow-hidden">
-                <div
-                  class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300"
-                  :style="{ width: storageUsageWidth }"
-                ></div>
-              </div>
-
-              <p class="text-xs text-[var(--text-muted)] mb-1">{{ storageUsageText }}</p>
-              <p v-if="storageSummary" class="text-[11px] text-[var(--text-muted)] mb-4">
-                {{ storageSummary.planLabel }} 플랜 · 휴지통 포함 {{ storageSummary.usagePercent }}%
-              </p>
-              <p v-else class="text-[11px] text-[var(--text-muted)] mb-4">
-                저장 공간 통계 확인 중
-              </p>
-
-              <RouterLink
-                :to="{ name: 'payment' }"
-                class="block w-full text-center border border-[var(--border-color)] px-2 py-2 rounded-full text-sm font-semibold text-blue-600 dark:text-blue-400 bg-[var(--bg-main)] transition-all duration-200 hover:bg-blue-500/10 dark:hover:bg-blue-400/10"
-              >
-                추가 저장용량 구매
-              </RouterLink>
-            </div>
             <p class="text-xs text-[var(--text-muted)] mb-1">{{ storageUsageText }}</p>
             <p v-if="storageSummary" class="text-[11px] text-[var(--text-muted)] mb-4">{{ storageSummary.planLabel }} 플랜 · 휴지통 포함 {{ storageSummary.usagePercent }}%</p>
             <p v-else class="text-[11px] text-[var(--text-muted)] mb-4">저장 공간 통계 확인 중</p>
