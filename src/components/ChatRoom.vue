@@ -1,36 +1,138 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import api from '@/plugins/axiosinterceptor.js'
+import { useAuthStore } from '@/stores/useAuthStore'
+import SockJS from 'sockjs-client'
+import Stomp from 'stompjs'
+
 const props = defineProps({ room: Object, currentUser: Object })
 const emit = defineEmits(['back'])
+const authStore = useAuthStore()
 
 const chatMessages = ref([])
 const newMessage = ref('')
-const isConnected = ref(false)
 const scrollContainer = ref(null)
-let websocket = null
+let stompClient = null
 
-// [추가] JSON 데이터를 불러오는 함수
+const formatTime = (isoString) => {
+  if (!isoString) return ''
+  const date = new Date(isoString)
+  return new Intl.DateTimeFormat('ko-KR', {
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: true
+  }).format(date)
+}
+
 const fetchHistory = async () => {
   try {
-    // 톰캣ROOT/api/chatHistory.json 에 파일이 있다면:
-    const response = await api.api.get('/json/chat/chathistory')
-
-    // axios는 데이터를 response.data에 담아줍니다.
-    const allData = response.data
-    const roomData = allData[props.room.id]
-    if (roomData && roomData.messages) {
-      chatMessages.value = roomData.messages
-    } else {
-      chatMessages.value = [] // 데이터가 없으면 빈 배열
+    const response = await api.get(`/chat/${props.room.id}/history`)
+    if (response.data.success && response.data.result.messageList) {
+      chatMessages.value = response.data.result.messageList.map(msg => ({
+        id: msg.idx,
+        sender: msg.senderNickname,
+        text: msg.contents,
+        time: msg.createdAt,
+        isMe: msg.senderIdx === authStore.user.idx,
+        messageUnreadCount: msg.messageUnreadCount // ← 추가
+      }))
+      chatMessages.value.reverse()
     }
-
     await nextTick()
     scrollToBottom()
   } catch (error) {
-    // 인터셉터에서 정의한 에러 콘솔 외에 추가 처리가 가능합니다.
-    console.error('데이터를 가져오는 데 실패했습니다:', error)
+    console.error('채팅 내역 로드 실패:', error)
   }
+}
+
+const initChat = () => {
+  if (stompClient) stompClient.disconnect()
+
+  const socket = new SockJS('http://localhost:8080/ws-stomp')
+  stompClient = Stomp.over(socket)
+
+  stompClient.connect(
+    { Authorization: `Bearer ${authStore.token}` },
+    () => {
+      console.log('STOMP 연결 성공')
+
+      stompClient.subscribe(`/sub/chat/room/${props.room.id}`, (sdkEvent) => {
+        const data = JSON.parse(sdkEvent.body)
+
+        // 읽음 업데이트 이벤트 → 안읽은 수 감소
+        if (data.type === 'READ_UPDATE') {
+          chatMessages.value.forEach(msg => {
+            if (!msg.isPending && msg.messageUnreadCount > 0) {
+              msg.messageUnreadCount -= 1 // 누군가 읽었으니 안읽은 수 -1
+            }
+          })
+          return
+        }
+
+        // 내가 보낸 메시지 → 임시 메시지 교체
+        if (data.senderIdx === authStore.user.idx) {
+          const tempIdx = chatMessages.value.findLastIndex(m => m.isPending && m.isMe)
+          if (tempIdx !== -1) {
+            chatMessages.value[tempIdx] = {
+              id: data.idx,
+              sender: data.senderNickname,
+              text: data.contents,
+              time: data.createdAt,
+              isMe: true,
+              isPending: false,
+              messageUnreadCount: data.messageUnreadCount // ← 추가
+            }
+            return
+          }
+        }
+
+        // 상대방 메시지
+        chatMessages.value.push({
+          id: data.idx,
+          sender: data.senderNickname,
+          text: data.contents,
+          time: data.createdAt,
+          isMe: false,
+          messageUnreadCount: data.messageUnreadCount // ← 추가
+        })
+        nextTick(() => scrollToBottom())
+
+        if (data.senderIdx !== authStore.user.idx) {
+          markAsRead()
+        }
+      })
+    },
+    (error) => {
+      console.error('STOMP 연결 에러:', error)
+    }
+  )
+}
+
+const sendMessage = () => {
+  if (!newMessage.value.trim() || !stompClient) return
+
+  const text = newMessage.value.trim()
+
+  const tempMsg = {
+    id: 'temp-' + Date.now(),
+    sender: authStore.user?.userName || authStore.user?.name,
+    text: text,
+    time: new Date().toISOString(),
+    isMe: true,
+    isPending: true,
+    messageUnreadCount: 0
+  }
+  chatMessages.value.push(tempMsg)
+  nextTick(() => scrollToBottom())
+
+  stompClient.send(
+    `/pub/chat/${props.room.id}`,
+    { Authorization: `Bearer ${authStore.token}` },
+    JSON.stringify({ contents: text })
+  )
+
+  newMessage.value = ''
+  
 }
 
 const scrollToBottom = () => {
@@ -39,83 +141,38 @@ const scrollToBottom = () => {
   }
 }
 
-const initChat = () => {
-  if (websocket) websocket.close()
-  websocket = new WebSocket('wss://www.innoutfile.kro.kr/ws/chat')
-
-  websocket.onopen = () => {
-    isConnected.value = true
-    websocket.send(JSON.stringify({ nickname: props.currentUser.name, roomId: props.room.id }))
-  }
-
-  websocket.onmessage = (e) => {
-    try {
-      const rawData = JSON.parse(e.data)
-      const data =
-        typeof rawData.payload === 'string' ? JSON.parse(rawData.payload) : rawData.payload
-      if (data.roomId !== props.room.id) {
-        console.log('다른 방 메시지라 무시합니다.')
-        return
-      }
-      if (data.message) {
-        chatMessages.value.push({
-          id: Date.now(),
-          sender: data.nickname,
-          text: data.message,
-          isMe: data.nickname === props.currentUser.name,
-        })
-        nextTick(() => scrollToBottom())
-      }
-    } catch (err) {
-      console.error('메시지 수신 에러:', err)
-    }
+const markAsRead = async () => {
+  try {
+    await api.post(`/chat/${props.room.id}/read`)
+  } catch (e) {
+    console.error('읽음 처리 실패:', e)
   }
 }
 
-const sendMessage = () => {
-  try{
-  if (!newMessage.value.trim() || !isConnected.value) return
-  websocket.send(
-    JSON.stringify({
-      roomId: props.room.id,
-      nickname: props.currentUser.name,
-      message: newMessage.value,
-    }),
-  )
-
-  chatMessages.value.push({
-    id: Date.now(),
-    sender: props.currentUser.name,
-    text: newMessage.value,
-    isMe: true, // 내가 쓴 것이므로 true
-  })
-
-  newMessage.value = ''
-  nextTick(() => scrollToBottom())
-  }catch(error){
-    console.error('메시지 송신 에러:', err)
+const requestNotificationPermission = async () => {
+  if ('Notification' in window && Notification.permission === 'default') {
+    await Notification.requestPermission()
   }
 }
 
-// [수정] 컴포넌트가 켜질 때 내역 로드와 소켓 연결을 동시에 수행
-onMounted(() => {
-  fetchHistory() // <-- 여기서 실행해줘야 데이터가 나옵니다!
+onMounted(async () => {
+  await api.post(`/chatRoom/${props.room.id}/enter`)
+  requestNotificationPermission()
+  fetchHistory()
   initChat()
+  markAsRead()
 })
 
 onUnmounted(() => {
-  if (websocket) websocket.close()
-  console.log('꺼짐')
+  api.post(`/chatRoom/${props.room.id}/leave`).catch(() => {})
+  if (stompClient) stompClient.disconnect()
 })
 
-// [추가] 목록에서 다른 방을 클릭했을 때 데이터를 새로 고침
-watch(
-  () => props.room.id,
-  () => {
-    fetchHistory()
-    initChat()
-  },
-)
+watch(() => props.room.id, () => {
+  markAsRead()
+  fetchHistory()
+  initChat()
+})
 </script>
 
 <template>
@@ -126,15 +183,32 @@ watch(
         :key="msg.id"
         :class="['flex gap-3', msg.isMe ? 'flex-row-reverse' : '']"
       >
-        <div :class="['flex flex-col max-w-[75%]', msg.isMe ? 'items-end' : 'items-start']">
+        <div :class="['flex flex-col max-w-[85%]', msg.isMe ? 'items-end' : 'items-start']">
           <p class="text-[10px] font-bold text-[var(--text-muted)] mb-1">{{ msg.sender }}</p>
-          <div
-            :class="[
-              'p-3 rounded-2xl text-xs break-words',
-              msg.isMe ? 'bg-[#4169E1] text-white' : 'bg-[var(--bg-input)] text-[var(--text-main)]',
-            ]"
-          >
-            {{ msg.text }}
+
+          <div :class="['flex items-end gap-2', msg.isMe ? 'flex-row-reverse' : '']">
+            <div
+              :class="[
+                'p-3 rounded-2xl text-xs break-words',
+                msg.isMe ? 'bg-[#4169E1] text-white' : 'bg-[var(--bg-input)] text-[var(--text-main)]',
+                msg.isPending ? 'opacity-60' : ''
+              ]"
+            >
+              {{ msg.text }}
+            </div>
+
+            <div :class="['flex flex-col gap-0.5', msg.isMe ? 'items-end' : 'items-start']">
+              <!-- 카톡처럼 안읽은 수 표시 (0이면 안보임) -->
+              <span
+                v-if="msg.messageUnreadCount > 0"
+                class="text-[9px] text-blue-400 font-bold whitespace-nowrap"
+              >
+                {{ msg.messageUnreadCount }}
+              </span>
+              <span class="text-[9px] text-gray-400 whitespace-nowrap">
+                {{ formatTime(msg.time) }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -149,7 +223,6 @@ watch(
           placeholder="메시지 입력..."
           class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
         />
-
         <button
           @click="sendMessage"
           class="absolute right-3 top-1/2 -translate-y-1/2 text-[#4169E1]"

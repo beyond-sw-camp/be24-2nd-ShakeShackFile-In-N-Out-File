@@ -85,10 +85,11 @@ const list_delete = async (idx) => {
 
 /**
  * 사용자 초대 API
- * @param {Object} inviteData - { email: string, uuid: string, type: string }
+ * @param {Object} inviteData - { email: string, post_idx: number|string }
  */
 const inviteUser = async (inviteData) => {
   try {
+
     // params에 email을 추가하여 @RequestParam이 인식할 수 있게 합니다.
     const response = await api.post('/workspace/invite', null, {
       params: {
@@ -98,6 +99,7 @@ const inviteUser = async (inviteData) => {
       },
       timeout : 15000
     });
+
     return response.data;
   } catch (error) {
     console.error('API Error (inviteUser):', error);

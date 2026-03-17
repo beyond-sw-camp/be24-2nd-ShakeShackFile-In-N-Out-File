@@ -76,7 +76,7 @@ const handleLogin = async () => {
     console.log("응답 헤더 전체:", res.headers);
     // axios는 헤더 키를 소문자로 정규화함. authorization이 있는지 확인.
     const authHeader = res.headers['authorization'] || res.headers['Authorization'];
-    const accessToken = authHeader?.replace('Bearer ', '');
+    const accessToken = authHeader?.replace('Bearer ', '') || res.data?.accessToken;
     console.log("추출된 토큰:", accessToken); // 👈 여기서 null이나 undefined가 나오면 '범인'입니다.
     if (accessToken) {
       // Pinia 스토어에 토큰 저장 (이때 localStorage에도 저장됨)

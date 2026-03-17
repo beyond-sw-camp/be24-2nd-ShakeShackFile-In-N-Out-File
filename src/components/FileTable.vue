@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
+import { downloadFileAsset } from "@/api/filesApi.js";
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic", "avif", "apng", "jfif", "tif", "tiff"]);
 const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp"]);
@@ -125,8 +126,28 @@ const canDownload = (file) => {
   return file?.type !== "folder" && Boolean(file?.downloadUrl || file?.presignedDownloadUrl);
 };
 
+const handleDownload = async (file, event) => {
+  event?.stopPropagation?.();
+
+  try {
+    await downloadFileAsset(file);
+  } catch (error) {
+    window.alert(error?.message || "\uD30C\uC77C\uC744 \uB2E4\uC6B4\uB85C\uB4DC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+  }
+};
+
 const canManageFolder = (file) => {
   return props.deleteMode !== "permanent" && file?.type === "folder" && !file?.isTrash;
+};
+const getDeleteConfirmMessage = (file) => {
+  if (file?.sharedFile && !file?.sharedWithMe) {
+    return "공유된 파일입니다 삭제하시겠습니까? 공유된 사람에게도 사라집니다.";
+  }
+
+  const targetLabel = file?.type === "folder" ? "폴더" : "파일";
+  return props.deleteMode === "permanent"
+    ? `'${getFileName(file)}' ${targetLabel}을 영구 삭제하시겠습니까?`
+    : `'${getFileName(file)}' ${targetLabel}을 휴지통으로 이동하시겠습니까?`;
 };
 
 const isMovable = (file) => {
@@ -189,7 +210,7 @@ const onClickDelete = (file, event) => {
     ? `'${getFileName(file)}' ${targetLabel}을(를) 영구 삭제하시겠습니까?`
     : `'${getFileName(file)}' ${targetLabel}을(를) 휴지통으로 이동하시겠습니까?`;
 
-  if (window.confirm(confirmMessage)) {
+  if (window.confirm(getDeleteConfirmMessage(file))) {
     emit("delete-file", file?.id);
   }
 };
@@ -532,7 +553,7 @@ const gridClassName = computed(() => {
 
                 <div class="min-w-0">
                   <p class="truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
-                  <p class="truncate text-xs text-gray-400">{{ file.location || "내 드라이브" }}</p>
+                  <p class="truncate text-xs text-gray-400">{{ file.location || "홈" }}</p>
                 </div>
               </div>
             </td>
@@ -566,16 +587,14 @@ const gridClassName = computed(() => {
             </td>
             <td class="px-6 py-4">
               <div class="flex flex-wrap justify-end gap-2">
-                <a
+                <button
                   v-if="canDownload(file)"
+                  type="button"
                   class="action-button text-blue-600 hover:bg-blue-50"
-                  :href="getPreviewUrl(file)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  @click.stop
+                  @click="handleDownload(file, $event)"
                 >
-                  다운로드
-                </a>
+                  {{ "\uB2E4\uC6B4\uB85C\uB4DC" }}
+                </button>
                 <button
                   v-if="canManageFolder(file)"
                   type="button"
@@ -782,16 +801,14 @@ const gridClassName = computed(() => {
         </div>
 
         <div class="mt-4 grid gap-2" :class="canDownload(file) ? 'grid-cols-2' : 'grid-cols-1'">
-          <a
+          <button
             v-if="canDownload(file)"
-            :href="getPreviewUrl(file)"
-            target="_blank"
-            rel="noopener noreferrer"
+            type="button"
             class="w-full rounded-xl bg-blue-50 px-3 py-2 text-center text-sm font-semibold text-blue-600 transition hover:bg-blue-100"
-            @click.stop
+            @click="handleDownload(file, $event)"
           >
-            다운로드
-          </a>
+            {{ "\uB2E4\uC6B4\uB85C\uB4DC" }}
+          </button>
           <button
             type="button"
             class="w-full rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-500 transition hover:bg-rose-100"

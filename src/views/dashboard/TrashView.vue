@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import BaseFileView from "@/components/BaseFileView.vue";
 import { useFileStore } from "@/stores/useFileStore";
 
@@ -9,7 +9,7 @@ const handlePermanentDelete = async (id) => {
 };
 
 const handleClearTrash = async () => {
-  if (confirm("휴지통의 항목을 모두 영구 삭제하시겠습니까?")) {
+  if (window.confirm("휴지통의 모든 항목을 영구 삭제하시겠습니까?")) {
     await fileStore.emptyTrash();
   }
 };
@@ -25,18 +25,14 @@ const handleClearTrash = async () => {
     @delete="handlePermanentDelete"
   >
     <template #header-right>
-      <button
-        @click="handleClearTrash"
-        class="rounded-lg px-4 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50"
-      >
+      <button class="rounded-lg px-4 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50" @click="handleClearTrash">
         휴지통 비우기
       </button>
     </template>
 
     <template #header-bottom>
       <div class="mb-6 flex items-center gap-2 rounded-lg bg-gray-100 p-3 text-xs text-gray-500">
-        <i class="fa-solid fa-circle-info"></i>
-        휴지통에 있는 항목은 여기서 영구 삭제할 수 있습니다.
+        휴지통의 항목은 영구 삭제되면 복구할 수 없습니다.
       </div>
     </template>
   </BaseFileView>

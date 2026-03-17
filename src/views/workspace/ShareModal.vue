@@ -12,6 +12,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'refresh']);
 
+// 상태 관리: 백엔드 Enum 값과 동일하게 유지 (Private, Shared, Public)
 const privacyStatus = ref(props.initialStatus); 
 const email = ref('');
 
@@ -72,7 +73,9 @@ const handleInvite = async () => {
  */
 const handleSaveStatus = async () => {
   try {
+    // privacyStatus.value는 'Private', 'Shared', 'Public' 중 하나임
     await postApi.updateShareStatus(props.postIdx, privacyStatus.value);
+    
     alert('공유 설정이 저장되었습니다.');
     if (loadpost && loadpost.side_list) {
       await loadpost.side_list(); 
@@ -170,3 +173,7 @@ const handleSaveStatus = async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 기존 스타일 유지 */
+</style>

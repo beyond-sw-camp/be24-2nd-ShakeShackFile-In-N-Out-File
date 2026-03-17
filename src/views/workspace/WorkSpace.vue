@@ -71,15 +71,18 @@ async function prepareData() {
 }
 
 async function setupEditor() {
-  const setupId = ++currentSetupId;
+  const setupId = ++currentSetupId; // {추가} 실행될 때마다 고유 ID 발급
+
   if (!editorHolder.value) return;
   isEditorLoading.value = true;
   const data = await prepareData();
   if (setupId !== currentSetupId) return;
   title.value = data.title || '';
 
+  // 1. 기존 에디터 자원 해제
   if (editorApi.value) {
     try {
+      // {수정} 에디터가 비동기 렌더링 중일 때 파기하면 DOM에 찌꺼기가 남으므로 안전하게 대기
       if (editorApi.value.editor && editorApi.value.editor.isReady) {
         await editorApi.value.editor.isReady;
       }
@@ -88,12 +91,14 @@ async function setupEditor() {
     editorApi.value = null;
   }
 
+  // 2. DOM 청소 및 상태 초기화
   await nextTick();
   if (editorHolder.value) {
     editorHolder.value.innerHTML = "";
   }
 
   try {
+    // 3. 에디터 초기화
     const newEditorApi = await initEditor(
       editorHolder.value,
       `notion-room-${data.idx ? data.idx : 'new-' + Date.now()}`,
@@ -103,6 +108,7 @@ async function setupEditor() {
       data.type // 서버에서 받아온 type (true/false) 전달
     );
 
+    // {추가} 초기화 도중에 라우터가 또 변경되었다면 새로 만든 에디터 즉시 파기
     if (setupId !== currentSetupId) {
       if (newEditorApi.editor && newEditorApi.editor.isReady) {
         await newEditorApi.editor.isReady;
@@ -115,6 +121,7 @@ async function setupEditor() {
   } catch (error) {
     console.error('에디터 초기화 실패:', error);
   } finally {
+    // {수정} 현재 진행 중인 셋업일 때만 로딩 상태 해제
     if (setupId === currentSetupId) {
       isEditorLoading.value = false;
     }
