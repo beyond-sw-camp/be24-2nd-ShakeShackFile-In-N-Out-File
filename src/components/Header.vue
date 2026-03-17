@@ -24,6 +24,98 @@ const showNotifDropdown = ref(false);
 const showProfileDropdown = ref(false);
 const showSearchDropdown = ref(false);
 const isProfileModalOpen = ref(false);
+
+// ── 알림 상태 ──────────────────────────────────────────────────────────────
+const notifications = ref([]);
+const hasNewNotif = ref(false);
+
+// ★ BroadcastChannel 참조 보관 → onBeforeUnmount 에서 close() 호출
+let broadcastChannel = null;
+
+/**
+ * 서버에서 초대 알림 목록을 불러옵니다.
+ * 백엔드: GET /notification/list
+ */
+const fetchNotifications = async () => {
+  try {
+    const response = await postApi.getNotifications();
+    if (response && response.result && Array.isArray(response.result.body)) {
+      notifications.value = response.result.body.map(item => ({
+        id:             item.idx ?? item.id,
+        uuid:           item.uuid ?? null,
+        type:           item.type ?? 'general',   // 'invite' | 'general'
+        title:          item.title ?? '알림',
+        message:        item.message ?? item.contents ?? '',
+        time:           item.createdAt ? formatRelativeTime(item.createdAt) : '방금 전',
+        read:           item.read ?? false,
+        processed:      false,   // 수락/거절 완료 여부 (로컬 상태)
+        processedLabel: '',
+      }));
+      hasNewNotif.value = notifications.value.some(n => !n.read);
+    }
+  } catch (e) {
+    console.error('알림 목록 불러오기 실패:', e);
+  }
+};
+
+/**
+ * 새 알림을 중복 없이 목록 최상단에 추가하는 헬퍼
+ * BroadcastChannel / SW postMessage 양쪽에서 공통 사용
+ */
+const pushNewNotification = (data) => {
+  // uuid 있으면 중복 체크
+  if (data.uuid) {
+    const alreadyExists = notifications.value.some(n => n.uuid === data.uuid);
+    if (alreadyExists) return;
+  }
+  notifications.value.unshift({
+    id:             Date.now(),
+    uuid:           data.uuid    ?? null,
+    type:           data.type    ?? 'general',
+    title:          data.title   ?? '알림',
+    message:        data.message ?? '',
+    time:           '방금 전',
+    read:           false,
+    processed:      false,
+    processedLabel: '',
+  });
+  hasNewNotif.value = true;
+};
+
+/**
+ * 초대 수락 / 거절
+ * 처리 후 목록에서 제거하지 않고 processed 상태로만 변경 → 어둡게 표시
+ */
+const handleInviteVerify = async (notification, type) => {
+  if (!notification.uuid || notification.processed) return;
+  try {
+    await postApi.verifyEmail(notification.uuid, type);
+    const target = notifications.value.find(n => n.id === notification.id);
+    if (target) {
+      target.processed      = true;
+      target.read           = true;
+      target.processedLabel = type === 'accept' ? '수락됨' : '거절됨';
+    }
+    hasNewNotif.value = notifications.value.some(n => !n.read);
+  } catch (e) {
+    console.error('초대 처리 실패:', e);
+    alert(type === 'accept' ? '초대 수락에 실패했습니다.' : '초대 거절에 실패했습니다.');
+  }
+};
+
+/** 시간 포맷 헬퍼 */
+const formatRelativeTime = (dateStr) => {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1)  return '방금 전';
+  if (minutes < 60) return `${minutes}분 전`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24)   return `${hours}시간 전`;
+  return `${Math.floor(hours / 24)}일 전`;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+
 const isDarkMode = ref(false);
 const themeIcon = ref("fa-solid fa-moon");
 const settingsTab = ref("profile");
@@ -92,42 +184,49 @@ const loadSettingsProfile = async () => {
   }
 };
 
-// 실시간 메시지 수신 (Service Worker와 통신)
+/**
+ * ★ [이슈4 수정] 실시간 알림 수신 — 두 가지 채널 모두 리슨
+ *
+ * 방법 A: BroadcastChannel('notif_channel')
+ *   → sw.js 에서 bc.postMessage() 로 보낼 때 수신
+ *
+ * 방법 B: navigator.serviceWorker 'message' 이벤트
+ *   → sw.js 에서 client.postMessage() 로 보낼 때 수신 (기존 sw.js 포함)
+ *
+ * 두 방법 모두 pushNewNotification() 의 중복 체크를 거치므로 이중 수신 없음
+ */
 const setupNotificationChannel = () => {
-  const bc = new BroadcastChannel('notif_channel');
-  bc.onmessage = (event) => {
-    // 실시간으로 수신된 데이터를 알림 목록 최상단에 추가
-    notifications.value.unshift({
-      id: Date.now(),
-      title: event.data.title,
-      message: event.data.message,
-      time: '방금 전'
-    });
+  // ── 방법 A: BroadcastChannel ──────────────────────────────────────────
+  broadcastChannel = new BroadcastChannel('notif_channel');
+  broadcastChannel.onmessage = (event) => {
+    pushNewNotification(event.data);
   };
+
+  // ── 방법 B: SW → 탭 직접 postMessage (구버전 sw.js 호환) ──────────────
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', swDirectMessageHandler);
+  }
 };
 
-onMounted(() => {
-  authStore.checkLogin();
-  
-  if (authStore.user) {
-    // 웹 푸시 구독 시도 후 성공하면 채널 개설
-    postApi.subscribeWebPush().then(res => {
-      if (res) setupNotificationChannel();
-    }).catch((error) => {
-       console.error("알림 구독 실패 또는 거부:", error);
-    });
+/** SW client.postMessage 핸들러 (별도 함수로 분리 → removeEventListener 가능) */
+const swDirectMessageHandler = (event) => {
+  const data = event.data;
+  if (!data) return;
+  // invite 타입이거나 일반 알림 타입만 처리 (OPEN_CHAT_ROOM 등은 무시)
+  if (data.type === 'invite' || data.type === 'general') {
+    pushNewNotification(data);
   }
+};
 
-  initTheme();
-  loadSettingsProfile();
-  document.addEventListener("click", handleClickOutside);
-});
-
-  // 알림창을 열면 배지가 사라지게 하고 싶다면 여기서 로직 추가 가능
 const toggleNotifMenu = () => {
   showNotifDropdown.value = !showNotifDropdown.value;
   showProfileDropdown.value = false;
   showSearchDropdown.value = false;
+  // 드롭다운을 열 때 배지 제거 및 읽음 처리
+  if (showNotifDropdown.value) {
+    hasNewNotif.value = false;
+    notifications.value.forEach(n => { n.read = true; });
+  }
 };
 
 const toggleProfileMenu = () => {
@@ -201,10 +300,31 @@ onMounted(() => {
   authStore.checkLogin();
   loadSettingsProfile();
   document.addEventListener("click", handleClickOutside);
+
+  if (authStore.user) {
+    // 기존 초대 알림 목록 로드
+    fetchNotifications();
+
+    // ★ 채널을 먼저 열어두고 (subscribeWebPush 성공 여부 무관)
+    setupNotificationChannel();
+
+    // 웹 푸시 구독 (미구독 기기 등록용)
+    postApi.subscribeWebPush().catch((error) => {
+      console.error("알림 구독 실패 또는 거부:", error);
+    });
+  }
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("click", handleClickOutside);
+  // ★ 메모리 누수 방지: 채널 정리
+  if (broadcastChannel) {
+    broadcastChannel.close();
+    broadcastChannel = null;
+  }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.removeEventListener('message', swDirectMessageHandler);
+  }
 });
 </script>
 <template>
@@ -289,11 +409,38 @@ onBeforeUnmount(() => {
             </div>
             <div class="py-2 max-h-64 overflow-y-auto">
               <template v-if="notifications.length > 0">
-                <div v-for="n in notifications" :key="n.id" class="dropdown-item notification-item">
+                <!--
+                  클래스 우선순위:
+                    notif-processed  → 수락/거절 완료 (가장 어둡게)
+                    notif-read       → 읽었지만 미처리 (약하게 흐리게)
+                    notif-unread     → 아직 읽지 않음 (파란 강조)
+                -->
+                <div
+                  v-for="n in notifications"
+                  :key="n.id"
+                  class="notification-item"
+                  :class="{
+                    'notif-processed': n.processed,
+                    'notif-read':      n.read && !n.processed,
+                    'notif-unread':    !n.read && !n.processed,
+                  }"
+                >
                   <div class="flex flex-col gap-1">
-                    <p class="notif-title">{{ n.title }}</p>
+                    <div class="notif-title-row">
+                      <p class="notif-title">{{ n.title }}</p>
+                      <!-- ★ [이슈2] 읽음 표시 뱃지 -->
+                      <span v-if="n.read && !n.processed" class="notif-read-badge">읽음</span>
+                    </div>
                     <p class="notif-message">{{ n.message }}</p>
                     <span class="notif-time">{{ n.time }}</span>
+                  </div>
+                  <!-- 초대 알림: 미처리 시 수락/거절 버튼, 처리 후 상태 뱃지 -->
+                  <div v-if="n.type === 'invite'" class="notif-actions">
+                    <template v-if="!n.processed">
+                      <button type="button" class="notif-btn notif-btn--accept" @click.stop="handleInviteVerify(n, 'accept')">수락</button>
+                      <button type="button" class="notif-btn notif-btn--reject" @click.stop="handleInviteVerify(n, 'reject')">거절</button>
+                    </template>
+                    <span v-else class="notif-processed-label">{{ n.processedLabel }}</span>
                   </div>
                 </div>
               </template>
@@ -422,10 +569,96 @@ onBeforeUnmount(() => {
   padding: 0.8rem 1.1rem;
   border-bottom: 1px solid var(--border-color);
   cursor: default;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+  border-left: 3px solid transparent; /* 기본: 투명 테두리 (레이아웃 고정) */
 }
 
 .notification-item:last-child {
   border-bottom: none;
+}
+
+/* 읽지 않은 알림: 파란 강조 */
+.notif-unread {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated) 93%);
+  border-left-color: var(--accent);
+}
+
+/* ★ [이슈2] 읽은 알림: 살짝 흐리게 */
+.notif-read {
+  opacity: 0.65;
+  border-left-color: transparent;
+}
+
+/* 수락/거절 처리된 알림: 더 어둡게 + 흑백 */
+.notif-processed {
+  opacity: 0.4;
+  filter: grayscale(50%);
+  border-left-color: transparent;
+}
+
+/* ★ 제목 행: 제목 + 읽음 뱃지 가로 배치 */
+.notif-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* ★ [이슈2] 읽음 뱃지 */
+.notif-read-badge {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+}
+
+.notif-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  align-items: center;
+}
+
+.notif-btn {
+  flex: 1;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.notif-btn--accept {
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+  color: #16a34a;
+  border: 1px solid color-mix(in srgb, #22c55e 30%, transparent);
+}
+
+.notif-btn--accept:hover {
+  background: color-mix(in srgb, #22c55e 26%, transparent);
+}
+
+.notif-btn--reject {
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+  color: #dc2626;
+  border: 1px solid color-mix(in srgb, #ef4444 26%, transparent);
+}
+
+.notif-btn--reject:hover {
+  background: color-mix(in srgb, #ef4444 22%, transparent);
+}
+
+/* 처리 완료 뱃지 */
+.notif-processed-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
 }
 
 .notif-title {

@@ -6,6 +6,7 @@ import FileCollectionView from "@/components/file/FileCollectionView.vue";
 import { downloadFileAsset } from "@/api/filesApi.js";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
+import postApi from "@/api/postApi";
 import {
   FILE_SIZE_OPTIONS,
   FILE_STATUS_OPTIONS,
@@ -42,6 +43,44 @@ const {
   setCustomLayoutColumns,
   setCustomLayoutRows,
 } = useViewStore();
+
+// ── sharedItems 로직 ──────────────────────────────────────────────────────
+const sharedItems = ref([]);
+
+const side_list = async () => {
+  try {
+    const response = await postApi.allPosts();
+    console.log('공유 목록 가져오기 성공:', response);
+
+    if (response && response.result && response.result.body) {
+      const allItems = response.result.body;
+      sharedItems.value = [];
+
+      allItems.forEach(item => {
+        if (item.status && item.status.toUpperCase() !== 'PRIVATE') {
+          // 필드명 정규화: BaseFileView가 기대하는 구조로 매핑
+          sharedItems.value.push({
+            id: item.idx ?? item.id,
+            name: item.title ?? item.name ?? '',
+            type: item.type ?? 'file',
+            updatedAt: item.updatedAt ?? item.modifiedAt ?? null,
+            sharedFile: true,
+            ...item,
+          });
+        }
+      });
+    }
+  } catch (e) {
+    console.error('side_list error:', e);
+    sharedItems.value = [];
+  }
+};
+
+// sharedLibrary 모드에서는 sharedItems를, 아니면 props.files를 사용
+const effectiveFiles = computed(() =>
+  props.sharedLibrary ? sharedItems.value : props.files
+);
+// ─────────────────────────────────────────────────────────────────────────
 
 const searchScope = computed(() => getFileSearchScope(route.name) || "files");
 const searchState = computed(() => headerSearchStore.getScopeState(searchScope.value));
@@ -122,7 +161,7 @@ const triggerDownload = async (file) => {
 };
 
 const extensionOptions = computed(() => {
-  const extensions = props.files
+  const extensions = effectiveFiles.value
     .map((file) => file?.extension || file?.fileFormat || "")
     .filter(Boolean)
     .map((extension) => extension.toLowerCase());
@@ -141,11 +180,11 @@ const propertyPathLabel = computed(() => {
 
 const currentFolderVisibleSummary = computed(() => {
   if (!fileStore.currentFolder) return null;
-  const visibleFiles = props.files.filter((file) => file?.type !== "folder");
-  const visibleFolders = props.files.filter((file) => file?.type === "folder");
+  const visibleFiles = effectiveFiles.value.filter((file) => file?.type !== "folder");
+  const visibleFolders = effectiveFiles.value.filter((file) => file?.type === "folder");
   const visibleSize = visibleFiles.reduce((sum, file) => sum + Number(file?.sizeBytes || 0), 0);
   return {
-    visibleChildCount: props.files.length,
+    visibleChildCount: effectiveFiles.value.length,
     visibleFileCount: visibleFiles.length,
     visibleFolderCount: visibleFolders.length,
     visibleSizeLabel: formatBytes(visibleSize),
@@ -230,7 +269,7 @@ const matchesSizeFilter = (file) => {
 const filteredFiles = computed(() => {
   const keyword = searchState.value.searchQuery.trim().toLowerCase();
   const [sortBy, sortDirection] = sortOption.value.split("-");
-  const filtered = props.files.filter((file) => {
+  const filtered = effectiveFiles.value.filter((file) => {
     const fileName = String(file?.name || file?.fileOriginName || "").toLowerCase();
     const extension = String(file?.extension || file?.fileFormat || "").toLowerCase();
     const ownerName = String(file?.ownerName || "").toLowerCase();
@@ -290,7 +329,7 @@ const pageNumbers = computed(() => {
   return pages;
 });
 
-watch(() => props.files, (files) => {
+watch(effectiveFiles, (files) => {
   const validIds = new Set((files || []).map((file) => String(file?.id)));
   selectedIds.value = selectedIds.value.filter((id) => validIds.has(String(id)));
 }, { deep: true });
@@ -599,7 +638,12 @@ const closeFilePreview = () => {
 };
 
 onMounted(() => {
-  if (!fileStore.hasLoaded && !fileStore.isLoading) {
+  if (props.sharedLibrary) {
+    // 공유 문서함: API에서 sharedItems 로드 + 사진 기준 기본값 적용
+    side_list();
+    setLayoutPreset('10x10');         // 배치: 10 x 10
+    sortOption.value = 'updatedAt-desc'; // 정렬: 최근 수정순
+  } else if (!fileStore.hasLoaded && !fileStore.isLoading) {
     fileStore.fetchFiles().catch(() => {});
   }
 });

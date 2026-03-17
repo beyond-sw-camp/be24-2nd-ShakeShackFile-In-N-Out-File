@@ -29,6 +29,21 @@ const subscribeWebPush = async () => {
   }
 };
 
+/**
+ * 현재 로그인된 유저의 알림 목록 조회
+ * 백엔드: GET /notification/list
+ * 응답 예시: { result: { body: [ { idx, uuid, type, title, message, createdAt, read } ] } }
+ */
+const getNotifications = async () => {
+  try {
+    const response = await api.get('/notification/list');
+    return response.data;
+  } catch (error) {
+    console.error('알림 목록 조회 실패:', error);
+    throw error;
+  }
+};
+
 // 게시글 저장
 const savePost = async (formData) => {
   try {
@@ -197,6 +212,7 @@ const getPostByUuid = async (uuid) => {
 
 export default { 
   subscribeWebPush,
+  getNotifications,
   savePost, 
   getPost, 
   allPosts, 
