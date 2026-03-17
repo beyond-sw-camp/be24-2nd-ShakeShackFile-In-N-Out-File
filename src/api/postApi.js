@@ -72,6 +72,16 @@ const deletePost = async (idx) => {
     throw error;
   }
 }
+// 게시글 목록 삭제
+const list_delete = async (idx) => {
+  try {
+    const response = await api.post(`/workspace/delete/list/${idx}`);
+    return response.data;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
 
 /**
  * 사용자 초대 API
@@ -194,5 +204,6 @@ export default {
   loadRole,
   saveRole,
   verifyEmail,
-  getPostByUuid
+  getPostByUuid,
+  list_delete
 }
