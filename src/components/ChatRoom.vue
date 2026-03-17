@@ -1,5 +1,6 @@
-<script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+profileImageUrl 매핑 추가하고 템플릿에 프사 표시하겠습니다:
+vue<script setup>
+import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import api from '@/plugins/axiosinterceptor.js'
 import { useAuthStore } from '@/stores/useAuthStore'
 import SockJS from 'sockjs-client'
@@ -13,6 +14,10 @@ const chatMessages = ref([])
 const newMessage = ref('')
 const scrollContainer = ref(null)
 let stompClient = null
+
+// 내 프사
+const myProfileImageUrl = computed(() => authStore.user?.profileImageUrl || null)
+const myName = computed(() => authStore.user?.userName || authStore.user?.name || 'Guest')
 
 const formatTime = (isoString) => {
   if (!isoString) return ''
@@ -34,7 +39,8 @@ const fetchHistory = async () => {
         text: msg.contents,
         time: msg.createdAt,
         isMe: msg.senderIdx === authStore.user.idx,
-        messageUnreadCount: msg.messageUnreadCount // ← 추가
+        messageUnreadCount: msg.messageUnreadCount,
+        profileImageUrl: msg.profileImageUrl // ← 추가
       }))
       chatMessages.value.reverse()
     }
@@ -59,17 +65,15 @@ const initChat = () => {
       stompClient.subscribe(`/sub/chat/room/${props.room.id}`, (sdkEvent) => {
         const data = JSON.parse(sdkEvent.body)
 
-        // 읽음 업데이트 이벤트 → 안읽은 수 감소
         if (data.type === 'READ_UPDATE') {
           chatMessages.value.forEach(msg => {
             if (!msg.isPending && msg.messageUnreadCount > 0) {
-              msg.messageUnreadCount -= 1 // 누군가 읽었으니 안읽은 수 -1
+              msg.messageUnreadCount -= 1
             }
           })
           return
         }
 
-        // 내가 보낸 메시지 → 임시 메시지 교체
         if (data.senderIdx === authStore.user.idx) {
           const tempIdx = chatMessages.value.findLastIndex(m => m.isPending && m.isMe)
           if (tempIdx !== -1) {
@@ -80,20 +84,21 @@ const initChat = () => {
               time: data.createdAt,
               isMe: true,
               isPending: false,
-              messageUnreadCount: data.messageUnreadCount // ← 추가
+              messageUnreadCount: data.messageUnreadCount,
+              profileImageUrl: data.profileImageUrl // ← 추가
             }
             return
           }
         }
 
-        // 상대방 메시지
         chatMessages.value.push({
           id: data.idx,
           sender: data.senderNickname,
           text: data.contents,
           time: data.createdAt,
           isMe: false,
-          messageUnreadCount: data.messageUnreadCount // ← 추가
+          messageUnreadCount: data.messageUnreadCount,
+          profileImageUrl: data.profileImageUrl // ← 추가
         })
         nextTick(() => scrollToBottom())
 
@@ -115,12 +120,13 @@ const sendMessage = () => {
 
   const tempMsg = {
     id: 'temp-' + Date.now(),
-    sender: authStore.user?.userName || authStore.user?.name,
+    sender: myName.value,
     text: text,
     time: new Date().toISOString(),
     isMe: true,
     isPending: true,
-    messageUnreadCount: 0
+    messageUnreadCount: 0,
+    profileImageUrl: myProfileImageUrl.value // ← 추가
   }
   chatMessages.value.push(tempMsg)
   nextTick(() => scrollToBottom())
@@ -132,7 +138,6 @@ const sendMessage = () => {
   )
 
   newMessage.value = ''
-  
 }
 
 const scrollToBottom = () => {
@@ -181,9 +186,24 @@ watch(() => props.room.id, () => {
       <div
         v-for="msg in chatMessages"
         :key="msg.id"
-        :class="['flex gap-3', msg.isMe ? 'flex-row-reverse' : '']"
+        :class="['flex items-end gap-2', msg.isMe ? 'flex-row-reverse' : '']"
       >
-        <div :class="['flex flex-col max-w-[85%]', msg.isMe ? 'items-end' : 'items-start']">
+        <!-- 프로필 사진 -->
+        <div class="flex-shrink-0 w-8 h-8">
+          <img
+            v-if="msg.profileImageUrl"
+            :src="msg.profileImageUrl"
+            class="w-8 h-8 rounded-full object-cover"
+          />
+          <div
+            v-else
+            class="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-white text-[10px] font-bold"
+          >
+            {{ msg.sender?.charAt(0)?.toUpperCase() }}
+          </div>
+        </div>
+
+        <div :class="['flex flex-col max-w-[75%]', msg.isMe ? 'items-end' : 'items-start']">
           <p class="text-[10px] font-bold text-[var(--text-muted)] mb-1">{{ msg.sender }}</p>
 
           <div :class="['flex items-end gap-2', msg.isMe ? 'flex-row-reverse' : '']">
@@ -198,7 +218,6 @@ watch(() => props.room.id, () => {
             </div>
 
             <div :class="['flex flex-col gap-0.5', msg.isMe ? 'items-end' : 'items-start']">
-              <!-- 카톡처럼 안읽은 수 표시 (0이면 안보임) -->
               <span
                 v-if="msg.messageUnreadCount > 0"
                 class="text-[9px] text-blue-400 font-bold whitespace-nowrap"
