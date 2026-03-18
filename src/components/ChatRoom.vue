@@ -14,14 +14,11 @@ const newMessage = ref('')
 const scrollContainer = ref(null)
 let stompClient = null
 
-//채팅창 페이지처리
 const currentPage = ref(0)
 const isLastPage = ref(false)
 const isLoading = ref(false)
-const prevScrollHeight = ref(0)
 const scrollObserver = ref(null)
 
-// 내 프사
 const myProfileImageUrl = computed(() => authStore.user?.profileImageUrl || null)
 const myName = computed(() => authStore.user?.userName || authStore.user?.name || 'Guest')
 
@@ -35,29 +32,35 @@ const formatTime = (isoString) => {
   }).format(date)
 }
 
+const sortMessages = () => {
+  chatMessages.value.sort((a, b) => {
+    const timeA = new Date(a.time).getTime()
+    const timeB = new Date(b.time).getTime()
+    if (timeA !== timeB) return timeA - timeB
+    return (a.id > b.id) ? 1 : -1
+  })
+}
+
 const fetchHistory = async (isFirst = false) => {
-  // 로딩 중이거나 이미 마지막 페이지라면 중단
   if (isLoading.value || (isLastPage.value && !isFirst)) return
-  
+
   isLoading.value = true
   const size = 20
 
   if (isFirst) {
     currentPage.value = 0
     isLastPage.value = false
-    // 첫 로딩 시에만 배열 초기화 (필요시)
+    chatMessages.value = [] // 첫 로딩 시 초기화
   }
 
   const container = scrollContainer.value
-  // 데이터 로드 전의 전체 높이를 기억합니다.
   const beforeHeight = container ? container.scrollHeight : 0
 
   try {
-    // 백엔드 ChatMessageController의 파라미터(page, size)를 활용합니다.
     const response = await api.get(`/chat/${props.room.id}/history`, {
       params: { page: currentPage.value, size: size }
     })
-    
+
     if (response.data.success && response.data.result.messageList) {
       const newMsgs = response.data.result.messageList.map(msg => ({
         id: msg.idx,
@@ -69,23 +72,15 @@ const fetchHistory = async (isFirst = false) => {
         profileImageUrl: msg.profileImageUrl
       }))
 
-      // 백엔드에서 준 데이터가 요청한 size보다 적으면 마지막 페이지로 판단합니다.
-      if (newMsgs.length < size) {
-        isLastPage.value = true
-      }
+      if (newMsgs.length < size) isLastPage.value = true
 
-      // [핵심] 과거 데이터를 현재 리스트의 '앞'에 추가합니다.
-      // 백엔드가 Desc로 주므로, 화면 표시를 위해 reverse() 후 붙입니다.
       chatMessages.value = [...newMsgs.reverse(), ...chatMessages.value]
-      
-      // 다음 페이지 준비
       currentPage.value++
 
       await nextTick()
       if (isFirst) {
         scrollToBottom()
       } else if (container) {
-        // [카톡 로직] 새 데이터가 추가된 만큼만 scrollTop을 조정해 보던 위치를 유지합니다.
         container.scrollTop = container.scrollHeight - beforeHeight
       }
     }
@@ -97,18 +92,15 @@ const fetchHistory = async (isFirst = false) => {
 }
 
 const initObserver = () => {
-  // 기존 옵저버가 있으면 해제
   if (scrollObserver.value) scrollObserver.value.disconnect()
-  
+
   scrollObserver.value = new IntersectionObserver((entries) => {
-    // 센서가 화면에 보이고(isIntersecting), 마지막 페이지가 아닐 때만 호출
     if (entries[0].isIntersecting && !isLastPage.value && !isLoading.value) {
-      console.log("과거 대화 추가 로딩 시작...")
-      fetchHistory() // isFirst를 안 보냈으므로 false로 작동하여 다음 페이지 로드
+      fetchHistory()
     }
-  }, { 
-    threshold: 0.1, // 센서가 10%만 보여도 작동
-    rootMargin: '100px 0px 0px 0px' // [팁] 맨 위 닿기 100px 전부터 미리 로딩 시작 (더 부드러움)
+  }, {
+    threshold: 0.1,
+    rootMargin: '100px 0px 0px 0px'
   })
 
   const target = document.querySelector('#chat-top-sensor')
@@ -120,6 +112,7 @@ const initChat = () => {
 
   const socket = new SockJS('http://localhost:8080/ws-stomp')
   stompClient = Stomp.over(socket)
+  stompClient.debug = null // 디버그 로그 제거
 
   stompClient.connect(
     { Authorization: `Bearer ${authStore.token}` },
@@ -129,6 +122,7 @@ const initChat = () => {
       stompClient.subscribe(`/sub/chat/room/${props.room.id}`, (sdkEvent) => {
         const data = JSON.parse(sdkEvent.body)
 
+        // 읽음 업데이트
         if (data.type === 'READ_UPDATE') {
           chatMessages.value.forEach(msg => {
             if (!msg.isPending && msg.messageUnreadCount > 0) {
@@ -138,6 +132,7 @@ const initChat = () => {
           return
         }
 
+        // 내가 보낸 메시지 → 임시 메시지 교체
         if (data.senderIdx === authStore.user.idx) {
           const tempIdx = chatMessages.value.findLastIndex(m => m.isPending && m.isMe)
           if (tempIdx !== -1) {
@@ -149,24 +144,27 @@ const initChat = () => {
               isMe: true,
               isPending: false,
               messageUnreadCount: data.messageUnreadCount,
-              profileImageUrl: data.profileImageUrl // ← 추가
+              profileImageUrl: data.profileImageUrl
             }
+            sortMessages()
+            nextTick(() => scrollToBottom())
             return
           }
         }
 
-        chatMessages.value.push({
-          id: data.idx,
-          sender: data.senderNickname,
-          text: data.contents,
-          time: data.createdAt,
-          isMe: false,
-          messageUnreadCount: data.messageUnreadCount,
-          profileImageUrl: data.profileImageUrl // ← 추가
-        })
-        nextTick(() => scrollToBottom())
-
-        if (data.senderIdx !== authStore.user.idx) {
+        // 상대방 메시지 (중복 방지)
+        if (!chatMessages.value.some(m => m.id === data.idx && !m.isPending)) {
+          chatMessages.value.push({
+            id: data.idx,
+            sender: data.senderNickname,
+            text: data.contents,
+            time: data.createdAt,
+            isMe: false,
+            messageUnreadCount: data.messageUnreadCount,
+            profileImageUrl: data.profileImageUrl
+          })
+          sortMessages()
+          nextTick(() => scrollToBottom())
           markAsRead()
         }
       })
@@ -178,21 +176,23 @@ const initChat = () => {
 }
 
 const sendMessage = () => {
-  if (!newMessage.value.trim() || !stompClient) return
-
   const text = newMessage.value.trim()
+  if (!text || !stompClient) return
+
+  newMessage.value = '' // 즉시 초기화
 
   const tempMsg = {
-    id: 'temp-' + Date.now(),
+    id: 'temp-' + Date.now() + Math.random(),
     sender: myName.value,
     text: text,
     time: new Date().toISOString(),
     isMe: true,
     isPending: true,
     messageUnreadCount: 0,
-    profileImageUrl: myProfileImageUrl.value // ← 추가
+    profileImageUrl: myProfileImageUrl.value
   }
   chatMessages.value.push(tempMsg)
+  sortMessages()
   nextTick(() => scrollToBottom())
 
   stompClient.send(
@@ -200,8 +200,6 @@ const sendMessage = () => {
     { Authorization: `Bearer ${authStore.token}` },
     JSON.stringify({ contents: text })
   )
-
-  newMessage.value = ''
 }
 
 const scrollToBottom = () => {
@@ -228,17 +226,18 @@ onMounted(async () => {
   await api.post(`/chatRoom/${props.room.id}/enter`)
   requestNotificationPermission()
   await fetchHistory(true)
-  initObserver()  
+  initObserver()
   initChat()
   markAsRead()
 })
 
 onUnmounted(() => {
   api.post(`/chatRoom/${props.room.id}/leave`).catch(() => {})
+  if (scrollObserver.value) scrollObserver.value.disconnect()
   if (stompClient) stompClient.disconnect()
 })
 
-watch(() => props.room.id, async() => {
+watch(() => props.room.id, async () => {
   markAsRead()
   await fetchHistory(true)
   initObserver()
@@ -248,9 +247,7 @@ watch(() => props.room.id, async() => {
 
 <template>
   <div class="flex flex-col h-full overflow-hidden relative">
-    
     <div ref="scrollContainer" class="flex-1 overflow-y-auto p-5 space-y-4">
-      
       <div id="chat-top-sensor" style="height: 1px; margin-bottom: -1px;"></div>
 
       <div v-if="isLoading && !isLastPage" class="flex justify-center py-2">
@@ -258,12 +255,12 @@ watch(() => props.room.id, async() => {
           <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> 이전 메시지 로딩 중...
         </span>
       </div>
+
       <div
         v-for="msg in chatMessages"
         :key="msg.id"
         :class="['flex items-end gap-2', msg.isMe ? 'flex-row-reverse' : '']"
       >
-        <!-- 프로필 사진 -->
         <div class="flex-shrink-0 w-8 h-8">
           <img
             v-if="msg.profileImageUrl"
@@ -312,7 +309,7 @@ watch(() => props.room.id, async() => {
       <div class="relative">
         <input
           v-model="newMessage"
-          @keyup.enter="sendMessage"
+          @keydown.enter.prevent="sendMessage"
           type="text"
           placeholder="메시지 입력..."
           class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
