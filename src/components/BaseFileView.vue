@@ -49,20 +49,17 @@ const sharedItems = ref([]);
 
 const side_list = async () => {
   try {
+    // 1) 워크스페이스(포스트) 목록
     const response = await postApi.allPosts();
-    console.log('공유 목록 가져오기 성공:', response);
+    const workspaceItems = [];
 
-    if (response && response.result && response.result.body) {
-      const allItems = response.result.body;
-      sharedItems.value = [];
-
-      allItems.forEach(item => {
+    if (response?.result?.body) {
+      response.result.body.forEach(item => {
         if (item.status && item.status.toUpperCase() !== 'PRIVATE') {
-          // 필드명 정규화: BaseFileView가 기대하는 구조로 매핑
-          sharedItems.value.push({
+          workspaceItems.push({
             id: item.idx ?? item.id,
             name: item.title ?? item.name ?? '',
-            type: item.type ?? 'file',
+            type: item.type ?? 'workspace',
             updatedAt: item.updatedAt ?? item.modifiedAt ?? null,
             sharedFile: true,
             ...item,
@@ -70,6 +67,32 @@ const side_list = async () => {
         }
       });
     }
+    // 2) 공유된 파일 목록 (fileStore)
+    if (!fileStore.hasLoaded && !fileStore.isLoading) {
+      await fileStore.fetchFiles();
+    }
+
+    const sharedFileItems = fileStore.allFiles.filter(
+      file => file?.sharedFile || file?.sharedWithMe
+    ).map(file => ({
+      ...file,
+      id: file.idx ?? file.id,
+      name: file.name ?? file.fileOriginName ?? '',
+      type: file.type ?? 'file',
+    }));
+
+    // 3) 중복 제거 후 병합 (id 기준)
+    const seen = new Set();
+    const merged = [];
+    for (const item of [...workspaceItems, ...sharedFileItems]) {
+      const key = String(item.id);
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(item);
+      }
+    }
+
+    sharedItems.value = merged;
   } catch (e) {
     console.error('side_list error:', e);
     sharedItems.value = [];
@@ -639,10 +662,9 @@ const closeFilePreview = () => {
 
 onMounted(() => {
   if (props.sharedLibrary) {
-    // 공유 문서함: API에서 sharedItems 로드 + 사진 기준 기본값 적용
-    side_list();
-    setLayoutPreset('10x10');         // 배치: 10 x 10
-    sortOption.value = 'updatedAt-desc'; // 정렬: 최근 수정순
+    side_list();                          // 워크스페이스 + 공유 파일 통합 로드
+    setLayoutPreset('10x10');
+    sortOption.value = 'updatedAt-desc';
   } else if (!fileStore.hasLoaded && !fileStore.isLoading) {
     fileStore.fetchFiles().catch(() => {});
   }
