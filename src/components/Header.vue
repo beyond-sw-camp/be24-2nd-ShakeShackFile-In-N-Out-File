@@ -385,9 +385,9 @@ const handleSavedProfile = (savedProfile) => {
   settingsProfile.value = savedProfile;
 };
 
-const handleLogout = () => {
+const handleLogout = async () => {
   if (confirm("\uB85C\uADF8\uC544\uC6C3 \uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?")) {
-    authStore.logout();
+    await authStore.logout();
     router.push("/login");
   }
 };
