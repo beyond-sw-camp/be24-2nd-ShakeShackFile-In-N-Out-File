@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import ChatRoom from './ChatRoom.vue'
 import ChatList from './Chatlist.vue'
 import { useAuthStore } from '@/stores/useAuthStore'
@@ -22,6 +22,29 @@ const currentPage = ref(0)
 const isLastPage = ref(false)
 const isLoading = ref(false)
 const scrollObserver = ref(null)
+
+// 메뉴 상태 관리
+const isMenuOpen = ref(false)
+const toggleMenu = () => {
+  isMenuOpen.value = !isMenuOpen.value
+}
+const closeMenuOutside = (e) => {
+  if (isMenuOpen.value && !e.target.closest('.menu-container')) {
+    isMenuOpen.value = false
+  }
+}
+// 메뉴에서 나가기 클릭 시
+const handleLeaveRoomFromMenu = async () => {
+  if (!selectedRoom.value || !confirm(`'${selectedRoom.value.name}' 방에서 나가시겠습니까?`)) return
+  try {
+    await api.delete(`/chatRoom/${selectedRoom.value.id}/exit`)
+    isMenuOpen.value = false
+    handleBack() // 목록으로 돌아가기
+  } catch (error) {
+    console.error('방 나가기 실패:', error)
+    alert('방 나가기에 실패했습니다.')
+  }
+}
 
 // 열릴 때마다 크기 초기화
 watch(() => props.isOpen, (newVal) => {
@@ -225,13 +248,9 @@ const handleInviteFromHeader = async () => {
   try {
     await api.post(`/chatRoom/${selectedRoom.value.id}/invite`, emails)
     alert('초대되었습니다.')
+    isMenuOpen.value = false // 초대 후 메뉴 닫기
   } catch (error) {
-    const serverMessage = error.response?.data?.message || "";
-    if (serverMessage.includes("존재하지 않는 유저")) {
-      alert("존재하지 않는 유저가 포함되어 있습니다.");
-    } else {
-      alert("초대에 실패했습니다.");
-    }
+    alert("초대에 실패했습니다.");
   }
 }
 
@@ -251,10 +270,12 @@ const handleBack = async () => {
       console.error('읽음 처리 실패:', e)
     }
   }
+  isMenuOpen.value = false // 뒤로갈 때 메뉴 닫기
   viewMode.value = 'list'
 }
 
 onMounted(() => {
+  window.addEventListener('click', closeMenuOutside)
   fetchRooms(true)
   initObserver()
 
@@ -274,6 +295,11 @@ onMounted(() => {
     }
   });
 });
+
+onUnmounted(() => {
+  // 컴포넌트 해제 시 이벤트 제거
+  window.removeEventListener('click', closeMenuOutside)
+})
 </script>
 
 <template>
@@ -285,33 +311,44 @@ onMounted(() => {
     <div v-if="isOpen" class="resizer" @mousedown="startResizing" :class="{ 'is-resizing': isResizing }"></div>
     
     <div class="chat-header">
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 overflow-hidden">
         <button v-if="viewMode === 'room'" @click="handleBack" class="back-button">
           <i class="fa-solid fa-chevron-left"></i>
         </button>
-        <span class="chat-title">{{ viewMode === 'list' ? '채팅 목록' : selectedRoom.name }}</span>
+        <span class="chat-title truncate">{{ viewMode === 'list' ? '채팅 목록' : selectedRoom.name }}</span>
       </div>
       
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1">
         <button v-if="viewMode === 'list'" @click="handleCreateRoom" class="create-room-btn">
-          <i class="fa-solid fa-plus"></i> 방 만들기
+          방 만들기
         </button>
-        <button v-if="viewMode === 'room'" @click="handleInviteFromHeader" class="create-room-btn">
-          <i class="fa-solid fa-user-plus"></i> 초대
-        </button>
-        <button @click="emit('close')" class="close-button">
-          <i class="fa-solid fa-xmark"></i>
+
+        <div v-if="viewMode === 'room'" class="relative menu-container">
+          <button @click.stop="toggleMenu" class="p-2 hover:bg-gray-100 rounded-full transition-colors">
+            <i class="fa-solid fa-ellipsis-vertical text-gray-500 text-sm"></i>
+          </button>
+
+          <div v-if="isMenuOpen" 
+               class="absolute right-0 mt-2 w-32 bg-white border border-gray-200 shadow-xl rounded-lg z-[100] py-1">
+            <button @click="handleInviteFromHeader" 
+                    class="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-gray-700 hover:bg-blue-50 text-left">
+              <i class="fa-solid fa-user-plus w-3"></i> 초대하기
+            </button>
+            <div class="border-t border-gray-50 my-1"></div>
+            <button @click="handleLeaveRoomFromMenu" 
+                    class="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-red-500 hover:bg-red-50 font-bold text-left">
+              <i class="fa-solid fa-right-from-bracket w-3"></i> 방 나가기
+            </button>
+          </div>
+        </div>
+
+        <button @click="emit('close')" class="close-button p-2 hover:bg-gray-100 rounded-full">
+          <i class="fa-solid fa-xmark text-gray-500"></i>
         </button>
       </div>
     </div>
 
     <div class="chat-main-container">
-      <div v-if="fetchError && viewMode === 'list'" class="fetch-error">
-        <i class="fa-solid fa-circle-exclamation"></i>
-        <p>목록을 불러오지 못했습니다.</p>
-        <button @click="fetchRooms(true)">새로고침</button>
-      </div>
-
       <template v-if="viewMode === 'list'">
         <ChatList :rooms="chatRooms" @select-room="handleSelectRoom" @rename-room="onRenameRoom" @leave-room="onLeaveRoom" />
         <div id="bottom-sensor" class="h-4 flex justify-center items-center p-4">
@@ -319,10 +356,16 @@ onMounted(() => {
         </div>
       </template>
       
-      <ChatRoom v-else :room="selectedRoom" :currentUser="currentUser" @back="viewMode = 'list'" />
+      <ChatRoom 
+        v-else 
+        :room="selectedRoom" 
+        :currentUser="currentUser" 
+        @back="handleBack" 
+      />
     </div>
   </aside>
 </template>
+
 
 <style scoped>
 .chat-main-container {

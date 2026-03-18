@@ -1,5 +1,4 @@
-profileImageUrl 매핑 추가하고 템플릿에 프사 표시하겠습니다:
-vue<script setup>
+<script setup>
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import api from '@/plugins/axiosinterceptor.js'
 import { useAuthStore } from '@/stores/useAuthStore'
@@ -7,7 +6,7 @@ import SockJS from 'sockjs-client'
 import Stomp from 'stompjs'
 
 const props = defineProps({ room: Object, currentUser: Object })
-const emit = defineEmits(['back'])
+const emit = defineEmits(['back', 'open-invite'])
 const authStore = useAuthStore()
 
 const chatMessages = ref([])
@@ -248,7 +247,8 @@ watch(() => props.room.id, async() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full overflow-hidden">
+  <div class="flex flex-col h-full overflow-hidden relative">
+    
     <div ref="scrollContainer" class="flex-1 overflow-y-auto p-5 space-y-4">
       
       <div id="chat-top-sensor" style="height: 1px; margin-bottom: -1px;"></div>
