@@ -15,6 +15,13 @@ const newMessage = ref('')
 const scrollContainer = ref(null)
 let stompClient = null
 
+//채팅창 페이지처리
+const currentPage = ref(0)
+const isLastPage = ref(false)
+const isLoading = ref(false)
+const prevScrollHeight = ref(0)
+const scrollObserver = ref(null)
+
 // 내 프사
 const myProfileImageUrl = computed(() => authStore.user?.profileImageUrl || null)
 const myName = computed(() => authStore.user?.userName || authStore.user?.name || 'Guest')
@@ -29,26 +36,84 @@ const formatTime = (isoString) => {
   }).format(date)
 }
 
-const fetchHistory = async () => {
+const fetchHistory = async (isFirst = false) => {
+  // 로딩 중이거나 이미 마지막 페이지라면 중단
+  if (isLoading.value || (isLastPage.value && !isFirst)) return
+  
+  isLoading.value = true
+  const size = 20
+
+  if (isFirst) {
+    currentPage.value = 0
+    isLastPage.value = false
+    // 첫 로딩 시에만 배열 초기화 (필요시)
+  }
+
+  const container = scrollContainer.value
+  // 데이터 로드 전의 전체 높이를 기억합니다.
+  const beforeHeight = container ? container.scrollHeight : 0
+
   try {
-    const response = await api.get(`/chat/${props.room.id}/history`)
+    // 백엔드 ChatMessageController의 파라미터(page, size)를 활용합니다.
+    const response = await api.get(`/chat/${props.room.id}/history`, {
+      params: { page: currentPage.value, size: size }
+    })
+    
     if (response.data.success && response.data.result.messageList) {
-      chatMessages.value = response.data.result.messageList.map(msg => ({
+      const newMsgs = response.data.result.messageList.map(msg => ({
         id: msg.idx,
         sender: msg.senderNickname,
         text: msg.contents,
         time: msg.createdAt,
         isMe: msg.senderIdx === authStore.user.idx,
         messageUnreadCount: msg.messageUnreadCount,
-        profileImageUrl: msg.profileImageUrl // ← 추가
+        profileImageUrl: msg.profileImageUrl
       }))
-      chatMessages.value.reverse()
+
+      // 백엔드에서 준 데이터가 요청한 size보다 적으면 마지막 페이지로 판단합니다.
+      if (newMsgs.length < size) {
+        isLastPage.value = true
+      }
+
+      // [핵심] 과거 데이터를 현재 리스트의 '앞'에 추가합니다.
+      // 백엔드가 Desc로 주므로, 화면 표시를 위해 reverse() 후 붙입니다.
+      chatMessages.value = [...newMsgs.reverse(), ...chatMessages.value]
+      
+      // 다음 페이지 준비
+      currentPage.value++
+
+      await nextTick()
+      if (isFirst) {
+        scrollToBottom()
+      } else if (container) {
+        // [카톡 로직] 새 데이터가 추가된 만큼만 scrollTop을 조정해 보던 위치를 유지합니다.
+        container.scrollTop = container.scrollHeight - beforeHeight
+      }
     }
-    await nextTick()
-    scrollToBottom()
   } catch (error) {
-    console.error('채팅 내역 로드 실패:', error)
+    console.error('이전 대화 로드 실패:', error)
+  } finally {
+    isLoading.value = false
   }
+}
+
+const initObserver = () => {
+  // 기존 옵저버가 있으면 해제
+  if (scrollObserver.value) scrollObserver.value.disconnect()
+  
+  scrollObserver.value = new IntersectionObserver((entries) => {
+    // 센서가 화면에 보이고(isIntersecting), 마지막 페이지가 아닐 때만 호출
+    if (entries[0].isIntersecting && !isLastPage.value && !isLoading.value) {
+      console.log("과거 대화 추가 로딩 시작...")
+      fetchHistory() // isFirst를 안 보냈으므로 false로 작동하여 다음 페이지 로드
+    }
+  }, { 
+    threshold: 0.1, // 센서가 10%만 보여도 작동
+    rootMargin: '100px 0px 0px 0px' // [팁] 맨 위 닿기 100px 전부터 미리 로딩 시작 (더 부드러움)
+  })
+
+  const target = document.querySelector('#chat-top-sensor')
+  if (target) scrollObserver.value.observe(target)
 }
 
 const initChat = () => {
@@ -163,7 +228,8 @@ const requestNotificationPermission = async () => {
 onMounted(async () => {
   await api.post(`/chatRoom/${props.room.id}/enter`)
   requestNotificationPermission()
-  fetchHistory()
+  await fetchHistory(true)
+  initObserver()  
   initChat()
   markAsRead()
 })
@@ -173,9 +239,10 @@ onUnmounted(() => {
   if (stompClient) stompClient.disconnect()
 })
 
-watch(() => props.room.id, () => {
+watch(() => props.room.id, async() => {
   markAsRead()
-  fetchHistory()
+  await fetchHistory(true)
+  initObserver()
   initChat()
 })
 </script>
@@ -183,6 +250,14 @@ watch(() => props.room.id, () => {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <div ref="scrollContainer" class="flex-1 overflow-y-auto p-5 space-y-4">
+      
+      <div id="chat-top-sensor" style="height: 1px; margin-bottom: -1px;"></div>
+
+      <div v-if="isLoading && !isLastPage" class="flex justify-center py-2">
+        <span class="text-[10px] text-gray-400">
+          <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> 이전 메시지 로딩 중...
+        </span>
+      </div>
       <div
         v-for="msg in chatMessages"
         :key="msg.id"
