@@ -134,7 +134,7 @@ const toNotificationItem = (item = {}) => {
     time: item.createdAt ? formatRelativeTime(item.createdAt) : "\uBC29\uAE08 \uC804",
     read,
     processed,
-    processedLabel: processed ? "?? ??" : "",
+    processedLabel: processed ? "이미 확인하셨습니다" : "",
   };
 };
 
