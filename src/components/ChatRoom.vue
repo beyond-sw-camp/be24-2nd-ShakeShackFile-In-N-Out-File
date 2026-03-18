@@ -69,7 +69,12 @@ const fetchHistory = async (isFirst = false) => {
         time: msg.createdAt,
         isMe: msg.senderIdx === authStore.user.idx,
         messageUnreadCount: msg.messageUnreadCount,
-        profileImageUrl: msg.profileImageUrl
+        profileImageUrl: msg.profileImageUrl,
+        fileUrl: msg.fileUrl,     
+        fileName: msg.fileName,   
+        fileType: msg.fileType,   
+        fileSize: msg.fileSize,     
+        messageType: msg.messageType 
       }))
 
       if (newMsgs.length < size) isLastPage.value = true
@@ -161,7 +166,12 @@ const initChat = () => {
             time: data.createdAt,
             isMe: false,
             messageUnreadCount: data.messageUnreadCount,
-            profileImageUrl: data.profileImageUrl
+            profileImageUrl: data.profileImageUrl,
+            fileUrl: data.fileUrl,    
+            fileName: data.fileName, 
+            fileType: data.fileType, 
+            fileSize: data.fileSize, 
+            messageType: data.messageType 
           })
           sortMessages()
           nextTick(() => scrollToBottom())
@@ -202,6 +212,77 @@ const sendMessage = () => {
   )
 }
 
+const fileInput = ref(null)
+
+const handleFileSelect = async (e) => {
+  const file = e.target.files[0]
+  if (!file) return
+
+  const isImage = file.type.startsWith('image/')
+  const maxSize = isImage ? 5 * 1024 * 1024 : 30 * 1024 * 1024
+
+  if (file.size > maxSize) {
+    alert(isImage ? '이미지는 5MB 이하만 업로드 가능합니다.' : '파일은 30MB 이하만 업로드 가능합니다.')
+    return
+  }
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  try {
+    const response = await api.post(`/chat/${props.room.id}/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
+    const fileUrl = response.data.result.fileUrl
+    const messageType = isImage ? 'IMAGE' : 'FILE'
+
+    // 임시 메시지 추가
+    const tempMsg = {
+      id: 'temp-' + Date.now() + Math.random(),
+      sender: myName.value,
+      time: new Date().toISOString(),
+      isMe: true,
+      isPending: true,
+      messageUnreadCount: 0,
+      profileImageUrl: myProfileImageUrl.value,
+      fileUrl: fileUrl,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      messageType: messageType,
+      contents: ''
+    }
+    chatMessages.value.push(tempMsg)
+    sortMessages()
+    nextTick(() => scrollToBottom())
+
+    // 웹소켓으로 파일 메시지 전송
+    stompClient.send(
+      `/pub/chat/${props.room.id}`,
+      { Authorization: `Bearer ${authStore.token}` },
+      JSON.stringify({
+        contents: '',
+        fileUrl: fileUrl,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        messageType: messageType
+      })
+    )
+  } catch (e) {
+    alert('파일 업로드에 실패했습니다.')
+  }
+
+  e.target.value = '' // 같은 파일 재업로드 가능하도록
+}
+
+const formatFileSize = (bytes) => {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
 const scrollToBottom = () => {
   if (scrollContainer.value) {
     scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
@@ -220,6 +301,9 @@ const requestNotificationPermission = async () => {
   if ('Notification' in window && Notification.permission === 'default') {
     await Notification.requestPermission()
   }
+}
+const openFile = (url) => {
+  window.open(url, '_blank')
 }
 
 onMounted(async () => {
@@ -286,7 +370,29 @@ watch(() => props.room.id, async () => {
                 msg.isPending ? 'opacity-60' : ''
               ]"
             >
-              {{ msg.text }}
+             <!-- 이미지 -->
+              <img
+                v-if="msg.messageType === 'IMAGE'"
+                :src="msg.fileUrl"
+                class="max-w-[200px] max-h-[200px] rounded-xl object-cover cursor-pointer"
+                @click="window.open(msg.fileUrl, '_blank')"
+              />
+                <!-- 파일 -->
+              <a
+                v-else-if="msg.messageType === 'FILE'"
+                :href="msg.fileUrl"
+                target="_blank"
+                :class="['flex items-center gap-2', msg.isMe ? 'text-white' : 'text-[var(--text-main)]']"
+              >
+                <i class="fa-solid fa-file text-lg"></i>
+                <div class="flex flex-col">
+                  <span class="font-bold truncate max-w-[150px]">{{ msg.fileName }}</span>
+                  <span class="text-[9px] opacity-70">{{ formatFileSize(msg.fileSize) }}</span>
+                </div>
+                <i class="fa-solid fa-download ml-1"></i>
+              </a>
+               <!-- 텍스트 -->
+              <span v-else>{{ msg.text }}</span>
             </div>
 
             <div :class="['flex flex-col gap-0.5', msg.isMe ? 'items-end' : 'items-start']">
@@ -306,14 +412,33 @@ watch(() => props.room.id, async () => {
     </div>
 
     <div class="p-4 border-t border-gray-100">
-      <div class="relative">
-        <input
-          v-model="newMessage"
-          @keydown.enter.prevent="sendMessage"
-          type="text"
-          placeholder="메시지 입력..."
-          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-        />
+      <div class="relative flex items-center">
+        <!-- 파일 input (숨김) -->
+    <input
+      ref="fileInput"
+      type="file"
+      accept="image/*,.pdf,.zip,.docx,.xlsx"
+      class="hidden"
+      @change="handleFileSelect"
+    />
+
+    <!-- 파일 업로드 버튼 -->
+    <button
+      @click="fileInput.click()"
+      class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#4169E1] transition z-10"
+    >
+      <i class="fa-solid fa-paperclip"></i>
+    </button>
+
+    <!-- 입력창 - pl-9로 클립 아이콘 공간 확보, pr-9로 전송 버튼 공간 확보 -->
+    <input
+      v-model="newMessage"
+      @keydown.enter.prevent="sendMessage"
+      type="text"
+      placeholder="메시지 입력..."
+      class="w-full border border-gray-200 rounded-lg pl-9 pr-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+    />
+
         <button
           @click="sendMessage"
           class="absolute right-3 top-1/2 -translate-y-1/2 text-[#4169E1]"
