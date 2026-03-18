@@ -161,15 +161,15 @@ const getFileExtension = (file) => String(file?.extension || file?.fileFormat ||
 const getUpdatedAt = (file) => file?.updatedAtLabel || formatDisplayDate(file?.updatedAt || file?.lastModified || file?.uploadDate);
 const getSharedOwnerLabel = (file) => file?.ownerName || file?.ownerEmail || "알 수 없는 사용자";
 const getSharedAtLabel = (file) => file?.sharedAtLabel || formatDisplayDate(file?.sharedAt);
+const getSharedOwnerText = (file) => `\uACF5\uC720\uC790: ${getSharedOwnerLabel(file)}`;
 const getSharedSourceLabel = (file) => {
-  const ownerLabel = getSharedOwnerLabel(file);
   const sharedAtLabel = getSharedAtLabel(file);
 
   if (sharedAtLabel && sharedAtLabel !== "-") {
-    return `${ownerLabel} 님이 ${sharedAtLabel}에 공유`;
+    return `${getSharedOwnerText(file)} | ${sharedAtLabel}`;
   }
 
-  return `${ownerLabel} 님이 공유`;
+  return getSharedOwnerText(file);
 };
 const getPreviewUrl = (file) => file?.downloadUrl || file?.presignedDownloadUrl || "";
 const getThumbnailUrl = (file) => file?.thumbnailUrl || file?.thumbnailPresignedUrl || "";
@@ -240,7 +240,7 @@ const canRestore = (file) => !props.sharedLibrary && props.deleteMode === "perma
 const canManageFolder = (file) => !props.sharedLibrary && props.deleteMode !== "permanent" && file?.type === "folder" && !file?.isTrash;
 const canShare = (file) => !props.sharedLibrary && !file?.sharedWithMe && file?.type !== "folder" && !file?.isTrash && !isLocked(file) && (canCreateShares.value || file?.sharedFile);
 const canToggleLock = (file) => !props.sharedLibrary && !file?.sharedWithMe && file?.type !== "folder" && !file?.isTrash && (canCreateLocks.value || file?.lockedFile);
-const canSaveShared = (file) => Boolean(file?.sharedWithMe || props.sharedLibrary) && file?.type !== "folder" && !isLocked(file);
+const canSaveShared = (file) => Boolean(file?.sharedWithMe) && file?.type !== "folder" && !isLocked(file);
 const isMovable = (file) => !props.sharedLibrary && props.deleteMode !== "permanent" && !file?.sharedWithMe && !file?.isTrash && !isLocked(file);
 const isFolderDropTarget = (file) => canManageFolder(file);
 const getDeleteConfirmMessage = (file) => {

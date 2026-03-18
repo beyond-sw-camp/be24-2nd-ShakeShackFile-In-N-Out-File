@@ -602,7 +602,7 @@ const closeFilePreview = () => {
 
 onMounted(() => {
   if (props.sharedLibrary) {
-    fileStore.fetchSharedFiles().catch(() => {});
+    fileStore.fetchFiles().catch(() => {});
     setLayoutPreset("10x10");
     sortOption.value = "sharedAt-desc";
   } else if (!fileStore.hasLoaded && !fileStore.isLoading) {
