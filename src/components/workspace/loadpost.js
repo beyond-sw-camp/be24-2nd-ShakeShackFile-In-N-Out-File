@@ -73,7 +73,8 @@ const read_post = async (idx) => {
         currentPost.value = {
             idx: data.idx,
             title: data.title,
-            contents: parsedContents // { time, blocks, version } 구조의 객체
+            contents: parsedContents, 
+            type: data.type
         };
 
         return currentPost.value;

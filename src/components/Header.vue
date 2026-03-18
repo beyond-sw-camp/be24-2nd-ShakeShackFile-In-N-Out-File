@@ -11,6 +11,7 @@ import {
   useHeaderSearchStore,
 } from "@/stores/useHeaderSearchStore";
 import ProfileModal from "./ProfileModal.vue";
+import postApi from "@/api/postApi";
 
 const emit = defineEmits(["toggle-chat", "toggle-theme", "switch-view"]);
 
@@ -23,6 +24,12 @@ const showNotifDropdown = ref(false);
 const showProfileDropdown = ref(false);
 const showSearchDropdown = ref(false);
 const isProfileModalOpen = ref(false);
+
+const notifications = ref([]);
+const hasNewNotif = ref(false);
+
+let broadcastChannel = null;
+
 const isDarkMode = ref(false);
 const themeIcon = ref("fa-solid fa-moon");
 const settingsTab = ref("profile");
@@ -36,36 +43,266 @@ const extensionOptions = computed(() => searchState.value.availableExtensions ||
 
 const customSizeRangeLabel = computed(() => {
   if (searchState.value.sizeFilter !== "custom") return "";
+
   const min = searchState.value.customMinSize?.trim();
   const max = searchState.value.customMaxSize?.trim();
-  if (!min && !max) return "범위를 입력하세요.";
+
+  if (!min && !max) return "\uBC94\uC704\uB97C \uC785\uB825\uD558\uC138\uC694";
   if (min && max) return `${min}MB ~ ${max}MB`;
-  if (min) return `${min}MB 이상`;
-  return `${max}MB 이하`;
+  if (min) return `${min}MB \uC774\uC0C1`;
+  return `${max}MB \uC774\uD558`;
 });
 
 const activeSearchFilterCount = computed(() => {
   if (!canUseFileSearch.value) return 0;
+
   let count = 0;
   if (searchState.value.searchQuery.trim()) count += 1;
   if (searchState.value.extensionFilter !== "all") count += 1;
   if (searchState.value.sizeFilter !== "all") count += 1;
   if (searchState.value.statusFilter !== "all") count += 1;
+
   return count;
 });
 
 const searchPlaceholder = computed(() => (
   canUseFileSearch.value
-    ? "파일명, 확장자, 공유자 이메일 검색"
-    : "파일 검색은 드라이브 화면에서 사용할 수 있습니다."
+    ? "\uD30C\uC77C\uBA85, \uD655\uC7A5\uC790, \uACF5\uC720\uC790 \uC774\uBA54\uC77C\uC744 \uAC80\uC0C9\uD558\uC138\uC694"
+    : "\uD30C\uC77C \uAC80\uC0C9\uC740 \uB4DC\uB77C\uC774\uBE0C \uD654\uBA74\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."
 ));
 
-const userName = computed(() => settingsProfile.value?.displayName || authStore.user?.userName || authStore.user?.name || "사용자");
-const userEmail = computed(() => settingsProfile.value?.email || authStore.user?.email || authStore.user?.userEmail || "이메일 정보 없음");
+const userName = computed(() => (
+  settingsProfile.value?.displayName ||
+  authStore.user?.userName ||
+  authStore.user?.name ||
+  "\uC0AC\uC6A9\uC790"
+));
+
+const userEmail = computed(() => (
+  settingsProfile.value?.email ||
+  authStore.user?.email ||
+  authStore.user?.userEmail ||
+  "\uC774\uBA54\uC77C \uC815\uBCF4 \uC5C6\uC74C"
+));
+
 const userLocaleLabel = computed(() => settingsProfile.value?.localeCode || "KO");
 const membershipLabel = computed(() => settingsProfile.value?.membershipLabel || "FREE MEMBER");
 const userProfileImage = computed(() => settingsProfile.value?.profileImageUrl || "");
-const avatarInitials = computed(() => (userName.value || "사용자").split(" ").filter(Boolean).slice(0, 2).map((token) => token[0]?.toUpperCase() || "").join("") || "U");
+const avatarInitials = computed(() => (
+  (userName.value || "\uC0AC\uC6A9\uC790")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((token) => token[0]?.toUpperCase() || "")
+    .join("") || "U"
+));
+
+const updateNotifBadge = () => {
+  hasNewNotif.value = notifications.value.some((notification) => !notification.read);
+};
+
+const formatRelativeTime = (dateStr) => {
+  if (!dateStr) return "\uBC29\uAE08 \uC804";
+
+  const parsed = new Date(dateStr);
+  if (Number.isNaN(parsed.getTime())) return "\uBC29\uAE08 \uC804";
+
+  const diff = Date.now() - parsed.getTime();
+  const minutes = Math.floor(diff / 60000);
+
+  if (minutes < 1) return "\uBC29\uAE08 \uC804";
+  if (minutes < 60) return `${minutes}\uBD84 \uC804`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}\uC2DC\uAC04 \uC804`;
+
+  return `${Math.floor(hours / 24)}\uC77C \uC804`;
+};
+
+const toNotificationItem = (item = {}) => {
+  const type = item.type ?? "general";
+  const read = Boolean(item.read);
+  const processed = type === "invite" && read;
+
+  return {
+    id: item.notificationId ?? item.idx ?? item.id ?? Date.now(),
+    uuid: item.uuid ?? null,
+    type,
+    title: item.title ?? "\uC54C\uB9BC",
+    message: item.message ?? item.contents ?? "",
+    createdAt: item.createdAt ?? null,
+    time: item.createdAt ? formatRelativeTime(item.createdAt) : "\uBC29\uAE08 \uC804",
+    read,
+    processed,
+    processedLabel: processed ? "이미 확인하셨습니다" : "",
+  };
+};
+
+const findNotificationIndex = (target) => notifications.value.findIndex((item) => (
+  (target.id != null && item.id === target.id) ||
+  (target.uuid && item.uuid === target.uuid)
+));
+
+const fetchNotifications = async () => {
+  if (!authStore.user?.idx) {
+    notifications.value = [];
+    updateNotifBadge();
+    return;
+  }
+
+  try {
+    const response = await postApi.getNotifications();
+    const items = Array.isArray(response?.result?.body) ? response.result.body : [];
+    notifications.value = items.map(toNotificationItem);
+    updateNotifBadge();
+  } catch (error) {
+    console.error("\uC54C\uB9BC \uBAA9\uB85D \uBD88\uB7EC\uC624\uAE30 \uC2E4\uD328:", error);
+  }
+};
+
+const pushNewNotification = (data) => {
+  if (!data) return;
+  if (data.type && !["invite", "general"].includes(data.type)) return;
+
+  const incoming = toNotificationItem({
+    ...data,
+    read: false,
+  });
+
+  const existingIndex = findNotificationIndex(incoming);
+  if (existingIndex >= 0) {
+    const previous = notifications.value[existingIndex];
+    notifications.value[existingIndex] = {
+      ...previous,
+      ...incoming,
+      processed: previous.processed,
+      processedLabel: previous.processedLabel,
+    };
+  } else {
+    notifications.value.unshift(incoming);
+  }
+
+  updateNotifBadge();
+};
+
+const markNotificationAsRead = async (notification) => {
+  if (!notification?.id && !notification?.uuid) return;
+
+  try {
+    await postApi.markNotificationAsRead({
+      id: notification.id ?? null,
+      uuid: notification.uuid ?? null,
+    });
+  } catch (error) {
+    console.error("\uC54C\uB9BC \uC77D\uC74C \uCC98\uB9AC \uC2E4\uD328:", error);
+  }
+};
+
+const applyProcessedState = async (notification, label) => {
+  const index = findNotificationIndex(notification);
+  if (index < 0) return;
+
+  notifications.value[index] = {
+    ...notifications.value[index],
+    read: true,
+    processed: true,
+    processedLabel: label,
+  };
+  updateNotifBadge();
+
+  await markNotificationAsRead(notifications.value[index]);
+};
+
+const getErrorMessage = (error) => {
+  if (typeof error?.response?.data === "string" && error.response.data.trim()) {
+    return error.response.data;
+  }
+
+  if (typeof error?.response?.data?.message === "string" && error.response.data.message.trim()) {
+    return error.response.data.message;
+  }
+
+  if (typeof error?.message === "string" && error.message.trim()) {
+    return error.message;
+  }
+
+  return "";
+};
+
+const handleInviteVerify = async (notification, type) => {
+  if (!notification.uuid || notification.processed) return;
+
+  try {
+    await postApi.verifyEmail(notification.uuid, type);
+    await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
+    await fetchNotifications();
+  } catch (error) {
+    const message = getErrorMessage(error);
+
+    if (type === "reject" && (error?.response?.status === 500 || message.includes("\uAC70\uC808"))) {
+      await applyProcessedState(notification, "\uAC70\uC808\uB428");
+      await fetchNotifications();
+      return;
+    }
+
+    console.error(type === "accept" ? "\uCD08\uB300 \uC218\uB77D \uC2E4\uD328:" : "\uCD08\uB300 \uAC70\uC808 \uC2E4\uD328:", error);
+    await fetchNotifications();
+
+    if (type === "accept" && message.includes("\uC720\uD6A8\uD558\uC9C0 \uC54A\uC740 \uD1A0\uD070")) {
+      alert("\uC774\uBBF8 \uCC98\uB9AC\uB418\uC5C8\uAC70\uB098 \uB9CC\uB8CC\uB41C \uCD08\uB300\uC785\uB2C8\uB2E4.");
+      return;
+    }
+
+    alert(message || (type === "accept" ? "\uCD08\uB300 \uC218\uB77D\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4." : "\uCD08\uB300 \uAC70\uC808\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4."));
+  }
+};
+
+const handleDeleteNotification = async (notification) => {
+  try {
+    if (notification?.id || notification?.uuid) {
+      await postApi.deleteNotification({
+        id: notification.id ?? null,
+        uuid: notification.uuid ?? null,
+      });
+    }
+
+    notifications.value = notifications.value.filter((item) => (
+      !(notification.id != null && item.id === notification.id) &&
+      !(notification.uuid && item.uuid === notification.uuid)
+    ));
+    updateNotifBadge();
+  } catch (error) {
+    console.error("\uC54C\uB9BC \uC0AD\uC81C \uC2E4\uD328:", error);
+    alert("\uC54C\uB9BC \uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
+  }
+};
+
+const swDirectMessageHandler = (event) => {
+  const data = event.data;
+  if (!data) return;
+
+  if (data.channel === "notification" && data.payload) {
+    pushNewNotification(data.payload);
+    return;
+  }
+
+  if (data.type === "invite" || data.type === "general") {
+    pushNewNotification(data);
+  }
+};
+
+const setupNotificationChannel = () => {
+  if (typeof BroadcastChannel !== "undefined") {
+    broadcastChannel = new BroadcastChannel("notif_channel");
+    broadcastChannel.onmessage = (event) => {
+      pushNewNotification(event.data);
+    };
+  }
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", swDirectMessageHandler);
+  }
+};
 
 const initTheme = () => {
   const savedTheme = localStorage.getItem("theme");
@@ -91,10 +328,14 @@ const loadSettingsProfile = async () => {
   }
 };
 
-const toggleNotifMenu = () => {
+const toggleNotifMenu = async () => {
   showNotifDropdown.value = !showNotifDropdown.value;
   showProfileDropdown.value = false;
   showSearchDropdown.value = false;
+
+  if (showNotifDropdown.value) {
+    await fetchNotifications();
+  }
 };
 
 const toggleProfileMenu = () => {
@@ -145,7 +386,7 @@ const handleSavedProfile = (savedProfile) => {
 };
 
 const handleLogout = () => {
-  if (confirm("로그아웃 하시겠습니까?")) {
+  if (confirm("\uB85C\uADF8\uC544\uC6C3 \uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?")) {
     authStore.logout();
     router.push("/login");
   }
@@ -163,17 +404,46 @@ watch(() => route.fullPath, () => {
   showSearchDropdown.value = false;
 });
 
+watch(
+  () => authStore.user?.idx,
+  async (userIdx) => {
+    if (!userIdx) {
+      notifications.value = [];
+      updateNotifBadge();
+      return;
+    }
+
+    await fetchNotifications();
+
+    try {
+      await postApi.subscribeWebPush();
+    } catch (error) {
+      console.error("\uC54C\uB9BC \uAD6C\uB3C5 \uC2E4\uD328:", error);
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   initTheme();
   authStore.checkLogin();
   loadSettingsProfile();
+  setupNotificationChannel();
   document.addEventListener("click", handleClickOutside);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("click", handleClickOutside);
+  if (broadcastChannel) {
+    broadcastChannel.close();
+    broadcastChannel = null;
+  }
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.removeEventListener("message", swDirectMessageHandler);
+  }
 });
 </script>
+
 <template>
   <div>
     <ProfileModal
@@ -245,10 +515,59 @@ onBeforeUnmount(() => {
 
       <div class="header-actions">
         <div class="relative" id="notif-container">
-          <button @click="toggleNotifMenu" class="icon-button bell-button"><i class="fa-solid fa-bell"></i></button>
+          <button @click="toggleNotifMenu" class="icon-button bell-button">
+            <i class="fa-solid fa-bell"></i>
+            <span v-if="hasNewNotif" class="notif-badge"></span>
+          </button>
+
           <div v-if="showNotifDropdown" class="dropdown-container active">
-            <div class="dropdown-header"><p class="dropdown-header__label">알림</p></div>
-            <div class="py-2"><div class="dropdown-item"><span class="dropdown-muted">새로운 알림이 없습니다.</span></div></div>
+            <div class="dropdown-header">
+              <p class="dropdown-header__label">알림</p>
+            </div>
+            <div class="py-2 max-h-64 overflow-y-auto">
+              <template v-if="notifications.length > 0">
+                <!--
+                  클래스 우선순위:
+                    notif-processed  → 수락/거절 완료 (가장 어둡게)
+                    notif-read       → 읽었지만 미처리 (약하게 흐리게)
+                    notif-unread     → 아직 읽지 않음 (파란 강조)
+                -->
+                <div
+                  v-for="n in notifications"
+                  :key="n.id"
+                  class="notification-item"
+                  :class="{
+                    'notif-processed': n.processed,
+                    'notif-read':      n.read && !n.processed,
+                    'notif-unread':    !n.read && !n.processed,
+                  }"
+                >
+                  <div class="notification-item__top">
+                    <div class="flex flex-col gap-1">
+                      <div class="notif-title-row">
+                        <p class="notif-title">{{ n.title }}</p>
+                        <span v-if="n.read && !n.processed" class="notif-read-badge">읽음</span>
+                      </div>
+                      <p class="notif-message">{{ n.message }}</p>
+                      <span class="notif-time">{{ n.time }}</span>
+                    </div>
+                    <button type="button" class="notif-delete-button" @click.stop="handleDeleteNotification(n)" aria-label="알림 삭제">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
+                  <div v-if="n.type === 'invite'" class="notif-actions">
+                    <template v-if="!n.processed">
+                      <button type="button" class="notif-btn notif-btn--accept" @click.stop="handleInviteVerify(n, 'accept')">수락</button>
+                      <button type="button" class="notif-btn notif-btn--reject" @click.stop="handleInviteVerify(n, 'reject')">거절</button>
+                    </template>
+                    <span v-else class="notif-processed-label">{{ n.processedLabel }}</span>
+                  </div>
+                </div>
+              </template>
+              <div v-else class="dropdown-item">
+                <span class="dropdown-muted">새로운 알림이 없습니다</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -287,7 +606,436 @@ onBeforeUnmount(() => {
   </div>
 </template>
 
+
 <style scoped>
+/* 제공해주신 기존 스타일을 그대로 유지합니다 */
+.header-container {
+  min-height: 4rem;
+  background-color: var(--bg-main);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 clamp(1rem, 2vw, 2rem);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.header-search-wrap {
+  position: relative;
+  flex: 1 1 22rem;
+  max-width: min(42rem, 55vw);
+  min-width: 0;
+}
+
+.search-input {
+  width: 100%;
+  background-color: var(--bg-input);
+  border: none;
+  border-radius: 1rem;
+  padding: 0.7rem 1rem 0.7rem 3rem;
+  outline: none;
+  font-size: 0.875rem;
+  color: var(--text-main);
+  transition: all 0.2s ease;
+}
+
+.search-input:focus {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  background-color: var(--bg-main);
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-icon {
+  position: absolute;
+  left: 1rem;
+  top: 0.78rem;
+  opacity: 0.45;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.65rem, 1vw, 1.1rem);
+  margin-left: auto;
+  min-width: max-content;
+}
+
+.icon-button {
+  color: var(--text-muted);
+  transition: color 0.2s ease, background-color 0.2s ease;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 0.75rem;
+  position: relative;
+}
+
+.notif-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  background-color: #ff4d4f;
+  border-radius: 50%;
+  border: 1.5px solid var(--bg-main);
+}
+
+.notification-item {
+  padding: 0.8rem 1.1rem;
+  border-bottom: 1px solid var(--border-color);
+  cursor: default;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+  border-left: 3px solid transparent; /* 기본: 투명 테두리 (레이아웃 고정) */
+}
+
+.notification-item:last-child {
+  border-bottom: none;
+}
+
+.notification-item__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* 읽지 않은 알림: 파란 강조 */
+.notif-unread {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated) 93%);
+  border-left-color: var(--accent);
+}
+
+/* ★ [이슈2] 읽은 알림: 살짝 흐리게 */
+.notif-read {
+  opacity: 0.65;
+  border-left-color: transparent;
+}
+
+/* 수락/거절 처리된 알림: 더 어둡게 + 흑백 */
+.notif-processed {
+  opacity: 0.4;
+  filter: grayscale(50%);
+  border-left-color: transparent;
+}
+
+/* ★ 제목 행: 제목 + 읽음 뱃지 가로 배치 */
+.notif-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* ★ [이슈2] 읽음 뱃지 */
+.notif-read-badge {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+}
+
+.notif-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.notif-delete-button:hover {
+  background: var(--bg-input);
+  color: var(--text-main);
+}
+
+.notif-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  align-items: center;
+}
+
+.notif-btn {
+  flex: 1;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.notif-btn--accept {
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+  color: #16a34a;
+  border: 1px solid color-mix(in srgb, #22c55e 30%, transparent);
+}
+
+.notif-btn--accept:hover {
+  background: color-mix(in srgb, #22c55e 26%, transparent);
+}
+
+.notif-btn--reject {
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+  color: #dc2626;
+  border: 1px solid color-mix(in srgb, #ef4444 26%, transparent);
+}
+
+.notif-btn--reject:hover {
+  background: color-mix(in srgb, #ef4444 22%, transparent);
+}
+
+/* 처리 완료 뱃지 */
+.notif-processed-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+}
+
+.notif-title {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.notif-message {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.notif-time {
+  font-size: 0.65rem;
+  color: #999;
+  margin-top: 2px;
+}
+
+@keyframes bell-swing {
+  0%, 100% { transform: rotate(0deg); }
+  15% { transform: rotate(14deg); }
+  30% { transform: rotate(-10deg); }
+  45% { transform: rotate(7deg); }
+  60% { transform: rotate(-5deg); }
+  75% { transform: rotate(2deg); }
+}
+
+.bell-button:hover,
+.theme-button:hover,
+.chat-button:hover {
+  background-color: var(--bg-input);
+  color: var(--text-main);
+}
+
+.bell-button:hover i {
+  animation: bell-swing 0.7s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+.theme-icon {
+  transition: transform 0.2s ease;
+}
+
+.theme-button:hover .theme-icon {
+  transform: scale(1.08);
+}
+
+.profile-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  border-radius: 1rem;
+  padding: 0.25rem 0.35rem 0.25rem 0.6rem;
+  transition: background-color 0.18s ease;
+  max-width: min(18rem, 32vw);
+}
+
+.profile-trigger:hover {
+  background: var(--bg-input);
+}
+
+.profile-trigger__copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.profile-trigger__name {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-main);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-trigger__plan {
+  margin-top: 0.1rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #44dff4;
+  text-transform: uppercase;
+}
+
+.profile-trigger__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  width: 2.55rem;
+  height: 2.55rem;
+  border-radius: 0.9rem;
+  background: linear-gradient(135deg, #190094 0%, #2b16c8 100%);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 900;
+  border: 2px solid rgba(68, 223, 244, 0.65);
+  box-shadow: 0 12px 22px rgba(25, 0, 148, 0.14);
+}
+
+.profile-trigger__avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dropdown-container {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 248px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: all 0.18s ease;
+}
+
+.dropdown-container.active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.dropdown-header {
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dropdown-header__label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.dropdown-header__email {
+  margin-top: 0.4rem;
+  font-size: 1.02rem;
+  font-weight: 900;
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+.dropdown-item {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  color: var(--text-main);
+  font-size: 0.98rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-input);
+}
+
+.dropdown-item i {
+  width: 18px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.dropdown-muted {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.dropdown-footer {
+  border-top: 1px solid var(--border-color);
+  padding: 0.35rem 0;
+}
+
+.logout-item {
+  color: var(--text-main);
+}
+
+.logout-item i {
+  color: inherit;
+}
+
+@media (max-width: 1080px) {
+  .header-search-wrap {
+    max-width: min(32rem, 48vw);
+  }
+}
+
+@media (max-width: 900px) {
+  .header-container {
+    padding: 0 1rem;
+  }
+  .profile-trigger__copy {
+    display: none;
+  }
+  .profile-trigger {
+    max-width: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .header-container {
+    flex-wrap: wrap;
+    align-items: center;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+  .header-search-wrap {
+    order: 2;
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
 .header-container { position: relative; min-height: 4rem; background: color-mix(in srgb, var(--bg-main) 92%, var(--bg-secondary) 8%); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0 clamp(1rem, 2vw, 2rem); transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease; box-shadow: 0 1px 0 color-mix(in srgb, var(--border-color) 72%, transparent); }
 .header-search-wrap { position: relative; flex: 1 1 22rem; max-width: min(44rem, 58vw); min-width: 0; }
 .search-input { width: 100%; background: color-mix(in srgb, var(--bg-elevated) 88%, var(--bg-input) 12%); border: 1px solid var(--border-color); border-radius: 1rem; padding: 0.82rem 8rem 0.82rem 3rem; outline: none; font-size: 0.92rem; color: var(--text-main); box-shadow: var(--shadow-sm); transition: all 0.2s ease; }
