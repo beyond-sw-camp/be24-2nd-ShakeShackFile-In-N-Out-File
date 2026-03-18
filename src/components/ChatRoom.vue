@@ -149,7 +149,12 @@ const initChat = () => {
               isMe: true,
               isPending: false,
               messageUnreadCount: data.messageUnreadCount,
-              profileImageUrl: data.profileImageUrl
+              profileImageUrl: data.profileImageUrl,
+              fileUrl: data.fileUrl,       
+              fileName: data.fileName,     
+              fileType: data.fileType,     
+              fileSize: data.fileSize,     
+              messageType: data.messageType || 'TEXT' 
             }
             sortMessages()
             nextTick(() => scrollToBottom())
