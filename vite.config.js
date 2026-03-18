@@ -13,7 +13,7 @@ export default defineConfig({
     global: 'globalThis', // ← 추가
   },
   server: {
-    // host: '0.0.0.0',
+    host: '0.0.0.0',
   },
   resolve: {
     alias: {

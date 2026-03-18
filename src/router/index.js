@@ -80,6 +80,12 @@ const router = createRouter({
           meta: { title: '관리자 페이지', requiresAuth: true, requiresAdmin: true },
         },
         {
+          path: 'easteregg/open-hexagon',
+          name: 'open_hexagon',
+          component: () => import('@/easteregg/OpenHexagonView.vue'),
+          meta: { title: 'Open Hexagon', requiresAuth: true },
+        },
+        {
           path: '/workspace', 
           name: 'workspace',
           component: () => import('@/views/workspace/WorkSpace.vue'),
