@@ -71,7 +71,7 @@ const handleSaveRole = async () => {
           >
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center overflow-hidden shrink-0">
-                <img v-if="member.Image" :src="member.Image" alt="profile" class="w-full h-full object-cover"/>
+                <img v-if="member.image || member.Image" :src="member.image || member.Image" alt="profile" class="w-full h-full object-cover"/>
                 <i v-else class="fa-solid fa-user text-xs"></i>
               </div>
               <span class="text-sm font-medium text-[var(--text-main)]">{{ member.username }}</span>

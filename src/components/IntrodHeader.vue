@@ -21,9 +21,9 @@ const toggleProfileMenu = () => {
   showProfileDropdown.value = !showProfileDropdown.value;
 };
 
-const handleLogout = () => {
+const handleLogout = async () => {
   if (confirm("로그아웃 하시겠습니까?")) {
-    authStore.logout();
+    await authStore.logout();
     router.push('/login');
   }
 };
