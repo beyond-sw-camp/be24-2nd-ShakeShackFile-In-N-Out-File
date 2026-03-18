@@ -159,6 +159,18 @@ const formatDisplaySize = (file) => {
 const getFileName = (file) => file?.name || file?.fileOriginName || "이름 없는 파일";
 const getFileExtension = (file) => String(file?.extension || file?.fileFormat || extractExtension(getFileName(file))).toLowerCase();
 const getUpdatedAt = (file) => file?.updatedAtLabel || formatDisplayDate(file?.updatedAt || file?.lastModified || file?.uploadDate);
+const getSharedOwnerLabel = (file) => file?.ownerName || file?.ownerEmail || "알 수 없는 사용자";
+const getSharedAtLabel = (file) => file?.sharedAtLabel || formatDisplayDate(file?.sharedAt);
+const getSharedOwnerText = (file) => `\uACF5\uC720\uC790: ${getSharedOwnerLabel(file)}`;
+const getSharedSourceLabel = (file) => {
+  const sharedAtLabel = getSharedAtLabel(file);
+
+  if (sharedAtLabel && sharedAtLabel !== "-") {
+    return `${getSharedOwnerText(file)} | ${sharedAtLabel}`;
+  }
+
+  return getSharedOwnerText(file);
+};
 const getPreviewUrl = (file) => file?.downloadUrl || file?.presignedDownloadUrl || "";
 const getThumbnailUrl = (file) => file?.thumbnailUrl || file?.thumbnailPresignedUrl || "";
 const getContentType = (file) => String(file?.contentType || file?.raw?.contentType || "").toLowerCase();
@@ -228,7 +240,7 @@ const canRestore = (file) => !props.sharedLibrary && props.deleteMode === "perma
 const canManageFolder = (file) => !props.sharedLibrary && props.deleteMode !== "permanent" && file?.type === "folder" && !file?.isTrash;
 const canShare = (file) => !props.sharedLibrary && !file?.sharedWithMe && file?.type !== "folder" && !file?.isTrash && !isLocked(file) && (canCreateShares.value || file?.sharedFile);
 const canToggleLock = (file) => !props.sharedLibrary && !file?.sharedWithMe && file?.type !== "folder" && !file?.isTrash && (canCreateLocks.value || file?.lockedFile);
-const canSaveShared = (file) => Boolean(file?.sharedWithMe || props.sharedLibrary) && file?.type !== "folder" && !isLocked(file);
+const canSaveShared = (file) => Boolean(file?.sharedWithMe) && file?.type !== "folder" && !isLocked(file);
 const isMovable = (file) => !props.sharedLibrary && props.deleteMode !== "permanent" && !file?.sharedWithMe && !file?.isTrash && !isLocked(file);
 const isFolderDropTarget = (file) => canManageFolder(file);
 const getDeleteConfirmMessage = (file) => {
@@ -674,7 +686,7 @@ const onDropToParentNavigator = async (event) => {
               <div class="min-w-0">
                 <p class="file-entry__title truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
                 <p class="mt-1 truncate text-xs text-gray-400">
-                  {{ file.sharedWithMe ? `${file.ownerName || '-'} 님이 공유` : (file.location || '홈') }}
+                  {{ file.sharedWithMe ? getSharedSourceLabel(file) : (file.location || '홈') }}
                 </p>
               </div>
             </td>
@@ -877,7 +889,7 @@ const onDropToParentNavigator = async (event) => {
         <div class="mt-4">
           <p class="truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
           <p v-if="viewMode !== 'icon'" class="file-entry__meta mt-1 text-xs text-gray-400">
-            {{ file.sharedWithMe ? `${file.ownerName || '-'} 님이 공유` : (file.type === 'folder' ? '폴더' : (getFileExtension(file) || '-').toUpperCase()) }}
+            {{ file.sharedWithMe ? getSharedSourceLabel(file) : (file.type === 'folder' ? '폴더' : (getFileExtension(file) || '-').toUpperCase()) }}
           </p>
         </div>
 

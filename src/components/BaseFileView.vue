@@ -6,7 +6,6 @@ import FileCollectionView from "@/components/file/FileCollectionView.vue";
 import { downloadFileAsset } from "@/api/filesApi.js";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
-import postApi from "@/api/postApi";
 import {
   FILE_SIZE_OPTIONS,
   FILE_STATUS_OPTIONS,
@@ -44,66 +43,7 @@ const {
   setCustomLayoutRows,
 } = useViewStore();
 
-// ── sharedItems 로직 ──────────────────────────────────────────────────────
-const sharedItems = ref([]);
-
-const side_list = async () => {
-  try {
-    // 1) 워크스페이스(포스트) 목록
-    const response = await postApi.allPosts();
-    const workspaceItems = [];
-
-    if (response?.result?.body) {
-      response.result.body.forEach(item => {
-        if (item.status && item.status.toUpperCase() !== 'PRIVATE') {
-          workspaceItems.push({
-            id: item.idx ?? item.id,
-            name: item.title ?? item.name ?? '',
-            type: item.type ?? 'workspace',
-            updatedAt: item.updatedAt ?? item.modifiedAt ?? null,
-            sharedFile: true,
-            ...item,
-          });
-        }
-      });
-    }
-    // 2) 공유된 파일 목록 (fileStore)
-    if (!fileStore.hasLoaded && !fileStore.isLoading) {
-      await fileStore.fetchFiles();
-    }
-
-    const sharedFileItems = fileStore.allFiles.filter(
-      file => file?.sharedFile || file?.sharedWithMe
-    ).map(file => ({
-      ...file,
-      id: file.idx ?? file.id,
-      name: file.name ?? file.fileOriginName ?? '',
-      type: file.type ?? 'file',
-    }));
-
-    // 3) 중복 제거 후 병합 (id 기준)
-    const seen = new Set();
-    const merged = [];
-    for (const item of [...workspaceItems, ...sharedFileItems]) {
-      const key = String(item.id);
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(item);
-      }
-    }
-
-    sharedItems.value = merged;
-  } catch (e) {
-    console.error('side_list error:', e);
-    sharedItems.value = [];
-  }
-};
-
-// sharedLibrary 모드에서는 sharedItems를, 아니면 props.files를 사용
-const effectiveFiles = computed(() =>
-  props.sharedLibrary ? sharedItems.value : props.files
-);
-// ─────────────────────────────────────────────────────────────────────────
+const effectiveFiles = computed(() => props.files);
 
 const searchScope = computed(() => getFileSearchScope(route.name) || "files");
 const searchState = computed(() => headerSearchStore.getScopeState(searchScope.value));
@@ -662,9 +602,9 @@ const closeFilePreview = () => {
 
 onMounted(() => {
   if (props.sharedLibrary) {
-    side_list();                          // 워크스페이스 + 공유 파일 통합 로드
-    setLayoutPreset('10x10');
-    sortOption.value = 'updatedAt-desc';
+    fileStore.fetchFiles().catch(() => {});
+    setLayoutPreset("10x10");
+    sortOption.value = "sharedAt-desc";
   } else if (!fileStore.hasLoaded && !fileStore.isLoading) {
     fileStore.fetchFiles().catch(() => {});
   }
