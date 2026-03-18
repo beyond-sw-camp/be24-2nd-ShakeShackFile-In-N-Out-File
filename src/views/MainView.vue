@@ -26,7 +26,8 @@ onMounted(async() => {
 
     // 3. URL에서 토큰을 지워주기 위해 쿼리 파라미터를 제거한 주소로 replace
     // (보안 및 주소창 깔끔하게 유지)
-    router.replace({ name: 'home' }) 
+    await router.replace({ name: 'home' })
+    return
   }
   // 일반 로그인 + 소셜 로그인 모두 커버
   if (authStore.token) {
