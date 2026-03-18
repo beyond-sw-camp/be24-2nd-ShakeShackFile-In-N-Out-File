@@ -6,16 +6,22 @@ import loadpost from '@/components/workspace/loadpost';
 import { useFileStore } from '@/stores/useFileStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import postApi from '@/api/postApi';
-import ShareModal from '@/views/workspace/ShareModal.vue'; // {추가} 모달 컴포넌트 임포트
+import ShareModal from '@/views/workspace/ShareModal.vue'; 
+import RoleModal from '@/views/workspace/RoleModal.vue';
 
 const authStore = useAuthStore()
 const fileStore = useFileStore()
 const isSidebarOpen = ref(true) // 사이드바 토글 상태
 const openMenuId = ref(null) // 현재 열려있는 메뉴의 ID 관리
 
-// {추가} 공유 모달 관련 상태
+// 공유 모달 관련 상태
 const isShareModalOpen = ref(false);
 const targetPostIdx = ref(null);
+const targetPostUuid = ref('');
+
+// 권한 설정 모달 관련 상태
+const isRoleModalOpen = ref(false);
+const roleDataList = ref([]);
 
 // 1. loadpost에서 정의된 상태와 함수를 가져옵니다.
 const { 
@@ -25,6 +31,8 @@ const {
   isSharedOpen, 
   side_list 
 } = loadpost;
+
+let sideListTimer = null;
 
 const scrollToTop = () => {
   window.scrollTo({
@@ -47,12 +55,18 @@ const closeMenu = () => {
 onMounted(() => {
   side_list();
   fileStore.fetchStorageSummary().catch(() => {})
-
-  //
   window.addEventListener('click', closeMenu);
+
+  sideListTimer = setInterval(() => {
+    console.log('실시간 리스트 갱신 중...');
+    side_list();
+  }, 30000);
 })
 
 onBeforeUnmount(() => {
+  if (sideListTimer) {
+    clearInterval(sideListTimer);
+  }
   window.removeEventListener('click', closeMenu);
 })
  
@@ -102,10 +116,17 @@ const isAdministrator = computed(() => {
 const sidebarToggleStyle = computed(() => ({
   left: isSidebarOpen.value ? 'calc(16rem - 0.75rem)' : '0.75rem',
 }))
+
 const router = useRouter();
-const goToPost = (idx) => {
+const goToPost = async (idx) => {
   if (!idx) return;
-  router.push(`/workspace/read/${idx}`);
+  if (typeof window.__activeEditorDestroy === 'function') {
+    window.__activeEditorDestroy();
+    window.__activeEditorDestroy = null;
+  }
+  setTimeout(() => {
+    router.push(`/workspace/read/${idx}`);
+  }, 10);
 };
 // 1. 선택된 게시글의 상태를 저장할 ref 추가
 const targetPostStatus = ref('Private');
@@ -114,27 +135,41 @@ const targetPostStatus = ref('Private');
 const handleAction = async (action, idx) => {
   if (action === 'delete') {
     if (confirm('정말로 이 페이지를 삭제하시겠습니까?')) {
-      // 1. 실제 삭제 API 호출 로직이 이곳에 위치해야 합니다.
-      console.log(idx);
       await postApi.deletePost(idx); 
-      
-      // 2. 삭제 후 side_list()를 호출하여 사이드바 목록을 서버 데이터와 동기화합니다.
       await side_list(); 
-      
-      // 만약 현재 삭제한 페이지를 보고 있었다면 홈으로 이동시키는 로직을 추가할 수도 있습니다.
       router.push({ name: 'home' });
     }
-  }else if (action === 'share') {
-    // [수정] 현재 클릭한 아이템의 status를 찾아서 저장합니다.
+  } else if (action === 'listDelete') {
+    // ✨ [추가] 목록 삭제 기능 (본인이 ADMIN이 아닐 때 리스트에서 제거)
+    if (confirm('이 페이지를 내 목록에서 삭제하시겠습니까?')) {
+      try {
+        await postApi.list_delete(idx); // api.post(`/workspace/delete/list/${idx}`) 호출
+        await side_list(); 
+        router.push({ name: 'home' });
+      } catch (error) {
+        console.error(error);
+        alert('목록 삭제 중 오류가 발생했습니다.');
+      }
+    }
+  } else if (action === 'share') {
     const allItems = [...personalItems.value, ...sharedItems.value];
     const selectedItem = allItems.find(item => item.post_idx === idx);
 
     targetPostIdx.value = idx;
-    // 서버 데이터의 status('Private', 'Public' 등)를 모달에 넘겨줄 변수에 할당
+    targetPostUuid.value = selectedItem ? (selectedItem.uuid || selectedItem.UUID) : ''; 
     targetPostStatus.value = selectedItem ? selectedItem.status : 'Private';
     isShareModalOpen.value = true;
-  } else {
-    console.log(`${action} action on post: ${idx}`);
+  } else if (action === 'settings') {
+    try {
+      targetPostIdx.value = idx;
+      const response = await postApi.loadRole(idx);
+      const fetchedRoles = response.result ? response.result.body : response;
+      roleDataList.value = Array.isArray(fetchedRoles) ? fetchedRoles : [];
+      isRoleModalOpen.value = true;
+    } catch (error) {
+      console.error('Role list fetch error:', error);
+      alert('권한 정보를 불러오는데 실패했습니다.');
+    }
   }
   openMenuId.value = null;
 }
@@ -145,14 +180,20 @@ const handleAction = async (action, idx) => {
     <ShareModal 
       :is-open="isShareModalOpen" 
       :post-idx="targetPostIdx"
+      :uuid="targetPostUuid" 
       :initial-status="targetPostStatus" 
       @close="isShareModalOpen = false"
     />
+    <RoleModal
+      :is-open="isRoleModalOpen"
+      :post-idx="targetPostIdx"
+      :initial-roles="roleDataList"
+      @close="isRoleModalOpen = false"
+    />
+
     <aside 
       class="bg-[var(--bg-sidebar)] border-r border-[var(--border-color)] flex flex-col transition-all duration-300 h-full sticky top-0"
-      :class="[
-        isSidebarOpen ? 'w-64 overflow-visible' : 'w-0 border-r-0 overflow-hidden'
-      ]"
+      :class="[isSidebarOpen ? 'w-64 overflow-visible' : 'w-0 border-r-0 overflow-hidden']"
     >
       <div :class="isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'" class="transition-opacity duration-300 h-full flex flex-col">
         <RouterLink 
@@ -215,137 +256,106 @@ const handleAction = async (action, idx) => {
           <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
 
           <div>
-            <div>
-              <div
-                @click="isPersonalOpen = !isPersonalOpen"
-                class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)] group"
-              >
-                <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
-                  개인 페이지
-                </h3>
-                <div class="flex items-center gap-2">
-                  <RouterLink :to="{ name: 'workspace' }" @click.stop>
-                    <button 
-                      class="p-1 rounded hover:bg-gray-200 text-[var(--text-muted)] hover:text-blue-500 transition-colors"
-                    >
-                      <i class="fa-solid fa-plus text-[10px]"></i>
-                    </button>
-                  </RouterLink>
-                  <span
-                    class="text-xs text-[var(--text-muted)] transition-transform duration-200"
-                    :class="{ 'rotate-180': !isPersonalOpen }"
-                  >▼</span>
-                </div>
+            <div @click="isPersonalOpen = !isPersonalOpen" class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)] group">
+              <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">개인 페이지</h3>
+              <div class="flex items-center gap-2">
+                <RouterLink :to="{ name: 'workspace' }" @click.stop>
+                  <button class="p-1 rounded hover:bg-gray-200 text-[var(--text-muted)] hover:text-blue-500 transition-colors">
+                    <i class="fa-solid fa-plus text-[10px]"></i>
+                  </button>
+                </RouterLink>
+                <span class="text-xs text-[var(--text-muted)] transition-transform duration-200" :class="{ 'rotate-180': !isPersonalOpen }">▼</span>
               </div>
+            </div>
 
-              <div v-show="isPersonalOpen" class="mt-1 space-y-1 px-2">
-                <template v-if="personalItems.length > 0">
-                  <div
-                    v-for="item in personalItems"
-                    :key="item.post_idx"
-                    @click="goToPost(item.post_idx)"
-                    class="group relative px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center justify-between transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]"
-                  >
-                    <div class="flex items-center gap-3 overflow-hidden">
-                      <i class="fa-solid fa-file-lines w-4 text-center opacity-70 flex-shrink-0"></i>
-                      <span class="truncate">{{ item.title }}</span>
-                    </div>
+            <div v-show="isPersonalOpen" class="mt-1 space-y-1 px-2">
+              <template v-if="personalItems.length > 0">
+                <div v-for="item in personalItems" :key="item.post_idx" @click="goToPost(item.post_idx)" class="group relative px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center justify-between transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]">
+                  <div class="flex items-center gap-3 overflow-hidden">
+                    <i class="fa-solid fa-file-lines w-4 text-center opacity-70 flex-shrink-0"></i>
+                    <span class="truncate">{{ item.title }}</span>
+                  </div>
+                  <button @click="toggleMenu($event, item.post_idx)" class="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-all">
+                    <i class="fa-solid fa-ellipsis text-xs"></i>
+                  </button>
+                  <div v-if="openMenuId === item.post_idx" class="absolute right-2 top-10 w-32 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg shadow-xl z-[110] py-1 overflow-hidden">
+                    <button @click.stop="handleAction('share', item.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
+                      <i class="fa-solid fa-share-nodes w-3"></i> 공유
+                    </button>
+                    <button @click.stop="handleAction('settings', item.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
+                      <i class="fa-solid fa-lock w-3"></i> 권한 설정
+                    </button>
                     
-                    <button 
-                      @click="toggleMenu($event, item.post_idx)"
-                      class="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-all"
-                    >
-                      <i class="fa-solid fa-ellipsis text-xs"></i>
+                    <button v-if="item.status !== 'Private' && item.level !== 'ADMIN'" @click.stop="handleAction('listDelete', item.post_idx)" class="w-full text-left px-4 py-2 text-xs text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center gap-2">
+                      <i class="fa-solid fa-rectangle-xmark w-3"></i> 목록 삭제
                     </button>
 
-                    <div 
-                      v-if="openMenuId === item.post_idx"
-                      class="absolute right-2 top-10 w-32 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg shadow-xl z-[110] py-1 overflow-hidden"
-                    >
-                      <button @click.stop="handleAction('share', item.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
-                        <i class="fa-solid fa-share-nodes w-3"></i> 공유
-                      </button>
-                      <button @click.stop="handleAction('settings', item.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
-                        <i class="fa-solid fa-lock w-3"></i> 권한 설정
-                      </button>
-                      <div class="border-t border-[var(--border-color)] my-1"></div>
-                      <button @click.stop="handleAction('delete', item.post_idx)" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
-                        <i class="fa-solid fa-trash w-3"></i> 삭제
-                      </button>
-                    </div>
+                    <div class="border-t border-[var(--border-color)] my-1"></div>
+                    <button @click.stop="handleAction('delete', item.post_idx)" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
+                      <i class="fa-solid fa-trash w-3"></i> 삭제
+                    </button>
                   </div>
-                </template>
-                
-                <div v-else class="px-3 py-4 text-xs text-[var(--text-muted)] italic text-center border border-dashed border-gray-200 rounded-lg mx-2">
-                  생성된 페이지가 없습니다.
                 </div>
-              </div>
+              </template>
+              <div v-else class="px-3 py-4 text-xs text-[var(--text-muted)] italic text-center border border-dashed border-gray-200 rounded-lg mx-2">생성된 페이지가 없습니다.</div>
             </div>
+          </div>
 
-            <div>
-              <div
-                @click="isSharedOpen = !isSharedOpen"
-                class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)]"
-              >
-                <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">협업 페이지</h3>
-                <span
-                  class="text-xs text-[var(--text-muted)] transition-transform duration-200"
-                  :class="{ 'rotate-180': !isSharedOpen }"
-                >▼</span>
-              </div>
-
-              <div v-show="isSharedOpen" class="mt-1 space-y-1 px-2">
-                <template v-if="sharedItems.length > 0">
-                  <div
-                    v-for="team in sharedItems"
-                    :key="team.post_idx"
-                    @click="goToPost(team.post_idx)"
-                    class="group relative px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center justify-between transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]"
-                  >
-                    <div class="flex items-center gap-3 overflow-hidden">
-                      <i class="fa-solid fa-file-lines w-4 text-center opacity-70 flex-shrink-0"></i>
-                      <span class="truncate">{{ team.title }}</span>
-                    </div>
-
-                    <button 
-                      @click="toggleMenu($event, team.post_idx)"
-                      class="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-all"
-                    >
-                      <i class="fa-solid fa-ellipsis text-xs"></i>
+          <div>
+            <div @click="isSharedOpen = !isSharedOpen" class="flex items-center justify-between px-4 py-2 cursor-pointer rounded-lg transition-colors duration-200 hover:bg-[var(--bg-input)]">
+              <h3 class="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">협업 페이지</h3>
+              <span class="text-xs text-[var(--text-muted)] transition-transform duration-200" :class="{ 'rotate-180': !isSharedOpen }">▼</span>
+            </div>
+            <div v-show="isSharedOpen" class="mt-1 space-y-1 px-2">
+              <template v-if="sharedItems.length > 0">
+                <div v-for="team in sharedItems" :key="team.post_idx" @click="goToPost(team.post_idx)" class="group relative px-3 py-2 text-sm text-[var(--text-secondary)] rounded-xl cursor-pointer flex items-center justify-between transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)]">
+                  <div class="flex items-center gap-3 overflow-hidden">
+                    <i class="fa-solid fa-file-lines w-4 text-center opacity-70 flex-shrink-0"></i>
+                    <span class="truncate">{{ team.title }}</span>
+                  </div>
+                  <button @click="toggleMenu($event, team.post_idx)" class="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-all">
+                    <i class="fa-solid fa-ellipsis text-xs"></i>
+                  </button>
+                  <div v-if="openMenuId === team.post_idx" class="absolute right-2 top-10 w-32 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg shadow-xl z-[110] py-1 overflow-hidden">
+                    <button @click.stop="handleAction('share', team.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
+                      <i class="fa-solid fa-share-nodes w-3"></i> 공유
+                    </button>
+                    <button @click.stop="handleAction('settings', team.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
+                      <i class="fa-solid fa-lock w-3"></i> 권한 설정
                     </button>
 
-                    <div 
-                      v-if="openMenuId === team.post_idx"
-                      class="absolute right-2 top-10 w-32 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg shadow-xl z-[110] py-1 overflow-hidden"
-                    >
-                      <button @click.stop="handleAction('share', team.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
-                        <i class="fa-solid fa-share-nodes w-3"></i> 공유
-                      </button>
-                      <button @click.stop="handleAction('settings', team.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
-                        <i class="fa-solid fa-lock w-3"></i> 권한 설정
-                      </button>
-                      <div class="border-t border-[var(--border-color)] my-1"></div>
-                      <button @click.stop="handleAction('delete', team.post_idx)" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
-                        <i class="fa-solid fa-trash w-3"></i> 삭제
-                      </button>
-                    </div>
+                    <button v-if="team.status !== 'Private' && team.level !== 'ADMIN'" @click.stop="handleAction('listDelete', team.post_idx)" class="w-full text-left px-4 py-2 text-xs text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center gap-2">
+                      <i class="fa-solid fa-rectangle-xmark w-3"></i> 목록 삭제
+                    </button>
+
+                    <div class="border-t border-[var(--border-color)] my-1"></div>
+                    <button @click.stop="handleAction('delete', team.post_idx)" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
+                      <i class="fa-solid fa-trash w-3"></i> 삭제
+                    </button>
                   </div>
-                </template>
-                <div v-else class="px-3 py-4 text-xs text-[var(--text-muted)] italic text-center border border-dashed border-gray-200 rounded-lg mx-2">
-                  생성된 페이지가 없습니다.
                 </div>
-              </div>
+              </template>
+              <div v-else class="px-3 py-4 text-xs text-[var(--text-muted)] italic text-center border border-dashed border-gray-200 rounded-lg mx-2">생성된 페이지가 없습니다.</div>
             </div>
-            
-            <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
-            
-            <RouterLink
-              :to="{ name: 'trash' }"
-              class="w-full flex items-center gap-3.5 px-3 py-2.5 text-sm text-[var(--text-secondary)] rounded-xl transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline"
-            >
-              <i class="fa-solid fa-trash w-5 text-center flex-shrink-0 text-lg"></i>
-              <span>휴지통</span>
+          </div>
+          
+          <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
+          
+          <RouterLink :to="{ name: 'trash' }" class="w-full flex items-center gap-3.5 px-3 py-2.5 text-sm text-[var(--text-secondary)] rounded-xl transition-all duration-200 hover:bg-[var(--bg-input)] hover:text-[var(--text-main)] no-underline">
+            <i class="fa-solid fa-trash w-5 text-center flex-shrink-0 text-lg"></i>
+            <span>휴지통</span>
+          </RouterLink>
+
+          <div class="p-3 pt-2">
+            <RouterLink :to="{ name: 'storage' }" class="flex items-center gap-3.5 text-[var(--text-secondary)] mb-3 transition-all duration-200 hover:text-[var(--text-main)] no-underline">
+              <i class="fa-solid fa-cloud w-5 text-center flex-shrink-0 text-lg"></i>
+              <span class="text-sm">저장용량</span>
             </RouterLink>
+            <div class="w-full bg-[var(--bg-input)] rounded-full h-1.5 mb-2 overflow-hidden">
+              <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300" :style="{ width: storageUsageWidth }"></div>
+            </div>
+            <div class="border-t border-[var(--border-color)] my-4 mx-2"></div>
+          
 
             <RouterLink
               v-if="isAdministrator"
@@ -356,38 +366,10 @@ const handleAction = async (action, idx) => {
               <i class="fa-solid fa-user-shield w-5 text-center flex-shrink-0 text-lg"></i>
               <span>관리자 페이지</span>
             </RouterLink>
-
-            <div class="p-3 pt-2">
-              <RouterLink 
-                :to="{ name: 'storage' }" 
-                class="flex items-center gap-3.5 text-[var(--text-secondary)] mb-3 transition-all duration-200 hover:text-[var(--text-main)] no-underline"
-              >
-                <i class="fa-solid fa-cloud w-5 text-center flex-shrink-0 text-lg"></i>
-                <span class="text-sm">저장용량</span>
-              </RouterLink>
-
-              <div class="w-full bg-[var(--bg-input)] rounded-full h-1.5 mb-2 overflow-hidden">
-                <div
-                  class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300"
-                  :style="{ width: storageUsageWidth }"
-                ></div>
-              </div>
-
-              <p class="text-xs text-[var(--text-muted)] mb-1">{{ storageUsageText }}</p>
-              <p v-if="storageSummary" class="text-[11px] text-[var(--text-muted)] mb-4">
-                {{ storageSummary.planLabel }} 플랜 · 휴지통 포함 {{ storageSummary.usagePercent }}%
-              </p>
-              <p v-else class="text-[11px] text-[var(--text-muted)] mb-4">
-                저장 공간 통계 확인 중
-              </p>
-
-              <RouterLink
-                :to="{ name: 'payment' }"
-                class="block w-full text-center border border-[var(--border-color)] px-2 py-2 rounded-full text-sm font-semibold text-blue-600 dark:text-blue-400 bg-[var(--bg-main)] transition-all duration-200 hover:bg-blue-500/10 dark:hover:bg-blue-400/10"
-              >
-                추가 저장용량 구매
-              </RouterLink>
-            </div>
+            <p class="text-xs text-[var(--text-muted)] mb-1">{{ storageUsageText }}</p>
+            <p v-if="storageSummary" class="text-[11px] text-[var(--text-muted)] mb-4">{{ storageSummary.planLabel }} 플랜 · 휴지통 포함 {{ storageSummary.usagePercent }}%</p>
+            <p v-else class="text-[11px] text-[var(--text-muted)] mb-4">저장 공간 통계 확인 중</p>
+            <RouterLink :to="{ name: 'payment' }" class="block w-full text-center border border-[var(--border-color)] px-2 py-2 rounded-full text-sm font-semibold text-blue-600 dark:text-blue-400 bg-[var(--bg-main)] transition-all duration-200 hover:bg-blue-500/10 dark:hover:bg-blue-400/10">추가 저장용량 구매</RouterLink>
           </div>
         </nav>
       </div>

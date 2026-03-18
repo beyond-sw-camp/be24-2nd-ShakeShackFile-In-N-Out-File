@@ -23,16 +23,26 @@ watch([() => props.isOpen, () => props.initialRoles], ([newOpen, newRoles]) => {
   }
 }, { immediate: true });
 
-// 나중에 백엔드로 Post 보낼 저장 로직
+// 백엔드로 Post 보낼 저장 로직
 const handleSaveRole = async () => {
   try {
-    // [TODO] 실제 백엔드 API 호출 로직 (현재는 postApi에 틀만 만들어둠)
-    // await postApi.saveRole(props.postIdx, roleList.value);
+    // 1. 데이터를 { "idx": "ROLE" } 형식으로 변환
+    // member.idx 가 유저의 고유 번호라고 가정합니다.
+    const roleData = roleList.value.reduce((acc, member) => {
+      acc[member.idx] = member.role;
+      return acc;
+    }, {});
+
+    console.log('서버로 보낼 변환된 데이터:', roleData);
+
+    // 2. 실제 백엔드 API 호출
+    const response = await postApi.saveRole(props.postIdx, roleData);
+
+    console.log(response);
     
-    console.log('서버로 보낼 권한 데이터:', roleList.value);
-    alert('권한 설정이 저장되었습니다. (현재 프론트 로그만 출력)');
+    alert('권한 설정이 저장되었습니다.');
     
-    emit('refresh'); // 필요시 사이드바 갱신
+    emit('refresh'); // 사이드바 또는 부모 데이터 갱신
     emit('close');
   } catch (error) {
     console.error('Save Role Error:', error);
@@ -56,7 +66,7 @@ const handleSaveRole = async () => {
         <ul class="space-y-3">
           <li 
             v-for="(member, index) in roleList" 
-            :key="index"
+            :key="member.idx || index"
             class="flex items-center justify-between p-3 bg-[var(--bg-input)] rounded-xl border border-[var(--border-color)]"
           >
             <div class="flex items-center gap-3">
