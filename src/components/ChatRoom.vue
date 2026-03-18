@@ -127,6 +127,18 @@ const initChat = () => {
       stompClient.subscribe(`/sub/chat/room/${props.room.id}`, (sdkEvent) => {
         const data = JSON.parse(sdkEvent.body)
 
+        // ✅ 시스템 메시지 (입장/퇴장)
+        if (data.messageType === 'ENTER' || data.messageType === 'EXIT') {
+          chatMessages.value.push({
+            id: 'system-' + Date.now(),
+            isSystem: true,       // 시스템 메시지 구분 플래그
+            text: data.contents,  // "홍길동님이 입장했습니다." 등
+            time: data.createdAt
+          })
+          nextTick(() => scrollToBottom())
+          return  // 👈 이후 로직 실행 안 되게 차단
+        }
+
         // 읽음 업데이트
         if (data.type === 'READ_UPDATE') {
           chatMessages.value.forEach(msg => {
@@ -345,105 +357,108 @@ watch(() => props.room.id, async () => {
         </span>
       </div>
 
-      <div
-        v-for="msg in chatMessages"
-        :key="msg.id"
-        :class="['flex items-end gap-2', msg.isMe ? 'flex-row-reverse' : '']"
-      >
-        <div class="flex-shrink-0 w-8 h-8">
-          <img
-            v-if="msg.profileImageUrl"
-            :src="msg.profileImageUrl"
-            class="w-8 h-8 rounded-full object-cover"
-          />
-          <div
-            v-else
-            class="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-white text-[10px] font-bold"
-          >
-            {{ msg.sender?.charAt(0)?.toUpperCase() }}
-          </div>
+      <!-- v-for 바깥 div는 단순 래퍼 -->
+      <div v-for="msg in chatMessages" :key="msg.id">
+
+        <!-- 시스템 메시지 -->
+        <div v-if="msg.isSystem" class="flex justify-center my-1 w-full">
+          <span class="text-[10px] text-gray-400 bg-gray-100 rounded-full px-3 py-0.5">
+            {{ msg.text }}
+          </span>
         </div>
 
-        <div :class="['flex flex-col max-w-[75%]', msg.isMe ? 'items-end' : 'items-start']">
-          <p class="text-[10px] font-bold text-[var(--text-muted)] mb-1">{{ msg.sender }}</p>
-
-          <div :class="['flex items-end gap-2', msg.isMe ? 'flex-row-reverse' : '']">
+        <!-- 일반 메시지 -->
+        <div v-else class="flex items-end gap-2" :class="msg.isMe ? 'flex-row-reverse' : ''">
+          <div class="flex-shrink-0 w-8 h-8">
+            <img
+              v-if="msg.profileImageUrl"
+              :src="msg.profileImageUrl"
+              class="w-8 h-8 rounded-full object-cover"
+            />
             <div
-              :class="[
-                'p-3 rounded-2xl text-xs break-words',
-                msg.isMe ? 'bg-[#4169E1] text-white' : 'bg-[var(--bg-input)] text-[var(--text-main)]',
-                msg.isPending ? 'opacity-60' : ''
-              ]"
+              v-else
+              class="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-white text-[10px] font-bold"
             >
-             <!-- 이미지 -->
-              <img
-                v-if="msg.messageType === 'IMAGE'"
-                :src="msg.fileUrl"
-                class="max-w-[200px] max-h-[200px] rounded-xl object-cover cursor-pointer"
-                @click="window.open(msg.fileUrl, '_blank')"
-              />
-                <!-- 파일 -->
-              <a
-                v-else-if="msg.messageType === 'FILE'"
-                :href="msg.fileUrl"
-                target="_blank"
-                :class="['flex items-center gap-2', msg.isMe ? 'text-white' : 'text-[var(--text-main)]']"
-              >
-                <i class="fa-solid fa-file text-lg"></i>
-                <div class="flex flex-col">
-                  <span class="font-bold truncate max-w-[150px]">{{ msg.fileName }}</span>
-                  <span class="text-[9px] opacity-70">{{ formatFileSize(msg.fileSize) }}</span>
-                </div>
-                <i class="fa-solid fa-download ml-1"></i>
-              </a>
-               <!-- 텍스트 -->
-              <span v-else>{{ msg.text }}</span>
+              {{ msg.sender?.charAt(0)?.toUpperCase() }}
             </div>
+          </div>
 
-            <div :class="['flex flex-col gap-0.5', msg.isMe ? 'items-end' : 'items-start']">
-              <span
-                v-if="msg.messageUnreadCount > 0"
-                class="text-[9px] text-blue-400 font-bold whitespace-nowrap"
+          <div :class="['flex flex-col max-w-[75%]', msg.isMe ? 'items-end' : 'items-start']">
+            <p class="text-[10px] font-bold text-[var(--text-muted)] mb-1">{{ msg.sender }}</p>
+
+            <div :class="['flex items-end gap-2', msg.isMe ? 'flex-row-reverse' : '']">
+              <div
+                :class="[
+                  'p-3 rounded-2xl text-xs break-words',
+                  msg.isMe ? 'bg-[#4169E1] text-white' : 'bg-[var(--bg-input)] text-[var(--text-main)]',
+                  msg.isPending ? 'opacity-60' : ''
+                ]"
               >
-                {{ msg.messageUnreadCount }}
-              </span>
-              <span class="text-[9px] text-gray-400 whitespace-nowrap">
-                {{ formatTime(msg.time) }}
-              </span>
+                <!-- 이미지 -->
+                <img
+                  v-if="msg.messageType === 'IMAGE'"
+                  :src="msg.fileUrl"
+                  class="max-w-[200px] max-h-[200px] rounded-xl object-cover cursor-pointer"
+                  @click="window.open(msg.fileUrl, '_blank')"
+                />
+                <!-- 파일 -->
+                <a
+                  v-else-if="msg.messageType === 'FILE'"
+                  :href="msg.fileUrl"
+                  target="_blank"
+                  :class="['flex items-center gap-2', msg.isMe ? 'text-white' : 'text-[var(--text-main)]']"
+                >
+                  <i class="fa-solid fa-file text-lg"></i>
+                  <div class="flex flex-col">
+                    <span class="font-bold truncate max-w-[150px]">{{ msg.fileName }}</span>
+                    <span class="text-[9px] opacity-70">{{ formatFileSize(msg.fileSize) }}</span>
+                  </div>
+                  <i class="fa-solid fa-download ml-1"></i>
+                </a>
+                <!-- 텍스트 -->
+                <span v-else>{{ msg.text }}</span>
+              </div>
+
+              <div :class="['flex flex-col gap-0.5', msg.isMe ? 'items-end' : 'items-start']">
+                <span
+                  v-if="msg.messageUnreadCount > 0"
+                  class="text-[9px] text-blue-400 font-bold whitespace-nowrap"
+                >
+                  {{ msg.messageUnreadCount }}
+                </span>
+                <span class="text-[9px] text-gray-400 whitespace-nowrap">
+                  {{ formatTime(msg.time) }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
+
       </div>
     </div>
 
     <div class="p-4 border-t border-gray-100">
       <div class="relative flex items-center">
-        <!-- 파일 input (숨김) -->
-    <input
-      ref="fileInput"
-      type="file"
-      accept="image/*,.pdf,.zip,.docx,.xlsx"
-      class="hidden"
-      @change="handleFileSelect"
-    />
-
-    <!-- 파일 업로드 버튼 -->
-    <button
-      @click="fileInput.click()"
-      class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#4169E1] transition z-10"
-    >
-      <i class="fa-solid fa-paperclip"></i>
-    </button>
-
-    <!-- 입력창 - pl-9로 클립 아이콘 공간 확보, pr-9로 전송 버튼 공간 확보 -->
-    <input
-      v-model="newMessage"
-      @keydown.enter.prevent="sendMessage"
-      type="text"
-      placeholder="메시지 입력..."
-      class="w-full border border-gray-200 rounded-lg pl-9 pr-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-    />
-
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/*,.pdf,.zip,.docx,.xlsx"
+          class="hidden"
+          @change="handleFileSelect"
+        />
+        <button
+          @click="fileInput.click()"
+          class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#4169E1] transition z-10"
+        >
+          <i class="fa-solid fa-paperclip"></i>
+        </button>
+        <input
+          v-model="newMessage"
+          @keydown.enter.prevent="sendMessage"
+          type="text"
+          placeholder="메시지 입력..."
+          class="w-full border border-gray-200 rounded-lg pl-9 pr-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+        />
         <button
           @click="sendMessage"
           class="absolute right-3 top-1/2 -translate-y-1/2 text-[#4169E1]"
