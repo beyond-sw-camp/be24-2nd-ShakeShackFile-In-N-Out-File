@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import userApi from '@/api/user/index.js'
 
 export const useAuthStore = defineStore('auth', () => {
   const isLogin = ref(false)
@@ -41,7 +42,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!newAccessToken) return
     token.value = newAccessToken
     localStorage.setItem('ACCESS_TOKEN', newAccessToken)
-    
+
     const userInfo = decodeToken(newAccessToken)
     if (userInfo) {
       user.value = userInfo
@@ -68,12 +69,20 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // 로그아웃 처리
-  const logout = () => {
-    isLogin.value = false
-    user.value = null
-    token.value = null
-    localStorage.removeItem('USERINFO')
-    localStorage.removeItem('ACCESS_TOKEN')
+  const logout = async () => {
+    try {
+      if (token.value || localStorage.getItem('ACCESS_TOKEN')) {
+        await userApi.logout()
+      }
+    } catch (error) {
+      console.error("로그아웃 API 호출 실패:", error)
+    } finally {
+      isLogin.value = false
+      user.value = null
+      token.value = null
+      localStorage.removeItem('USERINFO')
+      localStorage.removeItem('ACCESS_TOKEN')
+    }
   }
 
   return { isLogin, user, token, login, setToken, checkLogin, logout }
