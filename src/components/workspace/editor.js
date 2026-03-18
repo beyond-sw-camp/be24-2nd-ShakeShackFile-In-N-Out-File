@@ -22,11 +22,12 @@ import { ref } from 'vue'
 import postApi from '@/api/postApi'
 import loadpost from './loadpost'
 
-export async function initEditor(holderElement, room, initialData, idx, initialTitle, isCollaborative = false) {
+export async function initEditor(holderElement, room, initialData, idx, initialTitle, isCollaborative = false, options = {}) {
   if (!holderElement) throw new Error('holderElement is required')
 
   const ydoc = new Y.Doc()
   let provider = null
+  let currentIdx = idx ?? null
   
   // type이 true일 때만 웹소켓 연결
   if (isCollaborative) {
@@ -79,6 +80,39 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     }
   })
 
+  const imageToolConfig = options?.uploadImage
+    ? {
+        class: ImageTool,
+        config: {
+          uploader: {
+            async uploadByFile(file) {
+              const uploadedAsset = await options.uploadImage(file)
+              const imageUrl = uploadedAsset?.previewUrl || uploadedAsset?.downloadUrl || uploadedAsset?.url
+
+              if (!imageUrl) {
+                throw new Error('Image upload failed')
+              }
+
+              return {
+                success: 1,
+                file: {
+                  url: imageUrl,
+                },
+              }
+            },
+            async uploadByUrl(url) {
+              return {
+                success: 1,
+                file: {
+                  url,
+                },
+              }
+            },
+          },
+        },
+      }
+    : { class: ImageTool }
+
   const tools = {
     header: { class: Header, tunes: ['alignment'], config: { levels: [1,2,3,4], defaultLevel: 1 } },
     list: { class: List, inlineToolbar: true, tunes: ['alignment'] },
@@ -86,7 +120,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     table: { class: Table, inlineToolbar: true },
     code: { class: CodeTool },
     embed: { class: Embed, inlineToolbar: false },
-    image: { class: ImageTool },
+    image: imageToolConfig,
     linkTool: { class: LinkTool },
     inlineCode: { class: InlineCode },
     delimiter: Delimiter,
@@ -193,11 +227,15 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       await editor.isReady;
       const savedData = await editor.save(); 
       const postData = {
-        idx : idx ?? null,
+        idx : currentIdx,
         title: yTitle.toString(), 
         contents: JSON.stringify(savedData)
       };
       const response = await postApi.savePost(postData);
+      const savedIdx = response?.result?.body?.idx ?? response?.data?.idx ?? response?.idx ?? null
+      if (savedIdx != null) {
+        currentIdx = savedIdx
+      }
       await loadpost.side_list();
       return response;
     } catch (e) {

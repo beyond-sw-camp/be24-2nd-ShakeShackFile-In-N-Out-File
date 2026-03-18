@@ -10,6 +10,14 @@ const urlBase64ToUint8Array = (base64String) => {
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
 }
 
+const extractBody = (responseData) => {
+  if (!responseData) return null
+  if (responseData?.result?.body !== undefined) return responseData.result.body
+  if (responseData?.data?.result?.body !== undefined) return responseData.data.result.body
+  if (responseData?.data !== undefined) return responseData.data
+  return responseData
+}
+
 const subscribeWebPush = async () => {
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
     return null
@@ -199,12 +207,48 @@ const verifyEmail = async (uuid, type) => {
 
 const getPostByUuid = async (uuid) => {
   try {
-    const response = await api.post('/workspace/invite', null, {
-      params: { uuid },
-    })
+    const response = await api.get(`/workspace/by-uuid/${uuid}`)
     return response.data
   } catch (error) {
     console.error(error)
+    throw error
+  }
+}
+
+const getWorkspaceAssets = async (workspaceId) => {
+  try {
+    const response = await api.get(`/workspace/${workspaceId}/assets`)
+    return extractBody(response.data) || []
+  } catch (error) {
+    console.error('Workspace assets load error:', error)
+    throw error
+  }
+}
+
+const uploadWorkspaceAssets = async (workspaceId, files) => {
+  try {
+    const formData = new FormData()
+    Array.from(files || []).forEach((file) => {
+      formData.append('files', file)
+    })
+
+    const response = await api.post(`/workspace/${workspaceId}/assets`, formData, {
+      timeout: 600000,
+    })
+
+    return extractBody(response.data) || []
+  } catch (error) {
+    console.error('Workspace assets upload error:', error)
+    throw error
+  }
+}
+
+const deleteWorkspaceAsset = async (workspaceId, assetId) => {
+  try {
+    const response = await api.delete(`/workspace/${workspaceId}/assets/${assetId}`)
+    return extractBody(response.data)
+  } catch (error) {
+    console.error('Workspace asset delete error:', error)
     throw error
   }
 }
@@ -225,4 +269,7 @@ export default {
   verifyEmail,
   getPostByUuid,
   list_delete,
+  getWorkspaceAssets,
+  uploadWorkspaceAssets,
+  deleteWorkspaceAsset,
 }

@@ -29,6 +29,7 @@ const notifications = ref([]);
 const hasNewNotif = ref(false);
 
 let broadcastChannel = null;
+let notificationRefreshTimer = null;
 
 const isDarkMode = ref(false);
 const themeIcon = ref("fa-solid fa-moon");
@@ -400,6 +401,22 @@ const handleClickOutside = (event) => {
   if (!event.target.closest("#header-search-container")) showSearchDropdown.value = false;
 };
 
+const stopNotificationPolling = () => {
+  if (notificationRefreshTimer) {
+    window.clearInterval(notificationRefreshTimer);
+    notificationRefreshTimer = null;
+  }
+};
+
+const startNotificationPolling = () => {
+  stopNotificationPolling();
+  notificationRefreshTimer = window.setInterval(() => {
+    if (authStore.user?.idx) {
+      fetchNotifications();
+    }
+  }, 30000);
+};
+
 watch(() => route.fullPath, () => {
   showSearchDropdown.value = false;
 });
@@ -408,12 +425,14 @@ watch(
   () => authStore.user?.idx,
   async (userIdx) => {
     if (!userIdx) {
+      stopNotificationPolling();
       notifications.value = [];
       updateNotifBadge();
       return;
     }
 
     await fetchNotifications();
+    startNotificationPolling();
 
     try {
       await postApi.subscribeWebPush();
@@ -441,6 +460,7 @@ onBeforeUnmount(() => {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.removeEventListener("message", swDirectMessageHandler);
   }
+  stopNotificationPolling();
 });
 </script>
 
