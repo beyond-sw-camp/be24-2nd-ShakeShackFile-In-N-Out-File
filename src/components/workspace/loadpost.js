@@ -1,99 +1,99 @@
 import postApi from "@/api/postApi";
 import { ref } from 'vue';
 
-// 상태 관리
-const personalItems = ref([]); 
-const sharedItems = ref([]);   
-const isPersonalOpen = ref(true);
-const isSharedOpen = ref(true);
+// ─────────────────────────────────────────────────────────────────────────────
+// 상태
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * 사이드바 목록을 가져오는 함수
- * 인터셉터에서 토큰을 처리하므로 인자로 token을 직접 쓸 필요는 없으나, 
- * 구조 유지를 위해 유지하되 내부 로직은 최적화했습니다.
- */
+const personalItems = ref([]);
+const sharedItems   = ref([]);
+const isPersonalOpen = ref(true);
+const isSharedOpen   = ref(true);
+const currentPost    = ref({ title: '', contents: null });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 사이드바 목록
+// apiCall → extractBody 를 거쳐 result.body 가 이미 unwrap 된 상태로 넘어옴
+// allPosts() 반환값 = PostDto.ResList[]  (배열 그 자체)
+// ─────────────────────────────────────────────────────────────────────────────
+
 const side_list = async () => {
     try {
+        // response = PostDto.ResList[]
         const response = await postApi.allPosts();
         console.log('목록 가져오기 성공:', response);
 
-        // 1. 데이터가 있는지 안전하게 확인
-        if (response && response.result && response.result.body) {
-            const allItems = response.result.body; // 전체 리스트 (Array(2))
+        personalItems.value = [];
+        sharedItems.value   = [];
 
-            // 2. 초기화 (재호출 시 데이터 중복 방지)
-            personalItems.value = [];
-            sharedItems.value = [];
-
-            // 3. 반복문을 돌며 속성에 따라 분류
-            allItems.forEach(item => {
-                // 백엔드 Enum(상태값)이 'Private' (대소문자 무관)이 아니면 협업 페이지로 분류
+        if (Array.isArray(response)) {
+            response.forEach(item => {
                 if (item.status && item.status.toUpperCase() !== 'PRIVATE') {
                     sharedItems.value.push(item);
                 } else {
-                    // 상태가 'Private'이거나 값이 없으면 기본적으로 개인 페이지로 분류
                     personalItems.value.push(item);
                 }
             });
         }
 
-        return response; 
-        
-    } catch (e) {
-        console.error('side_list error:', e);
-        personalItems.value = [];
-        sharedItems.value = [];
-    }
-}
+        return response;
 
-// 상세 데이터를 담을 변수 추가
-const currentPost = ref({ title: '', contents: null });
+    } catch (e) {
+        // workspaceApi 에서 이미 [side_list] 실패 — [code] message 형태로 출력됨
+        personalItems.value = [];
+        sharedItems.value   = [];
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 워크스페이스 단건 조회
+// getPost() 반환값 = PostDto.ResPost  (객체 그 자체)
+// ─────────────────────────────────────────────────────────────────────────────
 
 const read_post = async (idx) => {
     try {
-        const response = await postApi.getPost(idx);
-        console.log('워크스페이스 가져오기 성공:', response);
-
-        const data = response.result.body;
+        // data = PostDto.ResPost
+        const data = await postApi.getPost(idx);
+        console.log('워크스페이스 가져오기 성공:', data);
 
         let parsedContents;
         try {
-            // 내용이 문자열이고 JSON 형식({ 로 시작)일 때만 파싱
             if (typeof data.contents === 'string' && data.contents.trim().startsWith('{')) {
                 parsedContents = JSON.parse(data.contents);
             } else {
                 parsedContents = data.contents;
             }
-        } catch (jsonError) {
-            // 파싱 실패 시 원본 문자열을 그대로 사용 (에러 방지)
+        } catch {
             console.warn('JSON 파싱 실패, 원본 데이터를 사용합니다.');
             parsedContents = data.contents;
         }
 
         currentPost.value = {
-            idx: data.idx,
-            title: data.title,
-            contents: parsedContents, 
-            type: data.type,
-            status: data.status || 'Private',
-            uuid: data.uuid || data.UUID || '',
-            accessRole: data.accessRole || data.level || 'ADMIN',
-            level: data.level || data.accessRole || 'ADMIN',
+            idx:        data.idx,
+            title:      data.title,
+            contents:   parsedContents,
+            type:       data.type,
+            status:     data.status     ?? 'Private',
+            uuid:       data.uuid       ?? data.UUID ?? '',
+            accessRole: data.accessRole ?? data.level ?? 'ADMIN',
+            level:      data.level      ?? data.accessRole ?? 'ADMIN',
         };
 
         return currentPost.value;
-        
-    } catch (e) {
-        console.error('side_list error:', e);
-    }
-}
 
-// 템플릿에서 사용할 변수와 함수를 같이 내보냅니다.
+    } catch (e) {
+        // workspaceApi 에서 이미 [getPost] 실패 — [code] message 형태로 출력됨
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default {
     personalItems,
     sharedItems,
     isPersonalOpen,
     isSharedOpen,
+    currentPost,
     side_list,
-    read_post
+    read_post,
 }
