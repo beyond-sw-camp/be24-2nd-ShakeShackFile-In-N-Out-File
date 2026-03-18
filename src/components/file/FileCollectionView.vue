@@ -159,6 +159,18 @@ const formatDisplaySize = (file) => {
 const getFileName = (file) => file?.name || file?.fileOriginName || "이름 없는 파일";
 const getFileExtension = (file) => String(file?.extension || file?.fileFormat || extractExtension(getFileName(file))).toLowerCase();
 const getUpdatedAt = (file) => file?.updatedAtLabel || formatDisplayDate(file?.updatedAt || file?.lastModified || file?.uploadDate);
+const getSharedOwnerLabel = (file) => file?.ownerName || file?.ownerEmail || "알 수 없는 사용자";
+const getSharedAtLabel = (file) => file?.sharedAtLabel || formatDisplayDate(file?.sharedAt);
+const getSharedSourceLabel = (file) => {
+  const ownerLabel = getSharedOwnerLabel(file);
+  const sharedAtLabel = getSharedAtLabel(file);
+
+  if (sharedAtLabel && sharedAtLabel !== "-") {
+    return `${ownerLabel} 님이 ${sharedAtLabel}에 공유`;
+  }
+
+  return `${ownerLabel} 님이 공유`;
+};
 const getPreviewUrl = (file) => file?.downloadUrl || file?.presignedDownloadUrl || "";
 const getThumbnailUrl = (file) => file?.thumbnailUrl || file?.thumbnailPresignedUrl || "";
 const getContentType = (file) => String(file?.contentType || file?.raw?.contentType || "").toLowerCase();
@@ -674,7 +686,7 @@ const onDropToParentNavigator = async (event) => {
               <div class="min-w-0">
                 <p class="file-entry__title truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
                 <p class="mt-1 truncate text-xs text-gray-400">
-                  {{ file.sharedWithMe ? `${file.ownerName || '-'} 님이 공유` : (file.location || '홈') }}
+                  {{ file.sharedWithMe ? getSharedSourceLabel(file) : (file.location || '홈') }}
                 </p>
               </div>
             </td>
@@ -877,7 +889,7 @@ const onDropToParentNavigator = async (event) => {
         <div class="mt-4">
           <p class="truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
           <p v-if="viewMode !== 'icon'" class="file-entry__meta mt-1 text-xs text-gray-400">
-            {{ file.sharedWithMe ? `${file.ownerName || '-'} 님이 공유` : (file.type === 'folder' ? '폴더' : (getFileExtension(file) || '-').toUpperCase()) }}
+            {{ file.sharedWithMe ? getSharedSourceLabel(file) : (file.type === 'folder' ? '폴더' : (getFileExtension(file) || '-').toUpperCase()) }}
           </p>
         </div>
 

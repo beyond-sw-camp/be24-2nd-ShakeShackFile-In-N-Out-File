@@ -6,7 +6,6 @@ import FileCollectionView from "@/components/file/FileCollectionView.vue";
 import { downloadFileAsset } from "@/api/filesApi.js";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
-import postApi from "@/api/postApi";
 import {
   FILE_SIZE_OPTIONS,
   FILE_STATUS_OPTIONS,
@@ -44,43 +43,7 @@ const {
   setCustomLayoutRows,
 } = useViewStore();
 
-// ── sharedItems 로직 ──────────────────────────────────────────────────────
-const sharedItems = ref([]);
-
-const side_list = async () => {
-  try {
-    const response = await postApi.allPosts();
-    console.log('공유 목록 가져오기 성공:', response);
-
-    if (response && response.result && response.result.body) {
-      const allItems = response.result.body;
-      sharedItems.value = [];
-
-      allItems.forEach(item => {
-        if (item.status && item.status.toUpperCase() !== 'PRIVATE') {
-          // 필드명 정규화: BaseFileView가 기대하는 구조로 매핑
-          sharedItems.value.push({
-            id: item.idx ?? item.id,
-            name: item.title ?? item.name ?? '',
-            type: item.type ?? 'file',
-            updatedAt: item.updatedAt ?? item.modifiedAt ?? null,
-            sharedFile: true,
-            ...item,
-          });
-        }
-      });
-    }
-  } catch (e) {
-    console.error('side_list error:', e);
-    sharedItems.value = [];
-  }
-};
-
-// sharedLibrary 모드에서는 sharedItems를, 아니면 props.files를 사용
-const effectiveFiles = computed(() =>
-  props.sharedLibrary ? sharedItems.value : props.files
-);
-// ─────────────────────────────────────────────────────────────────────────
+const effectiveFiles = computed(() => props.files);
 
 const searchScope = computed(() => getFileSearchScope(route.name) || "files");
 const searchState = computed(() => headerSearchStore.getScopeState(searchScope.value));
@@ -639,10 +602,9 @@ const closeFilePreview = () => {
 
 onMounted(() => {
   if (props.sharedLibrary) {
-    // 공유 문서함: API에서 sharedItems 로드 + 사진 기준 기본값 적용
-    side_list();
-    setLayoutPreset('10x10');         // 배치: 10 x 10
-    sortOption.value = 'updatedAt-desc'; // 정렬: 최근 수정순
+    fileStore.fetchSharedFiles().catch(() => {});
+    setLayoutPreset("10x10");
+    sortOption.value = "sharedAt-desc";
   } else if (!fileStore.hasLoaded && !fileStore.isLoading) {
     fileStore.fetchFiles().catch(() => {});
   }

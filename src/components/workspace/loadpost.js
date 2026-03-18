@@ -74,7 +74,11 @@ const read_post = async (idx) => {
             idx: data.idx,
             title: data.title,
             contents: parsedContents, 
-            type: data.type
+            type: data.type,
+            status: data.status || 'Private',
+            uuid: data.uuid || data.UUID || '',
+            accessRole: data.accessRole || data.level || 'ADMIN',
+            level: data.level || data.accessRole || 'ADMIN',
         };
 
         return currentPost.value;
