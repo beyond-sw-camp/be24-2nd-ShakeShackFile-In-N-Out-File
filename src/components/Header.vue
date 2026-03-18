@@ -11,7 +11,7 @@ import {
   useHeaderSearchStore,
 } from "@/stores/useHeaderSearchStore";
 import ProfileModal from "./ProfileModal.vue";
-import postApi from "@/api/postApi"; // 통합된 api 객체
+import postApi from "@/api/postApi";
 
 const emit = defineEmits(["toggle-chat", "toggle-theme", "switch-view"]);
 
@@ -25,96 +25,10 @@ const showProfileDropdown = ref(false);
 const showSearchDropdown = ref(false);
 const isProfileModalOpen = ref(false);
 
-// ── 알림 상태 ──────────────────────────────────────────────────────────────
 const notifications = ref([]);
 const hasNewNotif = ref(false);
 
-// ★ BroadcastChannel 참조 보관 → onBeforeUnmount 에서 close() 호출
 let broadcastChannel = null;
-
-/**
- * 서버에서 초대 알림 목록을 불러옵니다.
- * 백엔드: GET /notification/list
- */
-const fetchNotifications = async () => {
-  try {
-    const response = await postApi.getNotifications();
-    if (response && response.result && Array.isArray(response.result.body)) {
-      notifications.value = response.result.body.map(item => ({
-        id:             item.idx ?? item.id,
-        uuid:           item.uuid ?? null,
-        type:           item.type ?? 'general',   // 'invite' | 'general'
-        title:          item.title ?? '알림',
-        message:        item.message ?? item.contents ?? '',
-        time:           item.createdAt ? formatRelativeTime(item.createdAt) : '방금 전',
-        read:           item.read ?? false,
-        processed:      false,   // 수락/거절 완료 여부 (로컬 상태)
-        processedLabel: '',
-      }));
-      hasNewNotif.value = notifications.value.some(n => !n.read);
-    }
-  } catch (e) {
-    console.error('알림 목록 불러오기 실패:', e);
-  }
-};
-
-/**
- * 새 알림을 중복 없이 목록 최상단에 추가하는 헬퍼
- * BroadcastChannel / SW postMessage 양쪽에서 공통 사용
- */
-const pushNewNotification = (data) => {
-  // uuid 있으면 중복 체크
-  if (data.uuid) {
-    const alreadyExists = notifications.value.some(n => n.uuid === data.uuid);
-    if (alreadyExists) return;
-  }
-  notifications.value.unshift({
-    id:             Date.now(),
-    uuid:           data.uuid    ?? null,
-    type:           data.type    ?? 'general',
-    title:          data.title   ?? '알림',
-    message:        data.message ?? '',
-    time:           '방금 전',
-    read:           false,
-    processed:      false,
-    processedLabel: '',
-  });
-  hasNewNotif.value = true;
-};
-
-/**
- * 초대 수락 / 거절
- * 처리 후 목록에서 제거하지 않고 processed 상태로만 변경 → 어둡게 표시
- */
-const handleInviteVerify = async (notification, type) => {
-  if (!notification.uuid || notification.processed) return;
-  try {
-    await postApi.verifyEmail(notification.uuid, type);
-    const target = notifications.value.find(n => n.id === notification.id);
-    if (target) {
-      target.processed      = true;
-      target.read           = true;
-      target.processedLabel = type === 'accept' ? '수락됨' : '거절됨';
-    }
-    hasNewNotif.value = notifications.value.some(n => !n.read);
-  } catch (e) {
-    console.error('초대 처리 실패:', e);
-    alert(type === 'accept' ? '초대 수락에 실패했습니다.' : '초대 거절에 실패했습니다.');
-  }
-};
-
-/** 시간 포맷 헬퍼 */
-const formatRelativeTime = (dateStr) => {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1)  return '방금 전';
-  if (minutes < 60) return `${minutes}분 전`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24)   return `${hours}시간 전`;
-  return `${Math.floor(hours / 24)}일 전`;
-};
-
-// ──────────────────────────────────────────────────────────────────────────
 
 const isDarkMode = ref(false);
 const themeIcon = ref("fa-solid fa-moon");
@@ -129,36 +43,266 @@ const extensionOptions = computed(() => searchState.value.availableExtensions ||
 
 const customSizeRangeLabel = computed(() => {
   if (searchState.value.sizeFilter !== "custom") return "";
+
   const min = searchState.value.customMinSize?.trim();
   const max = searchState.value.customMaxSize?.trim();
-  if (!min && !max) return "범위를 입력하세요.";
+
+  if (!min && !max) return "\uBC94\uC704\uB97C \uC785\uB825\uD558\uC138\uC694";
   if (min && max) return `${min}MB ~ ${max}MB`;
-  if (min) return `${min}MB 이상`;
-  return `${max}MB 이하`;
+  if (min) return `${min}MB \uC774\uC0C1`;
+  return `${max}MB \uC774\uD558`;
 });
 
 const activeSearchFilterCount = computed(() => {
   if (!canUseFileSearch.value) return 0;
+
   let count = 0;
   if (searchState.value.searchQuery.trim()) count += 1;
   if (searchState.value.extensionFilter !== "all") count += 1;
   if (searchState.value.sizeFilter !== "all") count += 1;
   if (searchState.value.statusFilter !== "all") count += 1;
+
   return count;
 });
 
 const searchPlaceholder = computed(() => (
   canUseFileSearch.value
-    ? "파일명, 확장자, 공유자 이메일 검색"
-    : "파일 검색은 드라이브 화면에서 사용할 수 있습니다."
+    ? "\uD30C\uC77C\uBA85, \uD655\uC7A5\uC790, \uACF5\uC720\uC790 \uC774\uBA54\uC77C\uC744 \uAC80\uC0C9\uD558\uC138\uC694"
+    : "\uD30C\uC77C \uAC80\uC0C9\uC740 \uB4DC\uB77C\uC774\uBE0C \uD654\uBA74\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."
 ));
 
-const userName = computed(() => settingsProfile.value?.displayName || authStore.user?.userName || authStore.user?.name || "사용자");
-const userEmail = computed(() => settingsProfile.value?.email || authStore.user?.email || authStore.user?.userEmail || "이메일 정보 없음");
+const userName = computed(() => (
+  settingsProfile.value?.displayName ||
+  authStore.user?.userName ||
+  authStore.user?.name ||
+  "\uC0AC\uC6A9\uC790"
+));
+
+const userEmail = computed(() => (
+  settingsProfile.value?.email ||
+  authStore.user?.email ||
+  authStore.user?.userEmail ||
+  "\uC774\uBA54\uC77C \uC815\uBCF4 \uC5C6\uC74C"
+));
+
 const userLocaleLabel = computed(() => settingsProfile.value?.localeCode || "KO");
 const membershipLabel = computed(() => settingsProfile.value?.membershipLabel || "FREE MEMBER");
 const userProfileImage = computed(() => settingsProfile.value?.profileImageUrl || "");
-const avatarInitials = computed(() => (userName.value || "사용자").split(" ").filter(Boolean).slice(0, 2).map((token) => token[0]?.toUpperCase() || "").join("") || "U");
+const avatarInitials = computed(() => (
+  (userName.value || "\uC0AC\uC6A9\uC790")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((token) => token[0]?.toUpperCase() || "")
+    .join("") || "U"
+));
+
+const updateNotifBadge = () => {
+  hasNewNotif.value = notifications.value.some((notification) => !notification.read);
+};
+
+const formatRelativeTime = (dateStr) => {
+  if (!dateStr) return "\uBC29\uAE08 \uC804";
+
+  const parsed = new Date(dateStr);
+  if (Number.isNaN(parsed.getTime())) return "\uBC29\uAE08 \uC804";
+
+  const diff = Date.now() - parsed.getTime();
+  const minutes = Math.floor(diff / 60000);
+
+  if (minutes < 1) return "\uBC29\uAE08 \uC804";
+  if (minutes < 60) return `${minutes}\uBD84 \uC804`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}\uC2DC\uAC04 \uC804`;
+
+  return `${Math.floor(hours / 24)}\uC77C \uC804`;
+};
+
+const toNotificationItem = (item = {}) => {
+  const type = item.type ?? "general";
+  const read = Boolean(item.read);
+  const processed = type === "invite" && read;
+
+  return {
+    id: item.notificationId ?? item.idx ?? item.id ?? Date.now(),
+    uuid: item.uuid ?? null,
+    type,
+    title: item.title ?? "\uC54C\uB9BC",
+    message: item.message ?? item.contents ?? "",
+    createdAt: item.createdAt ?? null,
+    time: item.createdAt ? formatRelativeTime(item.createdAt) : "\uBC29\uAE08 \uC804",
+    read,
+    processed,
+    processedLabel: processed ? "?? ??" : "",
+  };
+};
+
+const findNotificationIndex = (target) => notifications.value.findIndex((item) => (
+  (target.id != null && item.id === target.id) ||
+  (target.uuid && item.uuid === target.uuid)
+));
+
+const fetchNotifications = async () => {
+  if (!authStore.user?.idx) {
+    notifications.value = [];
+    updateNotifBadge();
+    return;
+  }
+
+  try {
+    const response = await postApi.getNotifications();
+    const items = Array.isArray(response?.result?.body) ? response.result.body : [];
+    notifications.value = items.map(toNotificationItem);
+    updateNotifBadge();
+  } catch (error) {
+    console.error("\uC54C\uB9BC \uBAA9\uB85D \uBD88\uB7EC\uC624\uAE30 \uC2E4\uD328:", error);
+  }
+};
+
+const pushNewNotification = (data) => {
+  if (!data) return;
+  if (data.type && !["invite", "general"].includes(data.type)) return;
+
+  const incoming = toNotificationItem({
+    ...data,
+    read: false,
+  });
+
+  const existingIndex = findNotificationIndex(incoming);
+  if (existingIndex >= 0) {
+    const previous = notifications.value[existingIndex];
+    notifications.value[existingIndex] = {
+      ...previous,
+      ...incoming,
+      processed: previous.processed,
+      processedLabel: previous.processedLabel,
+    };
+  } else {
+    notifications.value.unshift(incoming);
+  }
+
+  updateNotifBadge();
+};
+
+const markNotificationAsRead = async (notification) => {
+  if (!notification?.id && !notification?.uuid) return;
+
+  try {
+    await postApi.markNotificationAsRead({
+      id: notification.id ?? null,
+      uuid: notification.uuid ?? null,
+    });
+  } catch (error) {
+    console.error("\uC54C\uB9BC \uC77D\uC74C \uCC98\uB9AC \uC2E4\uD328:", error);
+  }
+};
+
+const applyProcessedState = async (notification, label) => {
+  const index = findNotificationIndex(notification);
+  if (index < 0) return;
+
+  notifications.value[index] = {
+    ...notifications.value[index],
+    read: true,
+    processed: true,
+    processedLabel: label,
+  };
+  updateNotifBadge();
+
+  await markNotificationAsRead(notifications.value[index]);
+};
+
+const getErrorMessage = (error) => {
+  if (typeof error?.response?.data === "string" && error.response.data.trim()) {
+    return error.response.data;
+  }
+
+  if (typeof error?.response?.data?.message === "string" && error.response.data.message.trim()) {
+    return error.response.data.message;
+  }
+
+  if (typeof error?.message === "string" && error.message.trim()) {
+    return error.message;
+  }
+
+  return "";
+};
+
+const handleInviteVerify = async (notification, type) => {
+  if (!notification.uuid || notification.processed) return;
+
+  try {
+    await postApi.verifyEmail(notification.uuid, type);
+    await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
+    await fetchNotifications();
+  } catch (error) {
+    const message = getErrorMessage(error);
+
+    if (type === "reject" && (error?.response?.status === 500 || message.includes("\uAC70\uC808"))) {
+      await applyProcessedState(notification, "\uAC70\uC808\uB428");
+      await fetchNotifications();
+      return;
+    }
+
+    console.error(type === "accept" ? "\uCD08\uB300 \uC218\uB77D \uC2E4\uD328:" : "\uCD08\uB300 \uAC70\uC808 \uC2E4\uD328:", error);
+    await fetchNotifications();
+
+    if (type === "accept" && message.includes("\uC720\uD6A8\uD558\uC9C0 \uC54A\uC740 \uD1A0\uD070")) {
+      alert("\uC774\uBBF8 \uCC98\uB9AC\uB418\uC5C8\uAC70\uB098 \uB9CC\uB8CC\uB41C \uCD08\uB300\uC785\uB2C8\uB2E4.");
+      return;
+    }
+
+    alert(message || (type === "accept" ? "\uCD08\uB300 \uC218\uB77D\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4." : "\uCD08\uB300 \uAC70\uC808\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4."));
+  }
+};
+
+const handleDeleteNotification = async (notification) => {
+  try {
+    if (notification?.id || notification?.uuid) {
+      await postApi.deleteNotification({
+        id: notification.id ?? null,
+        uuid: notification.uuid ?? null,
+      });
+    }
+
+    notifications.value = notifications.value.filter((item) => (
+      !(notification.id != null && item.id === notification.id) &&
+      !(notification.uuid && item.uuid === notification.uuid)
+    ));
+    updateNotifBadge();
+  } catch (error) {
+    console.error("\uC54C\uB9BC \uC0AD\uC81C \uC2E4\uD328:", error);
+    alert("\uC54C\uB9BC \uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
+  }
+};
+
+const swDirectMessageHandler = (event) => {
+  const data = event.data;
+  if (!data) return;
+
+  if (data.channel === "notification" && data.payload) {
+    pushNewNotification(data.payload);
+    return;
+  }
+
+  if (data.type === "invite" || data.type === "general") {
+    pushNewNotification(data);
+  }
+};
+
+const setupNotificationChannel = () => {
+  if (typeof BroadcastChannel !== "undefined") {
+    broadcastChannel = new BroadcastChannel("notif_channel");
+    broadcastChannel.onmessage = (event) => {
+      pushNewNotification(event.data);
+    };
+  }
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", swDirectMessageHandler);
+  }
+};
 
 const initTheme = () => {
   const savedTheme = localStorage.getItem("theme");
@@ -184,48 +328,13 @@ const loadSettingsProfile = async () => {
   }
 };
 
-/**
- * ★ [이슈4 수정] 실시간 알림 수신 — 두 가지 채널 모두 리슨
- *
- * 방법 A: BroadcastChannel('notif_channel')
- *   → sw.js 에서 bc.postMessage() 로 보낼 때 수신
- *
- * 방법 B: navigator.serviceWorker 'message' 이벤트
- *   → sw.js 에서 client.postMessage() 로 보낼 때 수신 (기존 sw.js 포함)
- *
- * 두 방법 모두 pushNewNotification() 의 중복 체크를 거치므로 이중 수신 없음
- */
-const setupNotificationChannel = () => {
-  // ── 방법 A: BroadcastChannel ──────────────────────────────────────────
-  broadcastChannel = new BroadcastChannel('notif_channel');
-  broadcastChannel.onmessage = (event) => {
-    pushNewNotification(event.data);
-  };
-
-  // ── 방법 B: SW → 탭 직접 postMessage (구버전 sw.js 호환) ──────────────
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.addEventListener('message', swDirectMessageHandler);
-  }
-};
-
-/** SW client.postMessage 핸들러 (별도 함수로 분리 → removeEventListener 가능) */
-const swDirectMessageHandler = (event) => {
-  const data = event.data;
-  if (!data) return;
-  // invite 타입이거나 일반 알림 타입만 처리 (OPEN_CHAT_ROOM 등은 무시)
-  if (data.type === 'invite' || data.type === 'general') {
-    pushNewNotification(data);
-  }
-};
-
-const toggleNotifMenu = () => {
+const toggleNotifMenu = async () => {
   showNotifDropdown.value = !showNotifDropdown.value;
   showProfileDropdown.value = false;
   showSearchDropdown.value = false;
-  // 드롭다운을 열 때 배지 제거 및 읽음 처리
+
   if (showNotifDropdown.value) {
-    hasNewNotif.value = false;
-    notifications.value.forEach(n => { n.read = true; });
+    await fetchNotifications();
   }
 };
 
@@ -277,7 +386,7 @@ const handleSavedProfile = (savedProfile) => {
 };
 
 const handleLogout = () => {
-  if (confirm("로그아웃 하시겠습니까?")) {
+  if (confirm("\uB85C\uADF8\uC544\uC6C3 \uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?")) {
     authStore.logout();
     router.push("/login");
   }
@@ -295,38 +404,46 @@ watch(() => route.fullPath, () => {
   showSearchDropdown.value = false;
 });
 
+watch(
+  () => authStore.user?.idx,
+  async (userIdx) => {
+    if (!userIdx) {
+      notifications.value = [];
+      updateNotifBadge();
+      return;
+    }
+
+    await fetchNotifications();
+
+    try {
+      await postApi.subscribeWebPush();
+    } catch (error) {
+      console.error("\uC54C\uB9BC \uAD6C\uB3C5 \uC2E4\uD328:", error);
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   initTheme();
   authStore.checkLogin();
   loadSettingsProfile();
+  setupNotificationChannel();
   document.addEventListener("click", handleClickOutside);
-
-  if (authStore.user) {
-    // 기존 초대 알림 목록 로드
-    fetchNotifications();
-
-    // ★ 채널을 먼저 열어두고 (subscribeWebPush 성공 여부 무관)
-    setupNotificationChannel();
-
-    // 웹 푸시 구독 (미구독 기기 등록용)
-    postApi.subscribeWebPush().catch((error) => {
-      console.error("알림 구독 실패 또는 거부:", error);
-    });
-  }
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("click", handleClickOutside);
-  // ★ 메모리 누수 방지: 채널 정리
   if (broadcastChannel) {
     broadcastChannel.close();
     broadcastChannel = null;
   }
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.removeEventListener('message', swDirectMessageHandler);
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.removeEventListener("message", swDirectMessageHandler);
   }
 });
 </script>
+
 <template>
   <div>
     <ProfileModal
@@ -425,16 +542,19 @@ onBeforeUnmount(() => {
                     'notif-unread':    !n.read && !n.processed,
                   }"
                 >
-                  <div class="flex flex-col gap-1">
-                    <div class="notif-title-row">
-                      <p class="notif-title">{{ n.title }}</p>
-                      <!-- ★ [이슈2] 읽음 표시 뱃지 -->
-                      <span v-if="n.read && !n.processed" class="notif-read-badge">읽음</span>
+                  <div class="notification-item__top">
+                    <div class="flex flex-col gap-1">
+                      <div class="notif-title-row">
+                        <p class="notif-title">{{ n.title }}</p>
+                        <span v-if="n.read && !n.processed" class="notif-read-badge">읽음</span>
+                      </div>
+                      <p class="notif-message">{{ n.message }}</p>
+                      <span class="notif-time">{{ n.time }}</span>
                     </div>
-                    <p class="notif-message">{{ n.message }}</p>
-                    <span class="notif-time">{{ n.time }}</span>
+                    <button type="button" class="notif-delete-button" @click.stop="handleDeleteNotification(n)" aria-label="알림 삭제">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
                   </div>
-                  <!-- 초대 알림: 미처리 시 수락/거절 버튼, 처리 후 상태 뱃지 -->
                   <div v-if="n.type === 'invite'" class="notif-actions">
                     <template v-if="!n.processed">
                       <button type="button" class="notif-btn notif-btn--accept" @click.stop="handleInviteVerify(n, 'accept')">수락</button>
@@ -485,6 +605,7 @@ onBeforeUnmount(() => {
     </header>
   </div>
 </template>
+
 
 <style scoped>
 /* 제공해주신 기존 스타일을 그대로 유지합니다 */
@@ -577,6 +698,13 @@ onBeforeUnmount(() => {
   border-bottom: none;
 }
 
+.notification-item__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 /* 읽지 않은 알림: 파란 강조 */
 .notif-unread {
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated) 93%);
@@ -612,6 +740,26 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-color);
   border-radius: 999px;
   padding: 0.1rem 0.45rem;
+}
+
+.notif-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.notif-delete-button:hover {
+  background: var(--bg-input);
+  color: var(--text-main);
 }
 
 .notif-actions {
