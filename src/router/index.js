@@ -103,7 +103,7 @@ const router = createRouter({
               beforeEnter: (to, from, next) => {
                 fetchWorkspaceData(to, next);
               }
-            }
+            },
           ],
         },
         // /main/* 하위의 잘못된 경로도 404로 보내기
@@ -128,11 +128,17 @@ const router = createRouter({
       meta: { title: '회원 찾기', requiresAuth: false },
     },
     {
-          path: '/workspace/verify',
-          name: 'WorkspaceVerify',
-          component: () => import('@/views/workspace/InviteVerify.vue'),
-          // postIdx가 꼭 경로에 필요하다면 아래처럼 쓸 수도 있지만, 
-          // 이메일 링크의 token 방식을 쓰려면 /workspace/verify 가 가장 깔끔합니다.
+      path: '/workspace/verify',
+      name: 'WorkspaceVerify',
+      component: () => import('@/views/workspace/InviteVerify.vue'),
+      // postIdx가 꼭 경로에 필요하다면 아래처럼 쓸 수도 있지만, 
+      // 이메일 링크의 token 방식을 쓰려면 /workspace/verify 가 가장 깔끔합니다.
+    },
+    {
+      path: '/workspace/readonly/:id',
+      name: 'workspace_readonly',
+      component: () => import('@/views/workspace/WorkSpaceReadOnly.vue'),
+      meta : { requiresAuth: true},
     },
     {
       path: '/:pathMatch(.*)*',

@@ -34,7 +34,9 @@ const remoteCursors = computed(() => editorApi.value?.remoteCursorsRef?.value ||
 const activeUsers = computed(() => editorApi.value?.activeUsersRef?.value || [])
 const canManageAssets = computed(() => {
   if (!workspaceId.value) return true
-  return ['ADMIN', 'WRITE'].includes(String(workspaceAccessRole.value || 'ADMIN').toUpperCase())
+  const role = String(workspaceAccessRole.value || 'ADMIN').toUpperCase()
+  if (role === 'READ') return false
+  return ['ADMIN', 'WRITE'].includes(role)
 })
 const workspaceImages = computed(() => workspaceAssets.value.filter((asset) => asset.assetType === 'IMAGE'))
 const workspaceFiles = computed(() => workspaceAssets.value.filter((asset) => asset.assetType === 'FILE'))
@@ -470,6 +472,12 @@ const setupEditor = async () => {
   title.value = data.title || ''
   workspaceId.value = data.idx ? Number(data.idx) : null
   workspaceAccessRole.value = data.accessRole || data.level || 'ADMIN'
+
+  if (String(workspaceAccessRole.value).toUpperCase() === 'READ' && data.idx) {
+  await router.replace(`/workspace/readonly/${data.idx}`)
+  return
+  }
+
   await refreshWorkspaceAssets(workspaceId.value)
 
   if (editorApi.value) {
