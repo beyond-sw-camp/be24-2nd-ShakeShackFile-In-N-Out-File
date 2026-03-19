@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import FileUpload from '@/components/function/FilesUploadWidget.vue';
 import loadpost from '@/components/workspace/loadpost';
 import { useFileStore } from '@/stores/useFileStore';
@@ -118,8 +118,16 @@ const sidebarToggleStyle = computed(() => ({
 }))
 
 const router = useRouter();
+const route = useRoute();
+
 const goToPost = async (idx) => {
   if (!idx) return;
+
+  // 현재 보고 있는 페이지와 동일한 idx를 클릭하면 새로고침 X
+  if (String(route.params.id) === String(idx)) {
+    return;
+  }
+
   if (typeof window.__activeEditorDestroy === 'function') {
     window.__activeEditorDestroy();
     window.__activeEditorDestroy = null;
