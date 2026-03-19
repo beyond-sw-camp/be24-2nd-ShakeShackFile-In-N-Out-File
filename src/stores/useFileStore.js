@@ -1,6 +1,8 @@
 ﻿import { computed, ref } from "vue";
 import { defineStore } from "pinia";
+import { useAuthStore } from "@/stores/useAuthStore";
 import {
+  cancelAllFileShares as cancelAllFileSharesApi,
   cancelFileShares as cancelFileSharesApi,
   clearTrash as clearTrashApi,
   createFolder as createFolderApi,
@@ -8,6 +10,7 @@ import {
   fetchFileList as fetchFileListApi,
   fetchFileShareInfo as fetchFileShareInfoApi,
   fetchFolderProperties as fetchFolderPropertiesApi,
+  fetchSentSharedFileList as fetchSentSharedFileListApi,
   fetchSharedFileList as fetchSharedFileListApi,
   fetchSharedTextPreview as fetchSharedTextPreviewApi,
   fetchStorageSummary as fetchStorageSummaryApi,
@@ -25,8 +28,11 @@ import {
 
 const ROOT_LOCATION_LABEL = "홈";
 const SHARED_LOCATION_LABEL = "공유 문서함";
+const ADMINISTRATOR_EMAIL = "administrator@administrator.adm";
 const DEFAULT_MAX_UPLOAD_FILE_BYTES = 5 * 1024 * 1024 * 1024;
 const DEFAULT_MAX_UPLOAD_COUNT = 30;
+const ADMIN_MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024 * 1024;
+const ADMIN_MAX_UPLOAD_COUNT = 500;
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic", "avif", "apng", "jfif", "tif", "tiff"]);
 const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp"]);
@@ -96,6 +102,24 @@ const normalizeFileRecord = (rawFile, options = {}) => {
   const uploadedDate = parseDate(uploadDate);
   const sharedAt = rawFile?.sharedAt || rawFile?.shareDate || null;
   const sharedWithMe = Boolean(rawFile?.sharedWithMe || options.shared);
+  const recipients = Array.isArray(rawFile?.recipients)
+    ? rawFile.recipients
+      .map((recipient) => ({
+        recipientName: recipient?.recipientName || "",
+        recipientEmail: recipient?.recipientEmail || "",
+        sharedAt: recipient?.sharedAt || null,
+      }))
+      .filter((recipient) => recipient.recipientName || recipient.recipientEmail)
+    : [];
+  const recipientCount = Number(rawFile?.recipientCount ?? recipients.length) || 0;
+  const recipientNames = recipients
+    .map((recipient) => recipient.recipientName || recipient.recipientEmail)
+    .filter(Boolean);
+  const shareRecipientsLabel = recipientCount <= 0
+    ? ""
+    : recipientCount <= 2
+      ? `공유 대상: ${recipientNames.join(", ")}`
+      : `공유 대상: ${recipientNames.slice(0, 2).join(", ")} 외 ${recipientCount - 2}명`;
   const downloadUrl = rawFile?.presignedDownloadUrl || rawFile?.downloadUrl || "";
   const thumbnailUrl = rawFile?.thumbnailPresignedUrl || rawFile?.thumbnailUrl || "";
 
@@ -122,7 +146,7 @@ const normalizeFileRecord = (rawFile, options = {}) => {
     owner: rawFile?.ownerName || rawFile?.owner || "-",
     ownerName: rawFile?.ownerName || rawFile?.owner || "",
     ownerEmail: rawFile?.ownerEmail || "",
-    location: sharedWithMe ? SHARED_LOCATION_LABEL : ROOT_LOCATION_LABEL,
+    location: sharedWithMe ? SHARED_LOCATION_LABEL : (options.sentShared ? "내가 공유함" : ROOT_LOCATION_LABEL),
     reason:
       rawFile?.reason ||
       (type === "folder" ? "폴더" : `${extension ? extension.toUpperCase() : "FILE"} · ${formatFileSize(sizeBytes)}`),
@@ -142,6 +166,9 @@ const normalizeFileRecord = (rawFile, options = {}) => {
     sharedWithMe,
     sharedAt,
     sharedAtLabel: formatDateLabel(sharedAt),
+    recipientCount,
+    recipients,
+    shareRecipientsLabel,
     isImage: IMAGE_EXTENSIONS.has(extension),
     isVideo: VIDEO_EXTENSIONS.has(extension),
     raw: rawFile,
@@ -161,8 +188,10 @@ const decorateLocations = (files) => {
 };
 
 export const useFileStore = defineStore("file", () => {
+  const authStore = useAuthStore();
   const allFiles = ref([]);
   const sharedLibraryFiles = ref([]);
+  const sentSharedLibraryFiles = ref([]);
   const currentFolderId = ref(null);
   const isLoading = ref(false);
   const loadError = ref("");
@@ -170,12 +199,38 @@ export const useFileStore = defineStore("file", () => {
   const storageSummary = ref(null);
   const storageLoading = ref(false);
   const storageError = ref("");
+  const resolveCachedUser = () => {
+    try {
+      const savedUser = localStorage.getItem("USERINFO");
+      if (!savedUser || savedUser === "undefined") {
+        return null;
+      }
+
+      return JSON.parse(savedUser);
+    } catch {
+      return null;
+    }
+  };
+  const isAdministrator = computed(() => {
+    const currentUser = authStore.user || resolveCachedUser();
+    const role = String(currentUser?.role || "").toUpperCase();
+    const email = String(currentUser?.email || "").toLowerCase();
+
+    return Boolean(storageSummary.value?.adminAccount) || role.includes("ADMIN") || email === ADMINISTRATOR_EMAIL;
+  });
   const planCapabilities = computed(() => ({
-    planCode: String(storageSummary.value?.planCode || "FREE").toUpperCase(),
-    shareEnabled: Boolean(storageSummary.value?.shareEnabled),
-    fileLockEnabled: Boolean(storageSummary.value?.fileLockEnabled),
-    maxUploadFileBytes: Number(storageSummary.value?.maxUploadFileBytes || DEFAULT_MAX_UPLOAD_FILE_BYTES),
-    maxUploadCount: Number(storageSummary.value?.maxUploadCount || DEFAULT_MAX_UPLOAD_COUNT),
+    planCode: String(storageSummary.value?.planCode || (isAdministrator.value ? "ADMIN" : "FREE")).toUpperCase(),
+    adminAccount: isAdministrator.value,
+    shareEnabled: isAdministrator.value || Boolean(storageSummary.value?.shareEnabled),
+    fileLockEnabled: isAdministrator.value || Boolean(storageSummary.value?.fileLockEnabled),
+    maxUploadFileBytes: Number(
+      storageSummary.value?.maxUploadFileBytes ||
+      (isAdministrator.value ? ADMIN_MAX_UPLOAD_FILE_BYTES : DEFAULT_MAX_UPLOAD_FILE_BYTES),
+    ),
+    maxUploadCount: Number(
+      storageSummary.value?.maxUploadCount ||
+      (isAdministrator.value ? ADMIN_MAX_UPLOAD_COUNT : DEFAULT_MAX_UPLOAD_COUNT),
+    ),
   }));
 
   const fileById = computed(() => new Map(allFiles.value.map((file) => [String(file.id), file])));
@@ -226,6 +281,12 @@ export const useFileStore = defineStore("file", () => {
     return sharedLibraryFiles.value;
   };
 
+  const fetchSentSharedFiles = async () => {
+    const sentSharedList = await fetchSentSharedFileListApi();
+    sentSharedLibraryFiles.value = sentSharedList.map((file) => normalizeFileRecord(file, { sentShared: true }));
+    return sentSharedLibraryFiles.value;
+  };
+
   const fetchStorageSummary = async () => {
     storageLoading.value = true;
     storageError.value = "";
@@ -250,13 +311,15 @@ export const useFileStore = defineStore("file", () => {
     loadError.value = "";
 
     try {
-      const [fileList, sharedList] = await Promise.all([
+      const [fileList, sharedList, sentSharedList] = await Promise.all([
         fetchFileListApi(),
         fetchSharedFileListApi().catch(() => []),
+        fetchSentSharedFileListApi().catch(() => []),
       ]);
 
       allFiles.value = decorateLocations(fileList.map((file) => normalizeFileRecord(file)));
       sharedLibraryFiles.value = sharedList.map((file) => normalizeFileRecord(file, { shared: true }));
+      sentSharedLibraryFiles.value = sentSharedList.map((file) => normalizeFileRecord(file, { sentShared: true }));
       hasLoaded.value = true;
       syncCurrentFolder();
       fetchStorageSummary().catch(() => {});
@@ -280,6 +343,12 @@ export const useFileStore = defineStore("file", () => {
 
   const sharedFiles = computed(() =>
     [...sharedLibraryFiles.value]
+      .filter((file) => !file.isTrash)
+      .sort((left, right) => (new Date(right.sharedAt || 0).getTime()) - (new Date(left.sharedAt || 0).getTime())),
+  );
+
+  const sentSharedFiles = computed(() =>
+    [...sentSharedLibraryFiles.value]
       .filter((file) => !file.isTrash)
       .sort((left, right) => (new Date(right.sharedAt || 0).getTime()) - (new Date(left.sharedAt || 0).getTime())),
   );
@@ -442,6 +511,16 @@ export const useFileStore = defineStore("file", () => {
     await refreshAll();
   };
 
+  const cancelAllSharedFiles = async (fileIds) => {
+    const normalizedIds = normalizeIdList(fileIds);
+    if (!normalizedIds.length) {
+      return;
+    }
+
+    await cancelAllFileSharesApi(normalizedIds);
+    await refreshAll();
+  };
+
   const fetchShareInfo = async (fileId) => {
     return fetchFileShareInfoApi(fileId);
   };
@@ -475,6 +554,7 @@ export const useFileStore = defineStore("file", () => {
   return {
     allFiles,
     sharedLibraryFiles,
+    sentSharedLibraryFiles,
     currentFolderId,
     currentFolder,
     currentFolderPath,
@@ -487,11 +567,13 @@ export const useFileStore = defineStore("file", () => {
     storageError,
     driveFiles,
     sharedFiles,
+    sentSharedFiles,
     recentFiles,
     trashFiles,
     allOnlyFiles,
     fetchFiles,
     fetchSharedFiles,
+    fetchSentSharedFiles,
     refreshAll,
     createFolder,
     moveToTrash,
@@ -510,6 +592,7 @@ export const useFileStore = defineStore("file", () => {
     setFilesLocked,
     shareFiles,
     cancelSharedFiles,
+    cancelAllSharedFiles,
     fetchShareInfo,
     saveSharedFileToDrive,
     fetchFolderProperties,

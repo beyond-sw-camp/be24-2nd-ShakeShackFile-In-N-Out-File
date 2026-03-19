@@ -4,6 +4,7 @@ import ChatRoom from './ChatRoom.vue'
 import ChatList from './Chatlist.vue'
 import { useAuthStore } from '@/stores/useAuthStore'
 import api from '@/plugins/axiosinterceptor.js'
+import GroupChatInviteModal from '@/components/group/GroupChatInviteModal.vue'
 
 const props = defineProps({ isOpen: Boolean })
 const emit = defineEmits(['close'])
@@ -95,10 +96,36 @@ const selectedRoom = ref(null)
 const authStore = useAuthStore()
 const chatRooms = ref([])
 const fetchError = ref(false)
+const isChatInviteModalOpen = ref(false)
+const chatInviteMode = ref('invite')
 
 const currentUser = computed(() => ({ 
   name: authStore.user?.userName || 'Guest',
 }))
+
+const openChatInviteModal = (mode) => {
+  chatInviteMode.value = mode
+  isChatInviteModalOpen.value = true
+}
+
+const closeChatInviteModal = () => {
+  isChatInviteModalOpen.value = false
+}
+
+const handleChatInviteCompleted = async ({ mode, roomId } = {}) => {
+  await fetchRooms(true)
+
+  if (mode === 'create' && roomId) {
+    const createdRoom = chatRooms.value.find((room) => room.id === roomId)
+    if (createdRoom) {
+      handleSelectRoom(createdRoom)
+    }
+  }
+
+  if (mode === 'invite') {
+    isMenuOpen.value = false
+  }
+}
 
 // 방 목록 가져오기 (무한 스크롤 대응)
 const fetchRooms = async (isFirst = false) => {
@@ -181,38 +208,8 @@ watch(viewMode, async (newMode) => {
 })
 
 // 방 만들기
-const handleCreateRoom = async () => {
-  const roomName = prompt('새로운 채팅방 이름을 입력해주세요.')
-  if (!roomName || !roomName.trim()) return
-
-  const inviteInput = prompt('초대할 유저의 이메일을 입력해주세요.')
-  const participantsEmail = inviteInput 
-    ? inviteInput.split(',').map(email => email.trim()).filter(email => email !== "")
-    : []
-
-  const myEmail = authStore.user?.email;
-  const actualInvitees = participantsEmail.filter(email => email !== myEmail);
-
-  if (actualInvitees.length === 0) {
-    alert('본인 외에 최소 한 명 이상의 초대할 사람을 입력해주세요.');
-    return;
-  }
-
-  try {
-    await api.post('/chatRoom/create', {
-      title: roomName.trim(),
-      participantsEmail: participantsEmail 
-    })
-    alert('채팅방이 생성되었습니다.')
-    await fetchRooms(true)
-  } catch (error) {
-    const serverMessage = error.response?.data?.message || "";
-    if (serverMessage.includes("존재하지 않는 유저")) {
-      alert(`존재하지 않는 유저가 포함되어 있습니다. 이메일을 확인해 주세요.`)
-    } else {
-      alert('방 생성에 실패했습니다.')
-    }
-  }
+const handleCreateRoom = () => {
+  openChatInviteModal('create')
 }
 
 const onRenameRoom = async (room) => {
@@ -240,18 +237,9 @@ const onLeaveRoom = async (room) => {
   }
 }
 
-const handleInviteFromHeader = async () => {
-  const input = prompt('초대할 유저의 이메일을 입력하세요.')
-  if (!input || !input.trim()) return
-  const emails = input.split(',').map(e => e.trim()).filter(e => e !== "")
-
-  try {
-    await api.post(`/chatRoom/${selectedRoom.value.id}/invite`, emails)
-    alert('초대되었습니다.')
-    isMenuOpen.value = false // 초대 후 메뉴 닫기
-  } catch (error) {
-    alert("초대에 실패했습니다.");
-  }
+const handleInviteFromHeader = () => {
+  if (!selectedRoom.value?.id) return
+  openChatInviteModal('invite')
 }
 
 const handleSelectRoom = (room) => {
@@ -303,6 +291,15 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <GroupChatInviteModal
+    :is-open="isChatInviteModalOpen"
+    :mode="chatInviteMode"
+    :room-id="selectedRoom?.id"
+    :room-name="selectedRoom?.name || ''"
+    @close="closeChatInviteModal"
+    @completed="handleChatInviteCompleted"
+  />
+
   <aside 
     class="chat-panel" 
     :class="isOpen ? 'chat-panel-open' : 'chat-panel-closed'"

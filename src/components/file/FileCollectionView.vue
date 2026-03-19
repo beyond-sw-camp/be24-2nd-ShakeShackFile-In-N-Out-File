@@ -171,6 +171,17 @@ const getSharedSourceLabel = (file) => {
 
   return getSharedOwnerText(file);
 };
+
+const getSentShareLabel = (file) => {
+  const sharedAtLabel = getSharedAtLabel(file);
+  const recipientLabel = file?.shareRecipientsLabel || (file?.recipientCount ? `공유 대상 ${file.recipientCount}명` : "공유 중");
+
+  if (sharedAtLabel && sharedAtLabel !== "-") {
+    return `${recipientLabel} | ${sharedAtLabel}`;
+  }
+
+  return recipientLabel;
+};
 const getPreviewUrl = (file) => file?.downloadUrl || file?.presignedDownloadUrl || "";
 const getThumbnailUrl = (file) => file?.thumbnailUrl || file?.thumbnailPresignedUrl || "";
 const getContentType = (file) => String(file?.contentType || file?.raw?.contentType || "").toLowerCase();
@@ -241,6 +252,7 @@ const canManageFolder = (file) => !props.sharedLibrary && props.deleteMode !== "
 const canShare = (file) => !props.sharedLibrary && !file?.sharedWithMe && file?.type !== "folder" && !file?.isTrash && !isLocked(file) && (canCreateShares.value || file?.sharedFile);
 const canToggleLock = (file) => !props.sharedLibrary && !file?.sharedWithMe && file?.type !== "folder" && !file?.isTrash && (canCreateLocks.value || file?.lockedFile);
 const canSaveShared = (file) => Boolean(file?.sharedWithMe) && file?.type !== "folder" && !isLocked(file);
+const canManageSentShare = (file) => Boolean(props.sharedLibrary && file?.sharedFile && !file?.sharedWithMe && file?.type !== "folder");
 const isMovable = (file) => !props.sharedLibrary && props.deleteMode !== "permanent" && !file?.sharedWithMe && !file?.isTrash && !isLocked(file);
 const isFolderDropTarget = (file) => canManageFolder(file);
 const getDeleteConfirmMessage = (file) => {
@@ -391,6 +403,11 @@ const onClickShare = (file, event) => {
   if (!ensureUnlocked(file)) {
     return;
   }
+  emit("share-file", [file]);
+};
+
+const onClickManageSentShare = (file, event) => {
+  event.stopPropagation();
   emit("share-file", [file]);
 };
 
@@ -686,7 +703,7 @@ const onDropToParentNavigator = async (event) => {
               <div class="min-w-0">
                 <p class="file-entry__title truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
                 <p class="mt-1 truncate text-xs text-gray-400">
-                  {{ file.sharedWithMe ? getSharedSourceLabel(file) : (file.location || '홈') }}
+                  {{ file.sharedWithMe ? getSharedSourceLabel(file) : (canManageSentShare(file) ? getSentShareLabel(file) : (file.location || '홈')) }}
                 </p>
               </div>
             </td>
@@ -733,6 +750,14 @@ const onDropToParentNavigator = async (event) => {
                   @click="onClickShare(file, $event)"
                 >
                   공유
+                </button>
+                <button
+                  v-if="canManageSentShare(file)"
+                  type="button"
+                  class="action-button text-violet-700 hover:bg-violet-50"
+                  @click="onClickManageSentShare(file, $event)"
+                >
+                  공유 관리
                 </button>
                 <button
                   v-if="canToggleLock(file)"
@@ -889,7 +914,7 @@ const onDropToParentNavigator = async (event) => {
         <div class="mt-4">
           <p class="truncate text-sm font-semibold text-gray-900">{{ getFileName(file) }}</p>
           <p v-if="viewMode !== 'icon'" class="file-entry__meta mt-1 text-xs text-gray-400">
-            {{ file.sharedWithMe ? getSharedSourceLabel(file) : (file.type === 'folder' ? '폴더' : (getFileExtension(file) || '-').toUpperCase()) }}
+            {{ file.sharedWithMe ? getSharedSourceLabel(file) : (canManageSentShare(file) ? getSentShareLabel(file) : (file.type === 'folder' ? '폴더' : (getFileExtension(file) || '-').toUpperCase())) }}
           </p>
         </div>
 
@@ -941,6 +966,14 @@ const onDropToParentNavigator = async (event) => {
               @click="onClickShare(file, $event)"
             >
               공유
+            </button>
+            <button
+              v-if="canManageSentShare(file)"
+              type="button"
+              class="chip-button bg-violet-50 text-violet-700 hover:bg-violet-100"
+              @click="onClickManageSentShare(file, $event)"
+            >
+              공유 관리
             </button>
             <button
               v-if="canToggleLock(file)"
