@@ -225,16 +225,23 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     if (!editor) return;
     try {
       await editor.isReady;
-      const savedData = await editor.save(); 
+      const savedData = await editor.save();
+
+      // yjs 동기화 전에 저장을 누르면 yTitle이 비어 있을 수 있으므로
+      // initialTitle을 fallback으로 사용하고, 둘 다 없으면 '제목 없음'으로 저장
+      const resolvedTitle = yTitle.toString().trim() || (initialTitle ?? '').trim() || '제목 없음';
+
       const postData = {
-        idx : currentIdx,
-        title: yTitle.toString(), 
+        idx: currentIdx,
+        title: resolvedTitle,
         contents: JSON.stringify(savedData)
       };
+
       const response = await postApi.savePost(postData);
-      const savedIdx = response?.result?.body?.idx ?? response?.data?.idx ?? response?.idx ?? null
+      // postApi.savePost()는 PostDto.ResPost를 unwrap해서 반환하므로 .idx로 바로 접근
+      const savedIdx = response?.idx ?? null;
       if (savedIdx != null) {
-        currentIdx = savedIdx
+        currentIdx = savedIdx;
       }
       await loadpost.side_list();
       return response;

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { fetchSettingsProfile } from "@/api/featerApi";
+import loadpost from "./workspace/loadpost";
 import {
   FILE_SIZE_OPTIONS,
   FILE_STATUS_OPTIONS,
@@ -10,6 +11,13 @@ import {
   isFileSearchRoute,
   useHeaderSearchStore,
 } from "@/stores/useHeaderSearchStore";
+import {
+  acceptGroupInvite,
+  acceptRelationshipInvite,
+  rejectGroupInvite,
+  rejectRelationshipInvite,
+} from "@/api/groupApi";
+import { registerPushNotification } from "@/utils/pushNotification";
 import ProfileModal from "./ProfileModal.vue";
 import postApi from "@/api/postApi";
 
@@ -123,11 +131,13 @@ const formatRelativeTime = (dateStr) => {
 const toNotificationItem = (item = {}) => {
   const type = item.type ?? "general";
   const read = Boolean(item.read);
-  const processed = type === "invite" && read;
+  const actionableTypes = ["invite", "group_invite", "relationship_invite"];
+  const processed = actionableTypes.includes(type) && read;
 
   return {
     id: item.notificationId ?? item.idx ?? item.id ?? Date.now(),
     uuid: item.uuid ?? null,
+    referenceId: item.referenceId ?? null,
     type,
     title: item.title ?? "\uC54C\uB9BC",
     message: item.message ?? item.contents ?? "",
@@ -163,7 +173,7 @@ const fetchNotifications = async () => {
 
 const pushNewNotification = (data) => {
   if (!data) return;
-  if (data.type && !["invite", "general"].includes(data.type)) return;
+  if (data.type && !["invite", "general", "group_invite", "relationship_invite"].includes(data.type)) return;
 
   const incoming = toNotificationItem({
     ...data,
@@ -237,6 +247,7 @@ const handleInviteVerify = async (notification, type) => {
     await postApi.verifyEmail(notification.uuid, type);
     await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
     await fetchNotifications();
+    await loadpost.side_list();
   } catch (error) {
     const message = getErrorMessage(error);
 
@@ -255,6 +266,60 @@ const handleInviteVerify = async (notification, type) => {
     }
 
     alert(message || (type === "accept" ? "\uCD08\uB300 \uC218\uB77D\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4." : "\uCD08\uB300 \uAC70\uC808\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4."));
+  }
+};
+
+const handleGroupInviteAction = async (notification, type) => {
+  if (!notification.referenceId || notification.processed) return;
+
+  try {
+    if (type === "accept") {
+      await acceptGroupInvite(notification.referenceId);
+    } else {
+      await rejectGroupInvite(notification.referenceId);
+    }
+
+    await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
+    await fetchNotifications();
+  } catch (error) {
+    console.error(type === "accept" ? "그룹 초대 수락 실패:" : "그룹 초대 거절 실패:", error);
+    await fetchNotifications();
+    alert(getErrorMessage(error) || (type === "accept" ? "그룹 초대 수락에 실패했습니다." : "그룹 초대 거절에 실패했습니다."));
+  }
+};
+
+const handleRelationshipInviteAction = async (notification, type) => {
+  if (!notification.referenceId || notification.processed) return;
+
+  try {
+    if (type === "accept") {
+      await acceptRelationshipInvite(notification.referenceId);
+    } else {
+      await rejectRelationshipInvite(notification.referenceId);
+    }
+
+    await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
+    await fetchNotifications();
+  } catch (error) {
+    console.error(type === "accept" ? "연결 초대 수락 실패:" : "연결 초대 거절 실패:", error);
+    await fetchNotifications();
+    alert(getErrorMessage(error) || (type === "accept" ? "연결 초대 수락에 실패했습니다." : "연결 초대 거절에 실패했습니다."));
+  }
+};
+
+const handleNotificationAction = async (notification, type) => {
+  if (notification.type === "invite") {
+    await handleInviteVerify(notification, type);
+    return;
+  }
+
+  if (notification.type === "group_invite") {
+    await handleGroupInviteAction(notification, type);
+    return;
+  }
+
+  if (notification.type === "relationship_invite") {
+    await handleRelationshipInviteAction(notification, type);
   }
 };
 
@@ -287,7 +352,7 @@ const swDirectMessageHandler = (event) => {
     return;
   }
 
-  if (data.type === "invite" || data.type === "general") {
+  if (["invite", "general", "group_invite", "relationship_invite"].includes(data.type)) {
     pushNewNotification(data);
   }
 };
@@ -435,7 +500,7 @@ watch(
     startNotificationPolling();
 
     try {
-      await postApi.subscribeWebPush();
+      await registerPushNotification();
     } catch (error) {
       console.error("\uC54C\uB9BC \uAD6C\uB3C5 \uC2E4\uD328:", error);
     }
@@ -575,10 +640,10 @@ onBeforeUnmount(() => {
                       <i class="fa-solid fa-xmark"></i>
                     </button>
                   </div>
-                  <div v-if="n.type === 'invite'" class="notif-actions">
+                  <div v-if="['invite', 'group_invite', 'relationship_invite'].includes(n.type)" class="notif-actions">
                     <template v-if="!n.processed">
-                      <button type="button" class="notif-btn notif-btn--accept" @click.stop="handleInviteVerify(n, 'accept')">수락</button>
-                      <button type="button" class="notif-btn notif-btn--reject" @click.stop="handleInviteVerify(n, 'reject')">거절</button>
+                      <button type="button" class="notif-btn notif-btn--accept" @click.stop="handleNotificationAction(n, 'accept')">수락</button>
+                      <button type="button" class="notif-btn notif-btn--reject" @click.stop="handleNotificationAction(n, 'reject')">거절</button>
                     </template>
                     <span v-else class="notif-processed-label">{{ n.processedLabel }}</span>
                   </div>
@@ -613,6 +678,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="py-2">
               <button type="button" class="dropdown-item" @click="openSettings('profile')"><i class="fa-solid fa-user-gear"></i><span>개인 프로필 설정</span></button>
+              <button type="button" class="dropdown-item" @click="openSettings('group')"><i class="fa-solid fa-user-group"></i><span>그룹 관리</span></button>
               <button type="button" class="dropdown-item" @click="openSettings('security')"><i class="fa-solid fa-shield-halved"></i><span>보안 및 비밀번호</span></button>
               <button type="button" class="dropdown-item" @click="openSettings('language')"><i class="fa-solid fa-language"></i><span>언어 설정 ({{ userLocaleLabel }})</span></button>
             </div>

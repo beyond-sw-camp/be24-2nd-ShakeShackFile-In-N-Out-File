@@ -122,6 +122,11 @@ export async function fetchSharedFileList() {
   return extractArrayResult(response?.data);
 }
 
+export async function fetchSentSharedFileList() {
+  const response = await api.get("/file/share/sent/list");
+  return extractArrayResult(response?.data);
+}
+
 export async function fetchFileShareInfo(fileId) {
   const response = await api.get(`/file/share/${fileId}`);
   return extractArrayResult(response?.data);
@@ -204,6 +209,13 @@ export async function cancelFileShares(fileIdList, recipientEmail) {
   const response = await api.post("/file/share/cancel", {
     fileIdxList: fileIdList,
     recipientEmail,
+  });
+  return extractObjectResult(response?.data);
+}
+
+export async function cancelAllFileShares(fileIdList) {
+  const response = await api.post("/file/share/cancel-all", {
+    fileIdxList: fileIdList,
   });
   return extractObjectResult(response?.data);
 }
