@@ -6,9 +6,7 @@ const VAPID_PUBLIC_KEY =
 // ─────────────────────────────────────────────────────────────────────────────
 // 내부 유틸
 // ─────────────────────────────────────────────────────────────────────────────
-/**
- * VAPID 공개키를 Uint8Array로 변환합니다.
- */
+
 const urlBase64ToUint8Array = (base64String) => {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -65,11 +63,7 @@ const apiCall = async (label, request, fallback = undefined) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const subscribeWebPush = async () => {
-  if (
-    !('serviceWorker' in navigator) ||
-    !('PushManager' in window) ||
-    !('Notification' in window)
-  ) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
     return null
   }
 
@@ -87,29 +81,39 @@ const subscribeWebPush = async () => {
       })
     }
 
-    const { endpoint, keys } = subscription.toJSON()
-    return await apiCall('subscribeWebPush', () =>
-      api.post('/notification/subscribe', { endpoint, keys }),
-    )
+    const subscriptionJson = subscription.toJSON()
+    const response = await api.post('/notification/subscribe', {
+      endpoint: subscriptionJson.endpoint,
+      keys: subscriptionJson.keys,
+    })
+
+    console.log('알림 구독 성공')
+    return response.data
   } catch (error) {
-    console.error('[subscribeWebPush] 알림 구독 실패:', error)
+    console.error('알림 구독 실패:', error)
     throw error
   }
 }
 
-/**
- * 알림 목록을 조회합니다.
- * @returns {Array} 알림 목록
- */
-const getNotifications = async () =>
-  apiCall('getNotifications', () => api.get('/notification/list'))
+const getNotifications = async () => {
+  try {
+    const response = await api.get('/notification/list')
+    return response.data
+  } catch (error) {
+    console.error('알림 목록 조회 실패:', error)
+    throw error
+  }
+}
 
-/**
- * 알림을 읽음 처리합니다.
- * @param {{ id?: number|null, uuid?: string|null }} param
- */
-const markNotificationAsRead = async ({ id = null, uuid = null } = {}) =>
-  apiCall('markNotificationAsRead', () => api.patch('/notification/read', { id, uuid }))
+const markNotificationAsRead = async ({ id = null, uuid = null } = {}) => {
+  try {
+    const response = await api.patch('/notification/read', { id, uuid })
+    return response.data
+  } catch (error) {
+    console.error('알림 읽음 처리 실패:', error)
+    throw error
+  }
+}
 
 const deleteNotification = async ({ id = null, uuid = null } = {}) => {
   try {
@@ -192,15 +196,9 @@ const getWorkspaceAssets = async (workspaceId) =>
   apiCall(
     'getWorkspaceAssets',
     () => api.get(`/workspace/${workspaceId}/assets`),
-    [], // 실패 시 빈 배열 반환
+    [],
   )
 
-/**
- * 워크스페이스에 파일을 업로드합니다.
- * @param {number}    workspaceId
- * @param {FileList|File[]} files
- * @returns {Asset[]}
- */
 const uploadWorkspaceAssets = async (workspaceId, files) => {
   const formData = new FormData()
   Array.from(files || []).forEach((file) => formData.append('files', file))

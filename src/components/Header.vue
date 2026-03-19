@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { fetchSettingsProfile } from "@/api/featerApi";
+import loadpost from "./workspace/loadpost";
 import {
   FILE_SIZE_OPTIONS,
   FILE_STATUS_OPTIONS,
@@ -237,6 +238,7 @@ const handleInviteVerify = async (notification, type) => {
     await postApi.verifyEmail(notification.uuid, type);
     await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
     await fetchNotifications();
+    await loadpost.side_list();
   } catch (error) {
     const message = getErrorMessage(error);
 
