@@ -215,6 +215,13 @@ const deleteWorkspaceAsset = async (workspaceId, assetId) =>
     api.delete(`/workspace/${workspaceId}/assets/${assetId}`),
   )
 
+const saveWorkspaceAssetToDrive = async (workspaceId, assetId, parentId = null) =>
+  apiCall('saveWorkspaceAssetToDrive', () =>
+    api.post(`/workspace/${workspaceId}/assets/${assetId}/save-to-drive`, null, {
+      params: parentId == null ? {} : { parentId },
+    }),
+  )
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default {
@@ -236,4 +243,5 @@ export default {
   getWorkspaceAssets,
   uploadWorkspaceAssets,
   deleteWorkspaceAsset,
+  saveWorkspaceAssetToDrive,
 }
