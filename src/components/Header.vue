@@ -17,8 +17,10 @@ import {
   rejectGroupInvite,
   rejectRelationshipInvite,
 } from "@/api/groupApi";
+import { useFileStore } from "@/stores/useFileStore";
 import { registerPushNotification } from "@/utils/pushNotification";
 import ProfileModal from "./ProfileModal.vue";
+import GamesHubModal from "@/components/games/GamesHubModal.vue";
 import postApi from "@/api/postApi";
 
 const emit = defineEmits(["toggle-chat", "toggle-theme", "switch-view"]);
@@ -26,12 +28,14 @@ const emit = defineEmits(["toggle-chat", "toggle-theme", "switch-view"]);
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
+const fileStore = useFileStore();
 const headerSearchStore = useHeaderSearchStore();
 
 const showNotifDropdown = ref(false);
 const showProfileDropdown = ref(false);
 const showSearchDropdown = ref(false);
 const isProfileModalOpen = ref(false);
+const isGamesModalOpen = ref(false);
 
 const notifications = ref([]);
 const hasNewNotif = ref(false);
@@ -96,6 +100,19 @@ const userEmail = computed(() => (
 
 const userLocaleLabel = computed(() => settingsProfile.value?.localeCode || "KO");
 const membershipLabel = computed(() => settingsProfile.value?.membershipLabel || "FREE MEMBER");
+const canUseGames = computed(() => {
+  const capability = fileStore.planCapabilities || {};
+  const planCode = String(capability.planCode || "").toUpperCase();
+  const settingsMembershipCode = String(settingsProfile.value?.membershipCode || "").toUpperCase();
+
+  return (
+    Boolean(capability.adminAccount) ||
+    planCode === "PREMIUM" ||
+    planCode === "ADMIN" ||
+    settingsMembershipCode === "PREMIUM" ||
+    settingsMembershipCode === "ADMIN"
+  );
+});
 const userProfileImage = computed(() => settingsProfile.value?.profileImageUrl || "");
 const avatarInitials = computed(() => (
   (userName.value || "\uC0AC\uC6A9\uC790")
@@ -443,8 +460,29 @@ const openSettings = async (tab = "profile") => {
   await loadSettingsProfile();
 };
 
+const openGamesHub = async () => {
+  if (!fileStore.storageSummary && !fileStore.storageLoading) {
+    try {
+      await fileStore.fetchStorageSummary();
+    } catch (error) {
+      console.error("게임 권한 확인 실패:", error);
+    }
+  }
+
+  if (!canUseGames.value) {
+    return;
+  }
+
+  showProfileDropdown.value = false;
+  isGamesModalOpen.value = true;
+};
+
 const handleCloseProfileModal = () => {
   isProfileModalOpen.value = false;
+};
+
+const handleCloseGamesModal = () => {
+  isGamesModalOpen.value = false;
 };
 
 const handleSavedProfile = (savedProfile) => {
@@ -499,6 +537,10 @@ watch(
     await fetchNotifications();
     startNotificationPolling();
 
+    if (!fileStore.storageSummary && !fileStore.storageLoading) {
+      fileStore.fetchStorageSummary().catch(() => {});
+    }
+
     try {
       await registerPushNotification();
     } catch (error) {
@@ -513,6 +555,9 @@ onMounted(() => {
   authStore.checkLogin();
   loadSettingsProfile();
   setupNotificationChannel();
+  if (!fileStore.storageSummary && !fileStore.storageLoading) {
+    fileStore.fetchStorageSummary().catch(() => {});
+  }
   document.addEventListener("click", handleClickOutside);
 });
 
@@ -538,6 +583,11 @@ onBeforeUnmount(() => {
       :is-loading="isSettingsLoading"
       @close="handleCloseProfileModal"
       @saved="handleSavedProfile"
+    />
+    <GamesHubModal
+      :is-open="isGamesModalOpen"
+      :can-access="canUseGames"
+      @close="handleCloseGamesModal"
     />
 
     <header class="header-container">
@@ -679,6 +729,7 @@ onBeforeUnmount(() => {
             <div class="py-2">
               <button type="button" class="dropdown-item" @click="openSettings('profile')"><i class="fa-solid fa-user-gear"></i><span>개인 프로필 설정</span></button>
               <button type="button" class="dropdown-item" @click="openSettings('group')"><i class="fa-solid fa-user-group"></i><span>그룹 관리</span></button>
+              <button v-if="canUseGames" type="button" class="dropdown-item" @click="openGamesHub"><i class="fa-solid fa-gamepad"></i><span>Games</span></button>
               <button type="button" class="dropdown-item" @click="openSettings('security')"><i class="fa-solid fa-shield-halved"></i><span>보안 및 비밀번호</span></button>
               <button type="button" class="dropdown-item" @click="openSettings('language')"><i class="fa-solid fa-language"></i><span>언어 설정 ({{ userLocaleLabel }})</span></button>
             </div>
