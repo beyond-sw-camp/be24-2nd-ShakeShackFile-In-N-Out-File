@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import sseApi from '@/api/sseApi'
 import userApi from '@/api/user/index.js'
 
 export const useAuthStore = defineStore('auth', () => {
   const isLogin = ref(false)
   const user = ref(null)
   const token = ref(null) // 필수: Access Token 저장용 상태
+  const sseInstance = ref(null) // SSE 인스턴스 저장용
 
   // JWT Base64 페이로드 디코딩 유틸리티 함수
   const decodeToken = (tokenStr) => {
@@ -34,6 +36,9 @@ export const useAuthStore = defineStore('auth', () => {
       isLogin.value = true
       // 사용자 정보도 UI 표시를 위해 로컬 스토리지에 캐싱
       localStorage.setItem('USERINFO', JSON.stringify(userInfo))
+
+      // ✅ 로그인 성공 즉시 SSE 연결 시작 (userInfo에 담긴 고유 idx 활용)
+      startSseConnection(userInfo.idx);
     }
   }
 
@@ -60,6 +65,9 @@ export const useAuthStore = defineStore('auth', () => {
       try {
         user.value = JSON.parse(savedUser)
         isLogin.value = true
+
+        // ✅ 새로고침 시에도 로그인 상태라면 SSE 재연결
+        startSseConnection(user.value.idx);
       } catch (e) {
         logout()
       }
@@ -71,6 +79,9 @@ export const useAuthStore = defineStore('auth', () => {
   // 로그아웃 처리
   const logout = async () => {
     try {
+      // ✅ 로그아웃 프로세스 시작 시 SSE 연결부터 안전하게 종료
+      stopSseConnection();
+
       if (token.value || localStorage.getItem('ACCESS_TOKEN')) {
         await userApi.logout()
       }
@@ -82,6 +93,35 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = null
       localStorage.removeItem('USERINFO')
       localStorage.removeItem('ACCESS_TOKEN')
+    }
+  }
+
+  // SSE 처리
+  const startSseConnection = (userId) => {
+    // 이미 연결된 경우 중복 연결 방지
+    if (sseInstance.value) return;
+
+    sseInstance.value = sseApi.connectWorkspaceSse({
+      userId: userId,
+      onConnect: () => console.log(`[SSE] 사용자 ${userId} 연결 성공`),
+      onTitleUpdated: (updatedData) => {
+        // 방법 1: 직접 여기서 리스트를 관리하는 스토어의 액션을 호출
+        // const postStore = usePostStore();
+        // postStore.updateItemTitle(updatedData);
+        
+        // 방법 2: 커스텀 이벤트를 발생시켜 필요한 컴포넌트에서 듣게 함
+        window.dispatchEvent(new CustomEvent('sse-title-updated', { detail: updatedData }));
+      },
+      onError: () => {
+        sseInstance.value = null; // 에러 시 참조 제거
+      }
+    });
+  }
+
+  const stopSseConnection = () => {
+    if (sseInstance.value) {
+      sseApi.closeSse(sseInstance.value);
+      sseInstance.value = null;
     }
   }
 
