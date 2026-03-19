@@ -643,7 +643,8 @@ const onDropToParentNavigator = async (event) => {
             <td class="px-6 py-4 text-sm text-gray-500">이동</td>
             <td class="px-6 py-4 text-right text-sm text-blue-600">열기</td>
           </tr>
-
+          
+          
           <tr
             v-for="(file, index) in files"
             :key="file.id || file.idx || `${getFileName(file)}-${index}`"
