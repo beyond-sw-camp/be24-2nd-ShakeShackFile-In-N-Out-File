@@ -1,179 +1,290 @@
 <script setup>
-import { ref, computed, watch } from 'vue'; 
-import postApi from '@/api/postApi'; 
-import loadpost from '@/components/workspace/loadpost';
+import { computed, ref, watch } from "vue";
+import postApi from "@/api/postApi";
+import loadpost from "@/components/workspace/loadpost";
+import { fetchGroupOverview, shareWorkspacesWithTargets } from "@/api/groupApi";
+import GroupRecipientSelector from "@/components/group/GroupRecipientSelector.vue";
 
 const props = defineProps({
   isOpen: Boolean,
   postIdx: [Number, String],
-  uuid: String, 
-  initialStatus: String 
+  uuid: String,
+  initialStatus: String,
 });
 
-const emit = defineEmits(['close', 'refresh']);
+const emit = defineEmits(["close", "refresh"]);
 
-// 상태 관리: 백엔드 Enum 값과 동일하게 유지 (Private, Shared, Public)
-const privacyStatus = ref(props.initialStatus); 
-const email = ref('');
+const privacyStatus = ref(props.initialStatus || "Private");
+const overview = ref(null);
+const isOverviewLoading = ref(false);
+const shareEmail = ref("");
+const selectedUserIds = ref([]);
+const selectedGroupIds = ref([]);
+const pendingInvites = ref([]);
+const shareError = ref("");
+const shareSuccess = ref("");
+const isSharing = ref(false);
+const isSavingStatus = ref(false);
 
-// 모달이 열릴 때 초기 상태 동기화
-watch([() => props.isOpen, () => props.initialStatus], ([newOpen, newStatus]) => {
-  if (newOpen) {
-    privacyStatus.value = newStatus || 'Private';
-  }
-}, { immediate: true });
+const inviteUrl = computed(() => (
+  `http://localhost:5173/workspace/invite?uuid=${props.uuid || ""}`
+));
 
-// 초대 링크 계산 (type에 따라 파라미터 동적 구성)
-const inviteUrl = computed(() => {
-  const type = privacyStatus.value === 'Shared' ? 'email' : 'invite';
-  
-  if (type === 'email') {
-    // email.value를 사용하여 문자열에 올바르게 포함시킵니다.
-    return `http://localhost:5173/workspace/invite?uuid=${props.uuid}&type=${type}&email=${email.value}`;
-  }
-  
-  return `http://localhost:5173/workspace/invite?uuid=${props.uuid}`;
-});
-
-const copyLink = () => {
-  if (privacyStatus.value !== 'Public') return;
-  navigator.clipboard.writeText(inviteUrl.value);
-  alert('링크가 클립보드에 복사되었습니다.');
+const resetShareState = () => {
+  shareEmail.value = "";
+  selectedUserIds.value = [];
+  selectedGroupIds.value = [];
+  pendingInvites.value = [];
+  shareError.value = "";
+  shareSuccess.value = "";
+  overview.value = null;
 };
 
-/**
- * 1. 초대장 발송 API 호출
- */
-const handleInvite = async () => {
-  if (!email.value) {
-    alert('이메일 주소를 입력해주세요.');
+const loadOverview = async () => {
+  isOverviewLoading.value = true;
+  shareError.value = "";
+
+  try {
+    overview.value = await fetchGroupOverview();
+  } catch (error) {
+    overview.value = null;
+    shareError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      "공유 대상을 불러오지 못했습니다.";
+  } finally {
+    isOverviewLoading.value = false;
+  }
+};
+
+watch(
+  [() => props.isOpen, () => props.initialStatus],
+  async ([isOpen, nextStatus]) => {
+    if (!isOpen) {
+      resetShareState();
+      return;
+    }
+
+    resetShareState();
+    privacyStatus.value = nextStatus || "Private";
+    await loadOverview();
+  },
+  { immediate: true },
+);
+
+const copyLink = async () => {
+  if (privacyStatus.value !== "Public") return;
+  await navigator.clipboard.writeText(inviteUrl.value);
+  window.alert("링크가 클립보드에 복사되었습니다.");
+};
+
+const handleShareTargets = async () => {
+  const recipientEmail = shareEmail.value.trim();
+  const userIds = selectedUserIds.value.filter(Boolean);
+  const groupIds = selectedGroupIds.value.filter(Boolean);
+
+  if (!recipientEmail && userIds.length === 0 && groupIds.length === 0) {
+    shareError.value = "공유할 사용자, 그룹, 이메일 중 하나 이상을 선택해주세요.";
     return;
   }
 
+  isSharing.value = true;
+  shareError.value = "";
+  shareSuccess.value = "";
+
   try {
-    const type = privacyStatus.value === 'Shared' ? 'email' : 'invite';
-    
-    // 이메일 주소, UUID, 타입을 객체로 묶어서 전달
-    await postApi.inviteUser({
-      email: email.value,
-      uuid: props.uuid,
-      type: type
+    if (privacyStatus.value === "Private") {
+      await postApi.updateShareStatus(props.postIdx, "Shared");
+      privacyStatus.value = "Shared";
+    }
+
+    const result = await shareWorkspacesWithTargets({
+      workspaceId: props.postIdx,
+      userIds,
+      groupIds,
+      emails: recipientEmail ? [recipientEmail] : [],
     });
-    
-    alert(`${email.value}님께 초대장을 보냈습니다.`);
-    email.value = ''; // 발송 성공 후 입력창 초기화
+
+    selectedUserIds.value = [];
+    selectedGroupIds.value = [];
+    shareEmail.value = "";
+    pendingInvites.value = result?.pendingInvites || [];
+    shareSuccess.value = "워크스페이스 공유 대상을 적용했습니다.";
+
+    if (loadpost?.side_list) {
+      await loadpost.side_list();
+    }
+    emit("refresh");
   } catch (error) {
-    console.error('Invite Error:', error);
-    alert('초대장 발송에 실패했습니다. (서버 오류)');
+    shareError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      "워크스페이스를 공유하지 못했습니다.";
+  } finally {
+    isSharing.value = false;
   }
 };
 
-/**
- * 2. 공유 상태(개인/공유/공개) 저장 API
- */
 const handleSaveStatus = async () => {
+  isSavingStatus.value = true;
+
   try {
-    // privacyStatus.value는 'Private', 'Shared', 'Public' 중 하나임
     await postApi.updateShareStatus(props.postIdx, privacyStatus.value);
-    
-    alert('공유 설정이 저장되었습니다.');
-    if (loadpost && loadpost.side_list) {
-      await loadpost.side_list(); 
+    if (loadpost?.side_list) {
+      await loadpost.side_list();
     }
-    emit('close');
+    emit("refresh");
+    window.alert("공유 설정이 저장되었습니다.");
+    emit("close");
   } catch (error) {
-    console.error('Save Status Error:', error);
-    alert('설정 저장 중 오류가 발생했습니다.');
+    console.error("Save Status Error:", error);
+    window.alert("설정 저장 중 오류가 발생했습니다.");
+  } finally {
+    isSavingStatus.value = false;
   }
 };
 </script>
 
 <template>
-  <div v-if="isOpen" class="fixed inset-0 z-[1000] flex items-center justify-center px-4">
+  <div
+    v-if="isOpen"
+    class="fixed inset-0 z-[1000] flex items-center justify-center px-4"
+  >
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="$emit('close')"></div>
 
-    <div class="relative bg-[var(--bg-main)] border border-[var(--border-color)] w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
-      
-      <div class="p-6 pb-0 flex justify-between items-start">
+    <div class="relative w-full max-w-4xl overflow-hidden rounded-3xl border border-[var(--border-color)] bg-[var(--bg-main)] shadow-2xl">
+      <div class="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border-color)] p-6">
         <div>
-          <h2 class="text-xl font-bold text-[var(--text-main)]">페이지 공유</h2>
-          <p class="text-sm text-[var(--text-muted)] mt-1">공유 범위를 설정하고 팀원을 초대하세요.</p>
+          <h2 class="text-2xl font-black text-[var(--text-main)]">워크스페이스 공유</h2>
+          <p class="mt-1 text-sm text-[var(--text-muted)]">
+            공개 링크를 관리하고, 사용자와 그룹을 선택해 워크스페이스를 공유할 수 있습니다.
+          </p>
         </div>
-        
-        <div class="flex bg-[var(--bg-input)] p-1 rounded-lg border border-[var(--border-color)] scale-90 origin-right">
-          <button 
-            v-for="status in ['Private', 'Shared', 'Public']" 
+
+        <div class="flex rounded-xl border border-[var(--border-color)] bg-[var(--bg-input)] p-1">
+          <button
+            v-for="status in ['Private', 'Shared', 'Public']"
             :key="status"
+            type="button"
+            class="rounded-lg px-3 py-1.5 text-xs font-bold transition-all"
+            :class="privacyStatus === status ? 'bg-white text-sky-600 shadow-sm dark:bg-slate-700' : 'text-[var(--text-muted)]'"
             @click="privacyStatus = status"
-            :class="[privacyStatus === status ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600' : 'text-[var(--text-muted)]']"
-            class="px-2.5 py-1 text-[11px] font-bold rounded-md transition-all whitespace-nowrap"
           >
-            {{ status === 'Private' ? '개인' : status === 'Shared' ? '공유' : '공개' }}
+            {{ status === "Private" ? "개인" : status === "Shared" ? "공유" : "공개" }}
           </button>
         </div>
       </div>
 
-      <div class="p-6 space-y-6">
-        <div :class="{ 'opacity-50 pointer-events-none': privacyStatus !== 'Public' }">
-          <label class="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2 tracking-wider">초대 링크</label>
-          <div class="flex gap-2">
-            <input 
-              type="text" 
-              readonly 
+      <div class="space-y-6 p-6">
+        <section class="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-input)]/60 p-5">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-extrabold text-[var(--text-main)]">공개 링크</p>
+              <p class="mt-1 text-xs text-[var(--text-muted)]">
+                공개 상태일 때만 링크로 바로 입장할 수 있습니다.
+              </p>
+            </div>
+            <span class="rounded-full bg-white/80 px-3 py-1 text-xs font-bold text-[var(--text-muted)] dark:bg-slate-800/70">
+              현재 상태: {{ privacyStatus === "Private" ? "개인" : privacyStatus === "Shared" ? "공유" : "공개" }}
+            </span>
+          </div>
+
+          <div class="mt-4 flex gap-2">
+            <input
+              type="text"
+              readonly
               :value="inviteUrl"
               :disabled="privacyStatus !== 'Public'"
-              class="flex-1 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-main)] outline-none disabled:cursor-not-allowed"
+              class="flex-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] px-3 py-2.5 text-sm text-[var(--text-main)] outline-none disabled:cursor-not-allowed disabled:opacity-60"
             />
-            <button 
-              @click="copyLink"
+            <button
+              type="button"
+              class="rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] px-4 py-2.5 text-sm font-semibold text-[var(--text-main)] transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-slate-700/80"
               :disabled="privacyStatus !== 'Public'"
-              class="bg-[var(--bg-input)] border border-[var(--border-color)] hover:bg-gray-200 dark:hover:bg-gray-700 text-[var(--text-main)] px-3 py-2 rounded-lg text-sm transition-colors disabled:cursor-not-allowed"
-              title="링크 복사"
+              @click="copyLink"
             >
-              <i class="fa-solid fa-copy"></i>
+              링크 복사
             </button>
           </div>
-        </div>
+        </section>
 
-        <div>
-          <label class="block text-xs font-bold text-[var(--text-muted)] uppercase mb-2 tracking-wider">사용자 초대</label>
-          <div class="flex gap-2">
-            <div class="relative flex-1">
-              <i class="fa-solid fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] text-xs"></i>
-              <input 
-                v-model="email"
-                type="email" 
-                placeholder="이메일 주소 입력"
-                class="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg pl-9 pr-3 py-2 text-sm text-[var(--text-main)] focus:border-blue-500 outline-none transition-all"
-                @keyup.enter="handleInvite"
-              />
+        <section class="space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-base font-black text-[var(--text-main)]">멤버 공유</p>
+              <p class="mt-1 text-sm text-[var(--text-muted)]">
+                사용자, 그룹, 이메일을 함께 선택할 수 있습니다. 개인 상태에서 공유하면 자동으로 공유 상태로 전환됩니다.
+              </p>
             </div>
-            <button 
-              @click="handleInvite"
-              class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all flex-shrink-0"
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+            <input
+              v-model="shareEmail"
+              type="email"
+              class="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-input)] px-4 py-3 text-sm text-[var(--text-main)] outline-none"
+              placeholder="직접 입력할 이메일"
+              :disabled="isSharing"
+              @keydown.enter.prevent="handleShareTargets"
+            />
+            <button
+              type="button"
+              class="rounded-2xl bg-sky-600 px-5 py-3 text-sm font-extrabold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-70"
+              :disabled="isSharing"
+              @click="handleShareTargets"
             >
-              초대장 발송
+              {{ isSharing ? "공유 중..." : "공유 적용" }}
             </button>
           </div>
-        </div>
+
+          <GroupRecipientSelector
+            :overview="overview"
+            :loading="isOverviewLoading"
+            :disabled="isSharing"
+            :selected-user-ids="selectedUserIds"
+            :selected-group-ids="selectedGroupIds"
+            @update:selected-user-ids="selectedUserIds = $event"
+            @update:selected-group-ids="selectedGroupIds = $event"
+          />
+
+          <p v-if="shareError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">
+            {{ shareError }}
+          </p>
+          <p v-if="shareSuccess" class="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+            {{ shareSuccess }}
+          </p>
+
+          <div
+            v-if="pendingInvites.length"
+            class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
+          >
+            <p class="font-bold">회원이 아닌 이메일은 연결 초대로 저장되었습니다.</p>
+            <ul class="mt-2 list-disc space-y-1 pl-5">
+              <li v-for="invite in pendingInvites" :key="invite.inviteId">
+                {{ invite.email }}
+              </li>
+            </ul>
+          </div>
+        </section>
       </div>
 
-      <div class="bg-[var(--bg-input)] p-4 flex justify-end gap-3">
-        <button 
+      <div class="flex justify-end gap-3 border-t border-[var(--border-color)] bg-[var(--bg-input)] p-4">
+        <button
+          type="button"
+          class="px-4 py-2 text-sm font-semibold text-[var(--text-muted)] transition hover:text-[var(--text-main)]"
           @click="$emit('close')"
-          class="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-main)] transition-colors"
-        >취소</button>
-        <button 
-          @click="handleSaveStatus"
-          class="bg-blue-600 hover:bg-blue-700 text-white px-8 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20 transition-all"
         >
-          저장
+          취소
+        </button>
+        <button
+          type="button"
+          class="rounded-xl bg-blue-600 px-7 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+          :disabled="isSavingStatus"
+          @click="handleSaveStatus"
+        >
+          {{ isSavingStatus ? "저장 중..." : "설정 저장" }}
         </button>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-/* 기존 스타일 유지 */
-</style>

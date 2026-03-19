@@ -5,6 +5,7 @@ import { updateSettingsProfile, uploadSettingsProfileImage } from "@/api/featerA
 import { STORAGE_ADDON_PRODUCTS, findMembershipProduct, formatKrw } from "@/constants/billingProducts";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useFileStore } from "@/stores/useFileStore";
+import GroupManagerPanel from "@/components/group/GroupManagerPanel.vue";
 
 const props = defineProps({
   isOpen: {
@@ -30,6 +31,7 @@ const authStore = useAuthStore();
 const fileStore = useFileStore();
 
 const activeTab = ref("profile");
+const groupFocusSection = ref("manage");
 const isSaving = ref(false);
 const isUploadingImage = ref(false);
 const saveError = ref("");
@@ -37,11 +39,19 @@ const imageFeedback = ref("");
 const profileImageInput = ref(null);
 
 const tabs = [
+  { id: "group", label: "그룹", icon: "fa-solid fa-user-group" },
   { id: "profile", label: "프로필", icon: "fa-solid fa-circle-user" },
   { id: "security", label: "보안", icon: "fa-solid fa-shield-halved" },
   { id: "notification", label: "알림", icon: "fa-solid fa-bell" },
   { id: "language", label: "언어", icon: "fa-solid fa-globe" },
   { id: "billing", label: "결제", icon: "fa-solid fa-wallet" },
+];
+
+const groupSections = [
+  { id: "requests", label: "요청 현황" },
+  { id: "invite", label: "새 연결 초대" },
+  { id: "create", label: "새 그룹 만들기" },
+  { id: "manage", label: "그룹 관리" },
 ];
 
 const localeOptions = [
@@ -207,6 +217,14 @@ const applySavedProfile = (savedProfile) => {
   localStorage.setItem("USERINFO", JSON.stringify(updatedUser));
 };
 
+const handleTabSelect = (tabId) => {
+  activeTab.value = tabId;
+
+  if (tabId === "group" && !groupFocusSection.value) {
+    groupFocusSection.value = "manage";
+  }
+};
+
 const openProfileImagePicker = () => {
   profileImageInput.value?.click();
 };
@@ -322,7 +340,7 @@ const handleSave = async () => {
     emit("close");
   } catch (error) {
     saveError.value =
-      error?.response?.data?.message ||
+      error?.response?.data?.message || 
       error?.message ||
       "설정을 저장하지 못했습니다.";
   } finally {
@@ -352,7 +370,7 @@ const handleSave = async () => {
             type="button"
             class="settings-sidebar__item"
             :class="{ 'is-active': activeTab === tab.id }"
-            @click="activeTab = tab.id"
+            @click="handleTabSelect(tab.id)"
           >
             <i :class="tab.icon"></i>
             <span>{{ tab.label }}</span>
@@ -399,6 +417,10 @@ const handleSave = async () => {
                   <input :value="profileForm.email" class="settings-input" disabled />
                 </label>
               </div>
+            </section>
+
+            <section v-else-if="activeTab === 'group'" class="settings-pane">
+              <GroupManagerPanel :active="activeTab === 'group'" :focus-section="groupFocusSection" />
             </section>
 
             <section v-else-if="activeTab === 'security'" class="settings-pane">
@@ -573,14 +595,14 @@ const handleSave = async () => {
 
 .settings-modal {
   display: flex;
-  max-height: 88vh;
   width: min(1080px, 92vw);
+  height: min(88vh, 860px);
   flex-direction: column;
   overflow: hidden;
   border-radius: 2rem;
   border: 1px solid var(--border-color);
   background: var(--bg-elevated);
-  box-shadow: 0 32px 80px rgba(15, 23, 42, 0.22);
+  box-shadow: 0 32px 80px color-mix(in srgb, #020617 18%, transparent);
 }
 
 .settings-modal__header,
@@ -642,7 +664,7 @@ const handleSave = async () => {
   gap: 0.55rem;
   border-right: 1px solid var(--border-color);
   padding: 1.2rem;
-  background: rgba(248, 250, 252, 0.72);
+  background: color-mix(in srgb, var(--bg-input) 76%, var(--bg-elevated) 24%);
 }
 
 .settings-sidebar__item {
@@ -659,6 +681,35 @@ const handleSave = async () => {
 
 .settings-sidebar__item.is-active {
   background: rgba(14, 165, 233, 0.12);
+  color: #0369a1;
+}
+
+.settings-sidebar__submenu {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.2rem;
+  padding: 0.15rem 0 0 0.85rem;
+}
+
+.settings-sidebar__subitem {
+  border-radius: 0.85rem;
+  padding: 0.72rem 0.9rem;
+  text-align: left;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-main) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.settings-sidebar__subitem:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-main) 88%);
+}
+
+.settings-sidebar__subitem.is-active {
+  background: rgba(14, 165, 233, 0.1);
+  border-color: rgba(14, 165, 233, 0.24);
   color: #0369a1;
 }
 
@@ -680,7 +731,7 @@ const handleSave = async () => {
 .settings-card {
   border-radius: 1.5rem;
   border: 1px solid var(--border-color);
-  background: white;
+  background: var(--bg-main);
   padding: 1.25rem;
 }
 
@@ -783,7 +834,7 @@ const handleSave = async () => {
   gap: 0.8rem;
   border-radius: 1rem;
   border: 1px solid var(--border-color);
-  background: white;
+  background: var(--bg-main);
   padding: 1rem 1.1rem;
   font-weight: 700;
   color: var(--text-secondary);
@@ -827,7 +878,7 @@ const handleSave = async () => {
   margin: 0.9rem 0 0.8rem;
   overflow: hidden;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: color-mix(in srgb, var(--bg-input) 78%, var(--border-color) 22%);
 }
 
 .storage-panel__bar > div {
@@ -838,7 +889,7 @@ const handleSave = async () => {
 
 .settings-info-box {
   border-radius: 1.1rem;
-  background: #f8fafc;
+  background: color-mix(in srgb, var(--bg-input) 84%, var(--bg-main) 16%);
   padding: 1rem;
 }
 
@@ -890,7 +941,7 @@ const handleSave = async () => {
   gap: 1rem;
   border-radius: 1.4rem;
   border: 1px solid var(--border-color);
-  background: white;
+  background: var(--bg-main);
   padding: 1.1rem;
 }
 
@@ -929,7 +980,7 @@ const handleSave = async () => {
 .settings-secondary-button,
 .settings-ghost-button {
   border: 1px solid var(--border-color);
-  background: white;
+  background: var(--bg-main);
   color: var(--text-secondary);
 }
 
@@ -951,13 +1002,14 @@ const handleSave = async () => {
   min-height: 12rem;
   border-radius: 1.5rem;
   border: 1px dashed var(--border-color);
-  background: rgba(248, 250, 252, 0.72);
+  background: color-mix(in srgb, var(--bg-input) 74%, var(--bg-main) 26%);
   color: var(--text-muted);
 }
 
 @media (max-width: 960px) {
   .settings-modal {
     width: min(96vw, 720px);
+    height: min(94vh, 860px);
   }
 
   .settings-modal__body {
@@ -969,6 +1021,12 @@ const handleSave = async () => {
     border-bottom: 1px solid var(--border-color);
     flex-direction: row;
     overflow-x: auto;
+  }
+
+  .settings-sidebar__submenu {
+    min-width: 100%;
+    padding-left: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .settings-grid--two,

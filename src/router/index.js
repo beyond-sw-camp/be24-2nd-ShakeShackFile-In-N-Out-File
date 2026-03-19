@@ -190,7 +190,11 @@ router.beforeEach(async (to, from, next) => {
             idx: result.idx,
             title: result.title,
             contents: result.contents,
-            type: result.type // ✨ 데이터 포함 확인
+            type: result.type,
+            status: result.status,
+            uuid: result.uuid,
+            accessRole: result.accessRole || result.level,
+            level: result.level || result.accessRole,
           };
           return next(); // 데이터 로드 성공 시 이동
         } else {
@@ -218,7 +222,11 @@ const fetchWorkspaceData = async (to, next) => {
         idx: result.idx,
         title: result.title,
         contents: result.contents,
-        type: result.type // ✨ 이 부분이 누락되어 협업 세션이 켜지지 않았습니다.
+        type: result.type,
+        status: result.status,
+        uuid: result.uuid,
+        accessRole: result.accessRole || result.level,
+        level: result.level || result.accessRole,
       };
       next();
     } else {

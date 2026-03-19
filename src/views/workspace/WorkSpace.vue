@@ -1,49 +1,248 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { initEditor } from '@/components/workspace/editor' 
+import { downloadFileAsset } from '@/api/filesApi'
 import postApi from '@/api/postApi'
+import { initEditor } from '@/components/workspace/editor'
+import { useAuthStore } from '@/stores/useAuthStore'
+import SockJS from 'sockjs-client'
+import Stomp from 'stompjs'
+
+const route = useRoute()
+const router = useRouter()
+const authStore = useAuthStore()
 
 const editorHolder = ref(null)
 const editorApi = ref(null)
 const title = ref('')
-const isEditorLoading = ref(false) 
-const showUserList = ref(false) // 사용자 목록 팝업 노출 여부
+const isEditorLoading = ref(false)
+const showUserList = ref(false)
 
-const route = useRoute();
-const router = useRouter(); 
+const workspaceId = ref(null)
+const workspaceAccessRole = ref('ADMIN')
+const workspaceAssets = ref([])
+const workspaceAssetLoading = ref(false)
+const workspaceAssetUploading = ref(false)
+const workspaceAssetError = ref('')
+const deletingAssetIds = ref([])
+const imageInput = ref(null)
+const fileInput = ref(null)
+
 const isValid = computed(() => title.value.trim().length > 0)
+const remoteCursors = computed(() => editorApi.value?.remoteCursorsRef?.value || {})
+const activeUsers = computed(() => editorApi.value?.activeUsersRef?.value || [])
+const canManageAssets = computed(() => {
+  if (!workspaceId.value) return true
+  return ['ADMIN', 'WRITE'].includes(String(workspaceAccessRole.value || 'ADMIN').toUpperCase())
+})
+const workspaceImages = computed(() => workspaceAssets.value.filter((asset) => asset.assetType === 'IMAGE'))
+const workspaceFiles = computed(() => workspaceAssets.value.filter((asset) => asset.assetType === 'FILE'))
 
-// 에디터에서 관리하는 실시간 데이터 연결
-const remoteCursors = computed(() => editorApi.value?.remoteCursorsRef || {})
-const activeUsers = computed(() => editorApi.value?.activeUsersRef || [])
+let currentSetupId = 0
+let workspaceAssetStompClient = null
+let connectedWorkspaceAssetRoomId = null
 
-let currentSetupId = 0;
+const formatBytes = (bytes) => {
+  const size = Number(bytes || 0)
+  if (!Number.isFinite(size) || size <= 0) return '0 B'
 
-async function handleSave() {
-  if (!editorApi.value?.savePost) return
-  const response = await editorApi.value.savePost()
-  router.push(`/workspace/read/${response.result.body.idx}`)
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const unitIndex = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1)
+  const value = size / 1024 ** unitIndex
+  const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
+
+  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
 }
 
-// ✨ 특정 사용자의 권한을 변경하고 저장하는 로직
-function handlePermissionChange(clientId, event) {
-  const newStatus = event.target.value;
-  if (editorApi.value?.updateUserPermission) {
-    // 권한을 'redirect'로 설정하여 즉시 내보내기 신호를 보냄
-    editorApi.value.updateUserPermission(clientId, newStatus);
-    alert('권한 설정이 저장되었습니다.');
+const formatDateTime = (value) => {
+  if (!value) return ''
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+const normalizeWorkspaceAsset = (asset = {}) => {
+  return {
+    id: asset.idx ?? asset.id ?? null,
+    workspaceId: asset.workspaceIdx ?? asset.workspaceId ?? workspaceId.value,
+    assetType: String(asset.assetType || 'FILE').toUpperCase(),
+    originalName: asset.originalName || asset.fileOriginName || '이름 없는 파일',
+    storedFileName: asset.storedFileName || asset.fileSaveName || '',
+    objectFolder: asset.objectFolder || '',
+    objectKey: asset.objectKey || asset.fileSavePath || '',
+    contentType: asset.contentType || 'application/octet-stream',
+    fileSize: Number(asset.fileSize || 0),
+    previewUrl: asset.previewUrl || '',
+    downloadUrl: asset.downloadUrl || asset.presignedDownloadUrl || '',
+    createdAt: asset.createdAt || null,
+    createdAtLabel: formatDateTime(asset.createdAt),
+    fileSizeLabel: formatBytes(asset.fileSize),
   }
 }
 
-const isDarkMode = ref(false)
-const applyTheme = (isDark) => {
-  if (isDark) {
-    document.documentElement.classList.add('dark');
-    localStorage.setItem('theme', 'dark');
-  } else {
-    document.documentElement.classList.remove('dark');
-    localStorage.setItem('theme', 'light');
+const syncTheme = () => {
+  const savedTheme = localStorage.getItem('theme')
+  const shouldUseDark =
+    savedTheme === 'dark' ||
+    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+
+  document.documentElement.classList.toggle('dark', shouldUseDark)
+}
+
+const mergeWorkspaceAssets = (nextAssets) => {
+  const assetMap = new Map()
+  ;[...nextAssets, ...workspaceAssets.value].forEach((asset) => {
+    const normalized = normalizeWorkspaceAsset(asset)
+    if (normalized.id != null) {
+      assetMap.set(String(normalized.id), normalized)
+    }
+  })
+  workspaceAssets.value = [...assetMap.values()].sort((left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime())
+}
+
+const removeWorkspaceAssets = (assetIds) => {
+  const deleteTargetSet = new Set((assetIds || []).map((assetId) => String(assetId)))
+  if (!deleteTargetSet.size) return
+
+  workspaceAssets.value = workspaceAssets.value.filter((asset) => !deleteTargetSet.has(String(asset.id)))
+}
+
+const handleWorkspaceAssetRealtimeEvent = (payload = {}) => {
+  if (Number(payload.workspaceIdx || 0) !== Number(workspaceId.value || 0)) {
+    return
+  }
+
+  if (payload.action === 'UPSERT') {
+    mergeWorkspaceAssets(Array.isArray(payload.assets) ? payload.assets : [])
+    return
+  }
+
+  if (payload.action === 'DELETE') {
+    removeWorkspaceAssets(payload.assetIdxList)
+    return
+  }
+
+  refreshWorkspaceAssets(workspaceId.value).catch(() => {})
+}
+
+const disconnectWorkspaceAssetRealtime = () => {
+  connectedWorkspaceAssetRoomId = null
+
+  if (!workspaceAssetStompClient) {
+    return
+  }
+
+  try {
+    workspaceAssetStompClient.disconnect(() => {})
+  } catch (error) {
+    console.error('Workspace asset realtime disconnect failed:', error)
+  } finally {
+    workspaceAssetStompClient = null
+  }
+}
+
+const connectWorkspaceAssetRealtime = (targetWorkspaceId = workspaceId.value) => {
+  const normalizedWorkspaceId = Number(targetWorkspaceId || 0)
+  const accessToken = authStore.token || localStorage.getItem('ACCESS_TOKEN')
+
+  if (!normalizedWorkspaceId || !accessToken) {
+    disconnectWorkspaceAssetRealtime()
+    return
+  }
+
+  if (
+    workspaceAssetStompClient &&
+    connectedWorkspaceAssetRoomId === normalizedWorkspaceId &&
+    workspaceAssetStompClient.connected
+  ) {
+    return
+  }
+
+  disconnectWorkspaceAssetRealtime()
+
+  const socket = new SockJS('http://localhost:8080/ws-stomp')
+  const stompClient = Stomp.over(socket)
+  stompClient.debug = null
+
+  workspaceAssetStompClient = stompClient
+  stompClient.connect(
+    { Authorization: `Bearer ${accessToken}` },
+    () => {
+      if (workspaceAssetStompClient !== stompClient) {
+        stompClient.disconnect(() => {})
+        return
+      }
+
+      connectedWorkspaceAssetRoomId = normalizedWorkspaceId
+      stompClient.subscribe(`/sub/workspace/assets/${normalizedWorkspaceId}`, (message) => {
+        try {
+          const payload = JSON.parse(message.body)
+          handleWorkspaceAssetRealtimeEvent(payload)
+        } catch (error) {
+          console.error('Workspace asset realtime payload parse failed:', error)
+          refreshWorkspaceAssets(normalizedWorkspaceId).catch(() => {})
+        }
+      })
+    },
+    (error) => {
+      if (workspaceAssetStompClient === stompClient) {
+        console.error('Workspace asset realtime connection failed:', error)
+      }
+    },
+  )
+}
+
+const refreshWorkspaceAssets = async (targetWorkspaceId = workspaceId.value) => {
+  if (!targetWorkspaceId) {
+    workspaceAssets.value = []
+    workspaceAssetError.value = ''
+    return []
+  }
+
+  workspaceAssetLoading.value = true
+  workspaceAssetError.value = ''
+
+  try {
+    const result = await postApi.getWorkspaceAssets(targetWorkspaceId)
+    workspaceAssets.value = (Array.isArray(result) ? result : []).map(normalizeWorkspaceAsset)
+    return workspaceAssets.value
+  } catch (error) {
+    workspaceAssetError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      '워크스페이스 첨부 파일을 불러오지 못했습니다.'
+    workspaceAssets.value = []
+    return []
+  } finally {
+    workspaceAssetLoading.value = false
+  }
+}
+
+const handleSave = async () => {
+  if (!editorApi.value?.savePost) return
+
+  const response = await editorApi.value.savePost()
+  const savedWorkspaceId = response?.result?.body?.idx ?? response?.data?.idx ?? response?.idx ?? null
+  if (!savedWorkspaceId) return
+
+  workspaceId.value = Number(savedWorkspaceId)
+  workspaceAccessRole.value = 'ADMIN'
+  router.push(`/workspace/read/${savedWorkspaceId}`)
+}
+
+const handlePermissionChange = (clientId, event) => {
+  const newStatus = event.target.value
+  if (editorApi.value?.updateUserPermission) {
+    editorApi.value.updateUserPermission(clientId, newStatus)
+    alert('권한 설정이 저장되었습니다.')
   }
 }
 
@@ -53,127 +252,288 @@ watch(title, (newVal) => {
   }
 })
 
-async function prepareData() {
-  const id = route.params.id;
+const prepareData = async () => {
+  const id = route.params.id
   if (!id || route.path === '/workspace') {
-    return { idx: null, title: '', contents: '', type: false };
+    return {
+      idx: null,
+      title: '',
+      contents: '',
+      type: false,
+      status: 'Private',
+      uuid: '',
+      accessRole: 'ADMIN',
+    }
   }
+
   if (route.meta.initialData && String(route.meta.initialData.idx) === String(id)) {
-    return route.meta.initialData;
+    return route.meta.initialData
   }
+
   try {
-    const response = await postApi.getPost(id);
-    // result.body 구조에 맞춰 데이터 추출
-    return response.result?.body || response.data || response; 
-  } catch (err) {
-    return { idx: id, title: '', contents: '', type: false };
+    const response = await postApi.getPost(id)
+    return response?.result?.body || response?.data || response
+  } catch (error) {
+    return {
+      idx: Number(id),
+      title: '',
+      contents: '',
+      type: false,
+      status: 'Private',
+      uuid: '',
+      accessRole: 'READ',
+    }
   }
 }
 
-async function setupEditor() {
-  const setupId = ++currentSetupId; // {추가} 실행될 때마다 고유 ID 발급
-
-  if (!editorHolder.value) return;
-  isEditorLoading.value = true;
-  const data = await prepareData();
-  if (setupId !== currentSetupId) return;
-  title.value = data.title || '';
-
-  // 1. 기존 에디터 자원 해제
-  if (editorApi.value) {
-    try {
-      // {수정} 에디터가 비동기 렌더링 중일 때 파기하면 DOM에 찌꺼기가 남으므로 안전하게 대기
-      if (editorApi.value.editor && editorApi.value.editor.isReady) {
-        await editorApi.value.editor.isReady;
-      }
-      await editorApi.value.destroy();
-    } catch (e) {}
-    editorApi.value = null;
+const ensureWorkspacePersisted = async ({ navigate = false } = {}) => {
+  if (workspaceId.value) {
+    return workspaceId.value
   }
 
-  // 2. DOM 청소 및 상태 초기화
-  await nextTick();
+  if (!editorApi.value?.savePost) {
+    throw new Error('워크스페이스를 먼저 저장할 수 없습니다.')
+  }
+
+  const response = await editorApi.value.savePost()
+  const savedWorkspaceId = response?.result?.body?.idx ?? response?.data?.idx ?? response?.idx ?? null
+
+  if (!savedWorkspaceId) {
+    throw new Error('워크스페이스 저장에 실패했습니다.')
+  }
+
+  workspaceId.value = Number(savedWorkspaceId)
+  workspaceAccessRole.value = 'ADMIN'
+
+  if (navigate && String(route.params.id || '') !== String(savedWorkspaceId)) {
+    await router.replace(`/workspace/read/${savedWorkspaceId}`)
+  }
+
+  return workspaceId.value
+}
+
+const uploadWorkspaceFiles = async (files, { autoPersist = true } = {}) => {
+  const selectedFiles = Array.from(files || []).filter(Boolean)
+  if (!selectedFiles.length) return []
+
+  let targetWorkspaceId = workspaceId.value
+
+  if (!targetWorkspaceId && autoPersist) {
+    targetWorkspaceId = await ensureWorkspacePersisted({ navigate: false })
+  }
+
+  if (!targetWorkspaceId) {
+    throw new Error('워크스페이스를 먼저 저장한 뒤 업로드해 주세요.')
+  }
+
+  workspaceAssetUploading.value = true
+  workspaceAssetError.value = ''
+
+  try {
+    const uploaded = await postApi.uploadWorkspaceAssets(targetWorkspaceId, selectedFiles)
+    const normalizedAssets = (Array.isArray(uploaded) ? uploaded : []).map(normalizeWorkspaceAsset)
+    mergeWorkspaceAssets(normalizedAssets)
+    return normalizedAssets
+  } catch (error) {
+    workspaceAssetError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      '파일 업로드 중 오류가 발생했습니다.'
+    throw error
+  } finally {
+    workspaceAssetUploading.value = false
+  }
+}
+
+const handleEditorImageUpload = async (file) => {
+  const uploadedAssets = await uploadWorkspaceFiles([file], { autoPersist: true })
+  const uploadedImage = uploadedAssets.find((asset) => asset.assetType === 'IMAGE') || uploadedAssets[0]
+
+  if (!uploadedImage?.previewUrl) {
+    throw new Error('이미지 업로드 결과를 확인할 수 없습니다.')
+  }
+
+  return uploadedImage
+}
+
+const handleAssetSelection = async (event) => {
+  const files = Array.from(event.target?.files || [])
+  if (!files.length) return
+
+  try {
+    await uploadWorkspaceFiles(files, { autoPersist: true })
+  } catch (error) {
+    console.error('Workspace asset upload failed:', error)
+  } finally {
+    event.target.value = ''
+  }
+}
+
+const triggerImageSelect = () => {
+  if (!canManageAssets.value) return
+  imageInput.value?.click()
+}
+
+const triggerFileSelect = () => {
+  if (!canManageAssets.value) return
+  fileInput.value?.click()
+}
+
+const handleAssetDelete = async (asset) => {
+  if (!asset?.id || !workspaceId.value || !canManageAssets.value) return
+
+  deletingAssetIds.value = [...deletingAssetIds.value, asset.id]
+  workspaceAssetError.value = ''
+
+  try {
+    await postApi.deleteWorkspaceAsset(workspaceId.value, asset.id)
+    workspaceAssets.value = workspaceAssets.value.filter((item) => item.id !== asset.id)
+  } catch (error) {
+    workspaceAssetError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      '첨부 파일을 삭제하지 못했습니다.'
+  } finally {
+    deletingAssetIds.value = deletingAssetIds.value.filter((id) => id !== asset.id)
+  }
+}
+
+const isDeletingAsset = (assetId) => deletingAssetIds.value.includes(assetId)
+
+const downloadWorkspaceAsset = async (asset) => {
+  if (!asset?.downloadUrl) return
+
+  try {
+    await downloadFileAsset(
+      {
+        presignedDownloadUrl: asset.downloadUrl,
+        fileOriginName: asset.originalName,
+      },
+      asset.originalName,
+    )
+  } catch (error) {
+    workspaceAssetError.value = '파일 다운로드에 실패했습니다.'
+  }
+}
+
+const setupEditor = async () => {
+  const setupId = ++currentSetupId
+
+  if (!editorHolder.value) return
+
+  isEditorLoading.value = true
+  const data = await prepareData()
+  if (setupId !== currentSetupId) return
+
+  title.value = data.title || ''
+  workspaceId.value = data.idx ? Number(data.idx) : null
+  workspaceAccessRole.value = data.accessRole || data.level || 'ADMIN'
+  await refreshWorkspaceAssets(workspaceId.value)
+
+  if (editorApi.value) {
+    try {
+      if (editorApi.value.editor?.isReady) {
+        await editorApi.value.editor.isReady
+      }
+      await editorApi.value.destroy()
+    } catch (error) {
+      console.error('Editor destroy failed:', error)
+    }
+    editorApi.value = null
+  }
+
+  await nextTick()
   if (editorHolder.value) {
-    editorHolder.value.innerHTML = "";
+    editorHolder.value.innerHTML = ''
   }
 
   try {
-    // 3. 에디터 초기화
     const newEditorApi = await initEditor(
       editorHolder.value,
-      `notion-room-${data.idx ? data.idx : 'new-' + Date.now()}`,
+      `notion-room-${data.idx ? data.idx : `new-${Date.now()}`}`,
       data.contents,
       data.idx ?? null,
       data.title,
-      data.type // 서버에서 받아온 type (true/false) 전달
-    );
+      data.type,
+      {
+        uploadImage: handleEditorImageUpload,
+      },
+    )
 
-    // {추가} 초기화 도중에 라우터가 또 변경되었다면 새로 만든 에디터 즉시 파기
     if (setupId !== currentSetupId) {
-      if (newEditorApi.editor && newEditorApi.editor.isReady) {
-        await newEditorApi.editor.isReady;
+      if (newEditorApi.editor?.isReady) {
+        await newEditorApi.editor.isReady
       }
-      newEditorApi.destroy();
-      return;
+      newEditorApi.destroy()
+      return
     }
-    editorApi.value = newEditorApi;
-    if (editorApi.value?.bindTitleRef) editorApi.value.bindTitleRef(title);
+
+    editorApi.value = newEditorApi
+    editorApi.value?.bindTitleRef?.(title)
   } catch (error) {
-    console.error('에디터 초기화 실패:', error);
+    console.error('에디터 초기화 실패:', error)
   } finally {
-    // {수정} 현재 진행 중인 셋업일 때만 로딩 상태 해제
     if (setupId === currentSetupId) {
-      isEditorLoading.value = false;
+      isEditorLoading.value = false
     }
   }
 }
 
-async function checkAndRedirectUuid() {
-  const uuid = route.query.uuid;
-  if (route.path.includes('/invite') && uuid) {
-    try {
-      const response = await postApi.getPostByUuid(uuid); 
-      const data = response.result?.body || response.data || response;
-      if (data && data.idx) {
-        await router.replace({ name: 'workspace_read', params: { id: data.idx } });
-        return true; 
-      } else {
-        throw new Error("게시글 정보가 없습니다.");
-      }
-    } catch (error) {
-      console.error('UUID로 게시글을 찾을 수 없습니다.', error);
-      await router.replace('/workspace');
-      return true;
-    }
+const checkAndRedirectUuid = async () => {
+  const uuid = route.query.uuid
+  if (!route.path.includes('/invite') || !uuid) {
+    return false
   }
-  return false; 
+
+  try {
+    const response = await postApi.getPostByUuid(uuid)
+    const data = response?.result?.body || response?.data || response
+
+    if (data?.idx) {
+      await router.replace({ name: 'workspace_read', params: { id: data.idx } })
+      return true
+    }
+  } catch (error) {
+    console.error('UUID redirect failed:', error)
+  }
+
+  await router.replace('/workspace')
+  return true
 }
 
 onMounted(async () => {
-  const savedTheme = localStorage.getItem('theme')
-  isDarkMode.value = savedTheme === 'dark' || 
-    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  applyTheme(isDarkMode.value)
-  const isRedirected = await checkAndRedirectUuid();
-  if (!isRedirected) {
-    await setupEditor();
+  syncTheme()
+  const redirected = await checkAndRedirectUuid()
+  if (!redirected) {
+    await setupEditor()
   }
 })
 
 watch(() => route.params.id, async () => {
-  await setupEditor();
+  await setupEditor()
 })
 
 watch(() => route.path, async (newPath) => {
-  if (newPath === '/workspace') await setupEditor();
+  if (newPath === '/workspace') {
+    await setupEditor()
+  }
 })
 
+watch(
+  () => workspaceId.value,
+  (nextWorkspaceId) => {
+    connectWorkspaceAssetRealtime(nextWorkspaceId)
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(async () => {
+  disconnectWorkspaceAssetRealtime()
   if (editorApi.value?.destroy) {
-    if (editorApi.value.editor && editorApi.value.editor.isReady) {
-      await editorApi.value.editor.isReady;
+    if (editorApi.value.editor?.isReady) {
+      await editorApi.value.editor.isReady
     }
-    await editorApi.value.destroy();
+    await editorApi.value.destroy()
   }
 })
 </script>
@@ -182,15 +542,15 @@ onBeforeUnmount(async () => {
   <div class="editor-shell">
     <div class="editor-header">
       <input v-model="title" placeholder="제목 없음" class="title-input" />
-      
+
       <div class="user-presence-wrapper">
         <button class="presence-toggle-btn" @click="showUserList = !showUserList">
           <span class="user-count-badge">{{ activeUsers.length }}</span>
-          사용자 목록
+          참여자
         </button>
 
         <div v-if="showUserList" class="user-list-popover">
-          <div class="popover-title">참여 중인 사용자</div>
+          <div class="popover-title">현재 참여 중인 사용자</div>
           <div class="user-item-list">
             <div v-for="user in activeUsers" :key="user.clientId" class="user-item">
               <div class="user-avatar" :style="{ background: user.color }">
@@ -200,13 +560,13 @@ onBeforeUnmount(async () => {
                 <div class="user-name">
                   {{ user.name }} <span v-if="user.isMe" class="me-tag">(나)</span>
                 </div>
-                <select 
-                  v-if="!user.isMe" 
-                  class="permission-select" 
+                <select
+                  v-if="!user.isMe"
+                  class="permission-select"
                   @change="handlePermissionChange(user.clientId, $event)"
                 >
                   <option value="edit">편집 가능</option>
-                  <option value="redirect">권한 회수 (내보내기)</option>
+                  <option value="redirect">권한 회수</option>
                 </select>
               </div>
             </div>
@@ -217,93 +577,510 @@ onBeforeUnmount(async () => {
       <button :disabled="!isValid" @click="handleSave" class="save-btn">저장</button>
     </div>
 
+    <div class="workspace-assets">
+      <div class="workspace-assets__header">
+        <div>
+          <p class="workspace-assets__summary">
+            이미지 {{ workspaceImages.length }}개 · 파일 {{ workspaceFiles.length }}개
+          </p>
+        </div>
+
+        <div v-if="canManageAssets" class="workspace-assets__actions">
+          <input ref="imageInput" type="file" accept="image/*" multiple hidden @change="handleAssetSelection" />
+          <input ref="fileInput" type="file" multiple hidden @change="handleAssetSelection" />
+          <button type="button" class="asset-action-btn" :disabled="workspaceAssetUploading" @click="triggerImageSelect">
+            이미지 업로드
+          </button>
+          <button type="button" class="asset-action-btn asset-action-btn--secondary" :disabled="workspaceAssetUploading" @click="triggerFileSelect">
+            파일 업로드
+          </button>
+        </div>
+      </div>
+
+      <p v-if="workspaceAssetError" class="workspace-assets__error">{{ workspaceAssetError }}</p>
+      <p v-else-if="!workspaceId" class="workspace-assets__hint">처음 업로드할 때 워크스페이스가 먼저 저장됩니다.</p>
+
+      <div v-if="workspaceAssetLoading" class="workspace-assets__loading">첨부 자산을 불러오는 중입니다...</div>
+
+      <section v-if="workspaceImages.length > 0" class="workspace-assets__group">
+        <div class="workspace-assets__group-header">
+          <h4>이미지</h4>
+        </div>
+        <div class="workspace-image-grid">
+          <article v-for="asset in workspaceImages" :key="asset.id" class="workspace-image-card">
+            <button
+              v-if="canManageAssets"
+              type="button"
+              class="asset-remove-btn"
+              :disabled="isDeletingAsset(asset.id)"
+              @click.stop="handleAssetDelete(asset)"
+            >
+              ×
+            </button>
+            <a :href="asset.previewUrl" target="_blank" rel="noopener noreferrer" class="workspace-image-card__preview">
+              <img :src="asset.previewUrl" :alt="asset.originalName" class="workspace-image-card__image" />
+            </a>
+            <div class="workspace-image-card__meta">
+              <strong>{{ asset.originalName }}</strong>
+              <span>{{ asset.fileSizeLabel }}</span>
+              <span v-if="asset.createdAtLabel">{{ asset.createdAtLabel }}</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section v-if="workspaceFiles.length > 0" class="workspace-assets__group">
+        <div class="workspace-assets__group-header">
+          <h4>파일</h4>
+        </div>
+        <div class="workspace-file-list">
+          <article v-for="asset in workspaceFiles" :key="asset.id" class="workspace-file-card-wrap">
+            <button
+              v-if="canManageAssets"
+              type="button"
+              class="asset-remove-btn asset-remove-btn--file"
+              :disabled="isDeletingAsset(asset.id)"
+              @click.stop="handleAssetDelete(asset)"
+            >
+              ×
+            </button>
+            <button type="button" class="workspace-file-card" @click="downloadWorkspaceAsset(asset)">
+              <div class="workspace-file-card__icon">
+                <i class="fa-solid fa-file-arrow-down"></i>
+              </div>
+              <div class="workspace-file-card__meta">
+                <strong>{{ asset.originalName }}</strong>
+                <span>{{ asset.fileSizeLabel }}</span>
+                <span v-if="asset.createdAtLabel">{{ asset.createdAtLabel }}</span>
+              </div>
+            </button>
+          </article>
+        </div>
+      </section>
+
+      <div v-if="!workspaceAssetLoading && workspaceImages.length === 0 && workspaceFiles.length === 0" class="workspace-assets__empty">
+        업로드된 이미지나 파일이 없습니다.
+      </div>
+    </div>
+
     <div class="editor-body">
       <div v-if="isEditorLoading" class="loading-overlay">로딩 중...</div>
       <div ref="editorHolder" id="editor-holder" class="editor-holder"></div>
     </div>
 
     <div class="cursors-overlay" aria-hidden>
-      <div v-for="(c, id) in remoteCursors" :key="id" class="remote-cursor" :style="c.style">
+      <div v-for="(cursor, id) in remoteCursors" :key="id" class="remote-cursor" :style="cursor.style">
         <svg class="cursor-pointer" width="18" height="24" viewBox="0 0 18 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M2 2L16 11L9 13L13 20L10 22L6 15L2 19V2Z" :fill="c.color" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M2 2L16 11L9 13L13 20L10 22L6 15L2 19V2Z" :fill="cursor.color" stroke="white" stroke-width="2" stroke-linejoin="round" />
         </svg>
-        <div class="cursor-label" :style="{ background: c.color }">{{ c.name }}</div>
+        <div class="cursor-label" :style="{ background: cursor.color }">{{ cursor.name }}</div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-:root { --editor-bg: #ffffff; --editor-text: #1f2937; --editor-border: #f0f0f0; --editor-input-bg: #ffffff; }
-:global(html.dark) { --editor-bg: #1e1e1e; --editor-text: #e5e7eb; --editor-border: #333333; --editor-input-bg: #2d2d2d; }
+:root {
+  --editor-bg: #ffffff;
+  --editor-text: #1f2937;
+  --editor-border: #e5e7eb;
+  --editor-input-bg: #ffffff;
+}
+
+:global(html.dark) {
+  --editor-bg: #1e1e1e;
+  --editor-text: #e5e7eb;
+  --editor-border: #333333;
+  --editor-input-bg: #2d2d2d;
+}
 
 .editor-shell {
   position: relative;
-  overflow: visible; /* 팝업이 보일 수 있도록 수정 */
-  max-width: 900px; margin: 24px auto; background: var(--editor-bg);
-  color: var(--editor-text); border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+  overflow: visible;
+  max-width: 980px;
+  margin: 24px auto;
+  background: var(--editor-bg);
+  color: var(--editor-text);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
   transition: background 0.3s, color 0.3s;
 }
 
-.editor-header { display:flex; gap:12px; align-items:center; padding:20px; border-bottom:1px solid var(--editor-border); }
-.title-input { flex:1; font-size:20px; padding:8px 12px; border-radius:6px; border:1px solid var(--editor-border); background: var(--editor-input-bg); color: var(--editor-text); }
-.save-btn { padding:8px 12px; background:#2563eb; color:white; border-radius:6px; cursor:pointer; border: none; }
-.save-btn:disabled { background: #94a3b8; cursor: not-allowed; }
-
-/* 👥 사용자 목록 스타일 */
-.user-presence-wrapper { position: relative; }
-.presence-toggle-btn { 
-  display: flex; align-items: center; gap: 8px; padding: 8px 12px; 
-  background: var(--editor-input-bg); border: 1px solid var(--editor-border); 
-  border-radius: 6px; cursor: pointer; color: var(--editor-text); font-size: 14px;
+.editor-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid var(--editor-border);
 }
-.user-count-badge { background: #2ecc71; color: white; border-radius: 10px; padding: 1px 6px; font-size: 11px; font-weight: bold; }
+
+.title-input {
+  flex: 1;
+  font-size: 20px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--editor-border);
+  background: var(--editor-input-bg);
+  color: var(--editor-text);
+}
+
+.save-btn,
+.asset-action-btn {
+  padding: 9px 14px;
+  background: #2563eb;
+  color: white;
+  border-radius: 10px;
+  cursor: pointer;
+  border: none;
+  font-weight: 700;
+}
+
+.save-btn:disabled,
+.asset-action-btn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+.asset-action-btn--secondary {
+  background: #0f172a;
+}
+
+.user-presence-wrapper {
+  position: relative;
+}
+
+.presence-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--editor-input-bg);
+  border: 1px solid var(--editor-border);
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--editor-text);
+  font-size: 14px;
+}
+
+.user-count-badge {
+  background: #16a34a;
+  color: white;
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: bold;
+}
 
 .user-list-popover {
-  position: absolute; top: 45px; right: 0; width: 240px; 
-  background: var(--editor-bg); border: 1px solid var(--editor-border); 
-  border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); z-index: 1000; padding: 16px;
-}
-.popover-title { font-size: 12px; color: #888; margin-bottom: 12px; font-weight: 600; }
-.user-item { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.user-avatar { 
-  width: 32px; height: 32px; border-radius: 50%; display: flex; 
-  align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;
-}
-.user-info { flex: 1; }
-.user-name { font-size: 14px; font-weight: 500; }
-.me-tag { font-size: 11px; color: #888; }
-.permission-select { 
-  display: block; width: 100%; margin-top: 4px; font-size: 11px; 
-  background: transparent; border: none; color: #2563eb; cursor: pointer;
+  position: absolute;
+  top: 45px;
+  right: 0;
+  width: 260px;
+  background: var(--editor-bg);
+  border: 1px solid var(--editor-border);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  padding: 16px;
 }
 
-.editor-body { position:relative; min-height:60vh; padding:20px; }
-.loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; z-index: 10; }
-.editor-holder { min-height:48vh; border-radius:8px; border:1px solid var(--editor-border); padding:18px; font-size:16px; background: var(--editor-bg); }
+.popover-title {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
 
-.cursors-overlay { position:absolute; inset: 0; pointer-events:none; z-index: 100; }
+.user-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
 
-/* 🚀 커서 최적화: Transition 제거 및 GPU 가속 사용 */
-.remote-cursor { 
-  position:absolute; 
-  display:flex; 
-  align-items:flex-start;
-  /* 뺑뺑 돌릴 때 지연을 없애기 위해 transition: none 설정 */
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.user-info {
+  flex: 1;
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.me-tag {
+  font-size: 11px;
+  color: #888;
+}
+
+.permission-select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font-size: 11px;
+  background: transparent;
+  border: none;
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.workspace-assets {
+  padding: 20px;
+  border-bottom: 1px solid var(--editor-border);
+}
+
+.workspace-assets__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.workspace-assets__title {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.workspace-assets__summary,
+.workspace-assets__hint {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.workspace-assets__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.workspace-assets__error {
+  margin-top: 12px;
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.workspace-assets__loading,
+.workspace-assets__empty {
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px dashed var(--editor-border);
+  border-radius: 14px;
+  font-size: 13px;
+  color: #64748b;
+  text-align: center;
+}
+
+.workspace-assets__group {
+  margin-top: 18px;
+}
+
+.workspace-assets__group-header {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.workspace-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.workspace-image-card,
+.workspace-file-card-wrap {
+  position: relative;
+}
+
+.workspace-image-card {
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid var(--editor-border);
+  background: color-mix(in srgb, var(--editor-bg) 96%, #eff6ff 4%);
+}
+
+.workspace-image-card__preview {
+  display: block;
+  aspect-ratio: 16 / 11;
+  overflow: hidden;
+}
+
+.workspace-image-card__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.workspace-image-card__meta,
+.workspace-file-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+}
+
+.workspace-image-card__meta strong,
+.workspace-file-card__meta strong {
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.workspace-image-card__meta span,
+.workspace-file-card__meta span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.workspace-file-list {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-file-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  border: 1px solid var(--editor-border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--editor-bg) 97%, #f8fafc 3%);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.workspace-file-card__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.asset-remove-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15, 23, 42, 0.72);
+  color: white;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.asset-remove-btn--file {
+  top: 12px;
+  right: 12px;
+}
+
+.asset-remove-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.editor-body {
+  position: relative;
+  min-height: 60vh;
+  padding: 20px;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.editor-holder {
+  min-height: 48vh;
+  border-radius: 12px;
+  border: 1px solid var(--editor-border);
+  padding: 18px;
+  font-size: 16px;
+  background: var(--editor-bg);
+}
+
+.cursors-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.remote-cursor {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
   transition: none !important;
   will-change: transform;
 }
+
 .cursor-pointer {
   position: absolute;
-  top: -2px; left: -2px;
-  filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.3));
-}
-.cursor-label { 
-  color:white; font-size:12px; font-weight: 500;
-  padding:3px 8px; border-radius:12px;
-  white-space: nowrap; margin-top: 18px; margin-left: 10px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+  top: -2px;
+  left: -2px;
+  filter: drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.3));
 }
 
-:deep(.ce-block h1) { font-size: 40px !important; font-weight: 700; }
+.cursor-label {
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+  margin-top: 18px;
+  margin-left: 10px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+:deep(.ce-block h1) {
+  font-size: 40px !important;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .editor-header,
+  .workspace-assets__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workspace-assets__actions {
+    justify-content: flex-start;
+  }
+
+  .workspace-image-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
 </style>

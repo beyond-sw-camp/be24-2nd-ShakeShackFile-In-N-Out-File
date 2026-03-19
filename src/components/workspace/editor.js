@@ -22,11 +22,12 @@ import { ref } from 'vue'
 import postApi from '@/api/postApi'
 import loadpost from './loadpost'
 
-export async function initEditor(holderElement, room, initialData, idx, initialTitle, isCollaborative = false) {
+export async function initEditor(holderElement, room, initialData, idx, initialTitle, isCollaborative = false, options = {}) {
   if (!holderElement) throw new Error('holderElement is required')
 
   const ydoc = new Y.Doc()
   let provider = null
+  let currentIdx = idx ?? null
   
   // type이 true일 때만 웹소켓 연결
   if (isCollaborative) {
@@ -79,6 +80,39 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     }
   })
 
+  const imageToolConfig = options?.uploadImage
+    ? {
+        class: ImageTool,
+        config: {
+          uploader: {
+            async uploadByFile(file) {
+              const uploadedAsset = await options.uploadImage(file)
+              const imageUrl = uploadedAsset?.previewUrl || uploadedAsset?.downloadUrl || uploadedAsset?.url
+
+              if (!imageUrl) {
+                throw new Error('Image upload failed')
+              }
+
+              return {
+                success: 1,
+                file: {
+                  url: imageUrl,
+                },
+              }
+            },
+            async uploadByUrl(url) {
+              return {
+                success: 1,
+                file: {
+                  url,
+                },
+              }
+            },
+          },
+        },
+      }
+    : { class: ImageTool }
+
   const tools = {
     header: { class: Header, tunes: ['alignment'], config: { levels: [1,2,3,4], defaultLevel: 1 } },
     list: { class: List, inlineToolbar: true, tunes: ['alignment'] },
@@ -86,7 +120,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     table: { class: Table, inlineToolbar: true },
     code: { class: CodeTool },
     embed: { class: Embed, inlineToolbar: false },
-    image: { class: ImageTool },
+    image: imageToolConfig,
     linkTool: { class: LinkTool },
     inlineCode: { class: InlineCode },
     delimiter: Delimiter,
@@ -191,13 +225,24 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     if (!editor) return;
     try {
       await editor.isReady;
-      const savedData = await editor.save(); 
+      const savedData = await editor.save();
+
+      // yjs 동기화 전에 저장을 누르면 yTitle이 비어 있을 수 있으므로
+      // initialTitle을 fallback으로 사용하고, 둘 다 없으면 '제목 없음'으로 저장
+      const resolvedTitle = yTitle.toString().trim() || (initialTitle ?? '').trim() || '제목 없음';
+
       const postData = {
-        idx : idx ?? null,
-        title: yTitle.toString(), 
+        idx: currentIdx,
+        title: resolvedTitle,
         contents: JSON.stringify(savedData)
       };
+
       const response = await postApi.savePost(postData);
+      // postApi.savePost()는 PostDto.ResPost를 unwrap해서 반환하므로 .idx로 바로 접근
+      const savedIdx = response?.idx ?? null;
+      if (savedIdx != null) {
+        currentIdx = savedIdx;
+      }
       await loadpost.side_list();
       return response;
     } catch (e) {

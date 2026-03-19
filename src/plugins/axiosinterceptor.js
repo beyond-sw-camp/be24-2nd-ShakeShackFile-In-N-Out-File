@@ -18,9 +18,19 @@ api.interceptors.request.use(
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`
     }
-    
-    // post 요청일 경우 Content-Type 강제 지정 (기존 postApi의 역할 대체)
-    if (config.method === 'post' && !config.headers['Content-Type']) {
+
+    const isFormDataRequest =
+      typeof FormData !== 'undefined' &&
+      config.data instanceof FormData
+
+    if (isFormDataRequest) {
+      delete config.headers['Content-Type']
+      delete config.headers['content-type']
+      return config
+    }
+
+    // JSON 본문 요청에만 Content-Type을 지정합니다.
+    if (config.method === 'post' && !config.headers['Content-Type'] && !config.headers['content-type']) {
       config.headers['Content-Type'] = 'application/json'
     }
 

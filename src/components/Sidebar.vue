@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import FileUpload from '@/components/function/FilesUploadWidget.vue';
 import loadpost from '@/components/workspace/loadpost';
 import { useFileStore } from '@/stores/useFileStore';
@@ -118,8 +118,16 @@ const sidebarToggleStyle = computed(() => ({
 }))
 
 const router = useRouter();
+const route = useRoute();
+
 const goToPost = async (idx) => {
   if (!idx) return;
+
+  // 현재 보고 있는 페이지와 동일한 idx를 클릭하면 새로고침 X
+  if (String(route.params.id) === String(idx)) {
+    return;
+  }
+
   if (typeof window.__activeEditorDestroy === 'function') {
     window.__activeEditorDestroy();
     window.__activeEditorDestroy = null;
@@ -279,19 +287,19 @@ const handleAction = async (action, idx) => {
                     <i class="fa-solid fa-ellipsis text-xs"></i>
                   </button>
                   <div v-if="openMenuId === item.post_idx" class="absolute right-2 top-10 w-32 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg shadow-xl z-[110] py-1 overflow-hidden">
-                    <button @click.stop="handleAction('share', item.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
+                    <button v-if="item.level === 'ADMIN'" @click.stop="handleAction('share', item.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
                       <i class="fa-solid fa-share-nodes w-3"></i> 공유
                     </button>
-                    <button @click.stop="handleAction('settings', item.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
+                    <button v-if="item.level === 'ADMIN'" @click.stop="handleAction('settings', item.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
                       <i class="fa-solid fa-lock w-3"></i> 권한 설정
                     </button>
                     
-                    <button v-if="item.status !== 'Private' && item.level !== 'ADMIN'" @click.stop="handleAction('listDelete', item.post_idx)" class="w-full text-left px-4 py-2 text-xs text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center gap-2">
+                    <button v-if="item.level !== 'ADMIN'" @click.stop="handleAction('listDelete', item.post_idx)" class="w-full text-left px-4 py-2 text-xs text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center gap-2">
                       <i class="fa-solid fa-rectangle-xmark w-3"></i> 목록 삭제
                     </button>
 
-                    <div class="border-t border-[var(--border-color)] my-1"></div>
-                    <button @click.stop="handleAction('delete', item.post_idx)" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
+                    <div v-if="item.level === 'ADMIN'" class="border-t border-[var(--border-color)] my-1"></div>
+                    <button v-if="item.level === 'ADMIN'" @click.stop="handleAction('delete', item.post_idx)" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
                       <i class="fa-solid fa-trash w-3"></i> 삭제
                     </button>
                   </div>
@@ -317,19 +325,19 @@ const handleAction = async (action, idx) => {
                     <i class="fa-solid fa-ellipsis text-xs"></i>
                   </button>
                   <div v-if="openMenuId === team.post_idx" class="absolute right-2 top-10 w-32 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg shadow-xl z-[110] py-1 overflow-hidden">
-                    <button @click.stop="handleAction('share', team.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
+                    <button v-if="team.level === 'ADMIN'" @click.stop="handleAction('share', team.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
                       <i class="fa-solid fa-share-nodes w-3"></i> 공유
                     </button>
-                    <button @click.stop="handleAction('settings', team.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
+                    <button v-if="team.level === 'ADMIN'" @click.stop="handleAction('settings', team.post_idx)" class="w-full text-left px-4 py-2 text-xs hover:bg-[var(--bg-input)] transition-colors flex items-center gap-2">
                       <i class="fa-solid fa-lock w-3"></i> 권한 설정
                     </button>
 
-                    <button v-if="team.status !== 'Private' && team.level !== 'ADMIN'" @click.stop="handleAction('listDelete', team.post_idx)" class="w-full text-left px-4 py-2 text-xs text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center gap-2">
+                    <button v-if="team.level !== 'ADMIN'" @click.stop="handleAction('listDelete', team.post_idx)" class="w-full text-left px-4 py-2 text-xs text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors flex items-center gap-2">
                       <i class="fa-solid fa-rectangle-xmark w-3"></i> 목록 삭제
                     </button>
 
-                    <div class="border-t border-[var(--border-color)] my-1"></div>
-                    <button @click.stop="handleAction('delete', team.post_idx)" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
+                    <div v-if="team.level === 'ADMIN'" class="border-t border-[var(--border-color)] my-1"></div>
+                    <button v-if="team.level === 'ADMIN'" @click.stop="handleAction('delete', team.post_idx)" class="w-full text-left px-4 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2">
                       <i class="fa-solid fa-trash w-3"></i> 삭제
                     </button>
                   </div>

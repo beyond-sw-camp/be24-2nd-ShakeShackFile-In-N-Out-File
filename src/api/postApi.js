@@ -1,14 +1,66 @@
 import api from '@/plugins/axiosinterceptor'
 
-const VAPID_PUBLIC_KEY = 'BLHgfPga02L2u89uc4xjhbUFTy_U04rQCjGq7o24oxtqfVmAPHTxOmp6xndSHZtGQpmt7gqTFdMXco2gRNP7_p8'
+const VAPID_PUBLIC_KEY =
+  'BLHgfPga02L2u89uc4xjhbUFTy_U04rQCjGq7o24oxtqfVmAPHTxOmp6xndSHZtGQpmt7gqTFdMXco2gRNP7_p8'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 내부 유틸
+// ─────────────────────────────────────────────────────────────────────────────
 
 const urlBase64ToUint8Array = (base64String) => {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
   const rawData = window.atob(base64)
-
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
 }
+
+const extractBody = (baseResponse) => {
+  if (!baseResponse) return null
+  if (baseResponse?.result?.body !== undefined) return baseResponse.result.body
+  if (baseResponse?.data?.result?.body !== undefined) return baseResponse.data.result.body
+  if (baseResponse?.data !== undefined) return baseResponse.data
+  return baseResponse
+}
+
+const apiCall = async (label, request, fallback = undefined) => {
+  try {
+    const response = await request()
+    const baseResponse = response.data
+
+    if (baseResponse?.success === false) {
+      const code = baseResponse?.code ?? 'UNKNOWN'
+      const message = baseResponse?.message ?? '알 수 없는 오류가 발생했습니다.'
+      console.error(`[${label}] 실패 — [${code}] ${message}`)
+      const error = new Error(message)
+      error.code = code
+      error.baseResponse = baseResponse
+      throw error
+    }
+
+    return extractBody(baseResponse)
+  } catch (error) {
+    if (error.baseResponse) throw error
+
+    const serverData = error.response?.data
+    if (serverData?.success === false) {
+      const code = serverData?.code ?? error.response?.status ?? 'NETWORK'
+      const message = serverData?.message ?? error.message
+      console.error(`[${label}] 실패 — [${code}] ${message}`)
+      const wrappedError = new Error(message)
+      wrappedError.code = code
+      wrappedError.baseResponse = serverData
+      throw wrappedError
+    }
+
+    console.error(`[${label}] 오류 —`, error)
+    if (fallback !== undefined) return fallback
+    throw error
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 알림 (원본 코드 유지)
+// ─────────────────────────────────────────────────────────────────────────────
 
 const subscribeWebPush = async () => {
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
@@ -17,9 +69,7 @@ const subscribeWebPush = async () => {
 
   try {
     const permission = await Notification.requestPermission()
-    if (permission !== 'granted') {
-      return null
-    }
+    if (permission !== 'granted') return null
 
     const registration = await navigator.serviceWorker.register('/sw.js')
 
@@ -67,9 +117,7 @@ const markNotificationAsRead = async ({ id = null, uuid = null } = {}) => {
 
 const deleteNotification = async ({ id = null, uuid = null } = {}) => {
   try {
-    const response = await api.delete('/notification', {
-      data: { id, uuid },
-    })
+    const response = await api.delete('/notification', { data: { id, uuid } })
     return response.data
   } catch (error) {
     console.error('알림 삭제 실패:', error)
@@ -77,137 +125,97 @@ const deleteNotification = async ({ id = null, uuid = null } = {}) => {
   }
 }
 
-const savePost = async (formData) => {
-  try {
-    const response = await api.post('/workspace/save', formData)
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// 워크스페이스 CRUD
+// ─────────────────────────────────────────────────────────────────────────────
 
-const getPost = async (idx) => {
-  try {
-    const response = await api.get(`/workspace/read/${idx}`)
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
-}
+const savePost = async (formData) =>
+  apiCall('savePost', () => api.post('/workspace/save', formData))
 
-const allPosts = async () => {
-  try {
-    const response = await api.get('/workspace/list')
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
-}
+const getPost = async (idx) =>
+  apiCall('getPost', () => api.get(`/workspace/read/${idx}`))
 
-const deletePost = async (idx) => {
-  try {
-    const response = await api.post(`/workspace/delete/${idx}`)
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
-}
+const allPosts = async () =>
+  apiCall('allPosts', () => api.get('/workspace/list'))
 
-const list_delete = async (idx) => {
-  try {
-    const response = await api.post(`/workspace/delete/list/${idx}`)
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
-}
+const deletePost = async (idx) =>
+  apiCall('deletePost', () => api.post(`/workspace/delete/${idx}`))
 
-const inviteUser = async (inviteData) => {
-  try {
-    const response = await api.post('/workspace/invite', null, {
-      params: {
-        uuid: inviteData.uuid,
-        type: inviteData.type,
-        email: inviteData.email,
-      },
-      timeout: 15000,
-    })
+const list_delete = async (idx) =>
+  apiCall('list_delete', () => api.post(`/workspace/delete/list/${idx}`))
 
-    return response.data
-  } catch (error) {
-    console.error('API Error (inviteUser):', error)
-    throw error
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// 공유 / 초대
+// ─────────────────────────────────────────────────────────────────────────────
 
-const updateShareStatus = async (idx, status) => {
-  try {
-    const requestBody = {
+const inviteUser = async (inviteData) =>
+  apiCall(
+    'inviteUser',
+    () =>
+      api.post('/workspace/invite', null, {
+        params: {
+          uuid: inviteData.uuid,
+          type: inviteData.type,
+          email: inviteData.email,
+        },
+        timeout: 15000,
+      }),
+  )
+
+const getPostByUuid = async (uuid) =>
+  apiCall('getPostByUuid', () => api.get(`/workspace/by-uuid/${uuid}`))
+
+const verifyEmail = async (uuid, type) =>
+  apiCall('verifyEmail', () =>
+    api.get('/workspace/verify', { params: { uuid, type } }),
+  )
+
+const updateShareStatus = async (idx, status) =>
+  apiCall('updateShareStatus', () =>
+    api.post(`/workspace/isShared/${idx}`, {
       type: status !== 'Private',
       status,
-    }
+    }),
+  )
 
-    const response = await api.post(`/workspace/isShared/${idx}`, requestBody)
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
+// ─────────────────────────────────────────────────────────────────────────────
+// 권한
+// ─────────────────────────────────────────────────────────────────────────────
+
+const loadRole = async (idx) =>
+  apiCall('loadRole', () => api.get(`/workspace/loadRole/${idx}`))
+
+const saveRole = async (idx, roleData) =>
+  apiCall('saveRole', () => api.post(`/workspace/saveRole/${idx}`, roleData))
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 첨부 파일(에셋)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const getWorkspaceAssets = async (workspaceId) =>
+  apiCall(
+    'getWorkspaceAssets',
+    () => api.get(`/workspace/${workspaceId}/assets`),
+    [],
+  )
+
+const uploadWorkspaceAssets = async (workspaceId, files) => {
+  const formData = new FormData()
+  Array.from(files || []).forEach((file) => formData.append('files', file))
+
+  return apiCall(
+    'uploadWorkspaceAssets',
+    () => api.post(`/workspace/${workspaceId}/assets`, formData, { timeout: 600000 }),
+    [],
+  )
 }
 
-const loadRole = async (idx) => {
-  try {
-    const response = await api.get(`/workspace/loadRole/${idx}`)
-    console.log(response)
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
-}
+const deleteWorkspaceAsset = async (workspaceId, assetId) =>
+  apiCall('deleteWorkspaceAsset', () =>
+    api.delete(`/workspace/${workspaceId}/assets/${assetId}`),
+  )
 
-const saveRole = async (idx, roleData) => {
-  try {
-    const response = await api.post(`/workspace/saveRole/${idx}`, roleData)
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
-}
-
-const verifyEmail = async (uuid, type) => {
-  try {
-    const response = await api.get('/workspace/verify', {
-      params: {
-        uuid,
-        type,
-      },
-    })
-
-    return response.data
-  } catch (error) {
-    console.error('Verify Email Error:', error)
-    throw error
-  }
-}
-
-const getPostByUuid = async (uuid) => {
-  try {
-    const response = await api.post('/workspace/invite', null, {
-      params: { uuid },
-    })
-    return response.data
-  } catch (error) {
-    console.error(error)
-    throw error
-  }
-}
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default {
   subscribeWebPush,
@@ -218,11 +226,14 @@ export default {
   getPost,
   allPosts,
   deletePost,
+  list_delete,
   inviteUser,
+  getPostByUuid,
+  verifyEmail,
   updateShareStatus,
   loadRole,
   saveRole,
-  verifyEmail,
-  getPostByUuid,
-  list_delete,
+  getWorkspaceAssets,
+  uploadWorkspaceAssets,
+  deleteWorkspaceAsset,
 }

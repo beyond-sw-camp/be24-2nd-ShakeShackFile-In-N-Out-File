@@ -4,9 +4,9 @@ import { useRoute } from "vue-router";
 import FilePreviewModal from "@/components/FilePreviewModal.vue";
 import FileCollectionView from "@/components/file/FileCollectionView.vue";
 import { downloadFileAsset } from "@/api/filesApi.js";
+import { fetchGroupOverview, shareFilesWithTargets } from "@/api/groupApi";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
-import postApi from "@/api/postApi";
 import {
   FILE_SIZE_OPTIONS,
   FILE_STATUS_OPTIONS,
@@ -44,66 +44,7 @@ const {
   setCustomLayoutRows,
 } = useViewStore();
 
-// ── sharedItems 로직 ──────────────────────────────────────────────────────
-const sharedItems = ref([]);
-
-const side_list = async () => {
-  try {
-    // 1) 워크스페이스(포스트) 목록
-    const response = await postApi.allPosts();
-    const workspaceItems = [];
-
-    if (response?.result?.body) {
-      response.result.body.forEach(item => {
-        if (item.status && item.status.toUpperCase() !== 'PRIVATE') {
-          workspaceItems.push({
-            id: item.idx ?? item.id,
-            name: item.title ?? item.name ?? '',
-            type: item.type ?? 'workspace',
-            updatedAt: item.updatedAt ?? item.modifiedAt ?? null,
-            sharedFile: true,
-            ...item,
-          });
-        }
-      });
-    }
-    // 2) 공유된 파일 목록 (fileStore)
-    if (!fileStore.hasLoaded && !fileStore.isLoading) {
-      await fileStore.fetchFiles();
-    }
-
-    const sharedFileItems = fileStore.allFiles.filter(
-      file => file?.sharedFile || file?.sharedWithMe
-    ).map(file => ({
-      ...file,
-      id: file.idx ?? file.id,
-      name: file.name ?? file.fileOriginName ?? '',
-      type: file.type ?? 'file',
-    }));
-
-    // 3) 중복 제거 후 병합 (id 기준)
-    const seen = new Set();
-    const merged = [];
-    for (const item of [...workspaceItems, ...sharedFileItems]) {
-      const key = String(item.id);
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(item);
-      }
-    }
-
-    sharedItems.value = merged;
-  } catch (e) {
-    console.error('side_list error:', e);
-    sharedItems.value = [];
-  }
-};
-
-// sharedLibrary 모드에서는 sharedItems를, 아니면 props.files를 사용
-const effectiveFiles = computed(() =>
-  props.sharedLibrary ? sharedItems.value : props.files
-);
-// ─────────────────────────────────────────────────────────────────────────
+const effectiveFiles = computed(() => props.files);
 
 const searchScope = computed(() => getFileSearchScope(route.name) || "files");
 const searchState = computed(() => headerSearchStore.getScopeState(searchScope.value));
@@ -129,6 +70,11 @@ const shareCancelEmail = ref("");
 const shareError = ref("");
 const isSharing = ref(false);
 const isShareInfoLoading = ref(false);
+const shareGroupOverview = ref(null);
+const isShareGroupOverviewLoading = ref(false);
+const shareTargetUserIds = ref([]);
+const shareTargetGroupIds = ref([]);
+const sharePendingInvites = ref([]);
 
 const sizeOptions = FILE_SIZE_OPTIONS;
 const statusOptions = FILE_STATUS_OPTIONS;
@@ -228,6 +174,22 @@ const folderSummaryCards = computed(() => {
 const planCapabilities = computed(() => fileStore.planCapabilities);
 const canCreateShares = computed(() => Boolean(planCapabilities.value?.shareEnabled));
 const canCreateLocks = computed(() => Boolean(planCapabilities.value?.fileLockEnabled));
+const shareOverviewGroups = computed(() => shareGroupOverview.value?.groups || []);
+const shareOverviewUsers = computed(() => {
+  const directRelationships = shareGroupOverview.value?.uncategorizedRelationships || [];
+  const groupedRelationships = (shareGroupOverview.value?.groupDetails || [])
+    .flatMap((group) => group.relationships || []);
+  const relationshipMap = new Map();
+
+  [...directRelationships, ...groupedRelationships].forEach((relationship) => {
+    if (!relationship?.relationshipId || relationshipMap.has(relationship.relationshipId)) {
+      return;
+    }
+    relationshipMap.set(relationship.relationshipId, relationship);
+  });
+
+  return [...relationshipMap.values()];
+});
 
 const customSizeRangeLabel = computed(() => {
   if (searchState.value.sizeFilter !== "custom") return "";
@@ -339,6 +301,7 @@ const isOwnedSharedFile = (file) => Boolean(file?.sharedFile && !file?.sharedWit
 const selectedDownloadableFiles = computed(() => selectedFiles.value.filter((file) => file?.type !== "folder" && !file?.lockedFile && (file?.downloadUrl || file?.presignedDownloadUrl)));
 const selectedSharedFiles = computed(() => selectedFiles.value.filter((file) => file?.sharedWithMe && !file?.lockedFile));
 const selectedOwnedShareableFiles = computed(() => selectedFiles.value.filter((file) => !file?.sharedWithMe && !file?.lockedFile && file?.type !== "folder" && !file?.isTrash && (canCreateShares.value || file?.sharedFile)));
+const selectedCancelableSentSharedFiles = computed(() => selectedFiles.value.filter((file) => props.sharedLibrary && file?.sharedFile && !file?.sharedWithMe && file?.type !== "folder"));
 const selectedLockableFiles = computed(() => selectedFiles.value.filter((file) => !file?.sharedWithMe && file?.type !== "folder" && !file?.isTrash));
 const selectedLockCandidates = computed(() => selectedLockableFiles.value.filter((file) => !file?.lockedFile));
 const selectedLockedFiles = computed(() => selectedLockableFiles.value.filter((file) => file?.lockedFile));
@@ -479,13 +442,115 @@ const handleBatchSaveShared = async () => {
     window.alert(error?.response?.data?.message || error?.message || "\uACF5\uC720 \uD30C\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
   }
 };
+
+const handleBatchCancelSentShares = async () => {
+  if (!selectedCancelableSentSharedFiles.value.length) {
+    window.alert("공유 취소할 내가 공유한 파일이 선택되지 않았습니다.");
+    return;
+  }
+
+  const cancelTargetCount = selectedCancelableSentSharedFiles.value.length;
+  const ignoredCount = selectedFiles.value.length - cancelTargetCount;
+  const confirmMessage = ignoredCount > 0
+    ? `선택한 항목 중 내가 공유한 파일 ${cancelTargetCount}개만 공유 취소됩니다. 계속할까요?`
+    : `선택한 ${cancelTargetCount}개 파일의 공유를 모두 취소하시겠습니까?`;
+
+  if (!window.confirm(confirmMessage)) {
+    return;
+  }
+
+  try {
+    const targetIds = selectedCancelableSentSharedFiles.value.map((file) => file.id);
+    const targetIdSet = new Set(targetIds.map((id) => String(id)));
+    await fileStore.cancelAllSharedFiles(targetIds);
+    selectedIds.value = selectedIds.value.filter((id) => !targetIdSet.has(String(id)));
+    window.alert("선택한 파일의 공유를 모두 취소했습니다.");
+  } catch (error) {
+    window.alert(error?.response?.data?.message || error?.message || "선택한 파일의 공유를 취소하지 못했습니다.");
+  }
+};
+
+const aggregateShareInfoEntries = (items) => {
+  const shareMap = new Map();
+
+  items.forEach((item) => {
+    const recipientEmail = String(item?.recipientEmail || "").trim();
+    if (!recipientEmail) {
+      return;
+    }
+
+    const key = recipientEmail.toLowerCase();
+    const existing = shareMap.get(key) || {
+      shareIdx: item?.shareIdx || null,
+      fileIdx: item?.fileIdx || null,
+      recipientName: item?.recipientName || "",
+      recipientEmail,
+      createdAt: item?.createdAt || null,
+      fileNames: new Set(),
+    };
+
+    if (!existing.recipientName && item?.recipientName) {
+      existing.recipientName = item.recipientName;
+    }
+
+    const currentTimestamp = new Date(existing.createdAt || 0).getTime() || 0;
+    const nextTimestamp = new Date(item?.createdAt || 0).getTime() || 0;
+    if (nextTimestamp >= currentTimestamp) {
+      existing.createdAt = item?.createdAt || existing.createdAt;
+      existing.shareIdx = item?.shareIdx || existing.shareIdx;
+      existing.fileIdx = item?.fileIdx || existing.fileIdx;
+    }
+
+    if (item?.fileOriginName) {
+      existing.fileNames.add(item.fileOriginName);
+    }
+
+    shareMap.set(key, existing);
+  });
+
+  return [...shareMap.values()]
+    .map((item) => ({
+      ...item,
+      fileNames: [...item.fileNames],
+      fileCount: item.fileNames.size,
+    }))
+    .sort((left, right) => (new Date(right.createdAt || 0).getTime() || 0) - (new Date(left.createdAt || 0).getTime() || 0));
+};
+
+const formatSharedFilesLabel = (item) => {
+  const fileNames = Array.isArray(item?.fileNames) ? item.fileNames.filter(Boolean) : [];
+
+  if (!fileNames.length) {
+    return "공유된 파일 정보 없음";
+  }
+
+  if (fileNames.length === 1) {
+    return fileNames[0];
+  }
+
+  if (fileNames.length === 2) {
+    return fileNames.join(", ");
+  }
+
+  return `${fileNames.slice(0, 2).join(", ")} 외 ${fileNames.length - 2}개`;
+};
+
 const loadShareInfo = async () => {
   shareInfo.value = [];
   shareError.value = "";
-  if (shareTargets.value.length !== 1 || shareTargets.value[0]?.sharedWithMe) return;
+  if (!shareTargets.value.length || shareTargets.value.some((file) => file?.sharedWithMe)) return;
   isShareInfoLoading.value = true;
   try {
-    shareInfo.value = await fileStore.fetchShareInfo(shareTargets.value[0].id);
+    const shareResponses = await Promise.all(
+      shareTargets.value.map(async (file) => {
+        const items = await fileStore.fetchShareInfo(file.id);
+        return (items || []).map((item) => ({
+          ...item,
+          fileOriginName: item?.fileOriginName || file?.name || file?.fileOriginName || "",
+        }));
+      }),
+    );
+    shareInfo.value = aggregateShareInfoEntries(shareResponses.flat());
   } catch (error) {
     shareError.value = error?.response?.data?.message || error?.message || "\uACF5\uC720 \uC815\uBCF4\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
   } finally {
@@ -499,6 +564,19 @@ const normalizeShareTargets = (value) => {
   return [];
 };
 
+const loadShareGroupOverview = async () => {
+  isShareGroupOverviewLoading.value = true;
+
+  try {
+    shareGroupOverview.value = await fetchGroupOverview();
+  } catch (error) {
+    shareGroupOverview.value = null;
+    shareError.value = error?.response?.data?.message || error?.message || "\uADF8\uB8F9 \uBAA9\uB85D\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
+  } finally {
+    isShareGroupOverviewLoading.value = false;
+  }
+};
+
 const openShareDialog = async (files = selectedOwnedShareableFiles.value) => {
   const nextTargets = normalizeShareTargets(files).filter((file) => !file?.sharedWithMe && file?.type !== "folder" && (canCreateShares.value || file?.sharedFile));
   if (!nextTargets.length) {
@@ -509,6 +587,10 @@ const openShareDialog = async (files = selectedOwnedShareableFiles.value) => {
   shareEmail.value = "";
   shareCancelEmail.value = "";
   shareError.value = "";
+  shareTargetUserIds.value = [];
+  shareTargetGroupIds.value = [];
+  sharePendingInvites.value = [];
+  await loadShareGroupOverview();
   await loadShareInfo();
 };
 
@@ -520,6 +602,9 @@ const closeShareDialog = () => {
   shareError.value = "";
   isShareInfoLoading.value = false;
   isSharing.value = false;
+  shareTargetUserIds.value = [];
+  shareTargetGroupIds.value = [];
+  sharePendingInvites.value = [];
 };
 
 const submitShare = async () => {
@@ -529,15 +614,26 @@ const submitShare = async () => {
     return;
   }
   const recipientEmail = shareEmail.value.trim();
-  if (!recipientEmail) {
-    shareError.value = "\uACF5\uC720\uD560 \uC774\uBA54\uC77C\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
+  const selectedUserIds = shareTargetUserIds.value.filter(Boolean);
+  const selectedGroupIds = shareTargetGroupIds.value.filter(Boolean);
+  if (!recipientEmail && !selectedUserIds.length && !selectedGroupIds.length) {
+    shareError.value = "\uACF5\uC720\uD560 \uC0AC\uC6A9\uC790, \uADF8\uB8F9, \uC774\uBA54\uC77C \uC911 \uD558\uB098 \uC774\uC0C1\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.";
     return;
   }
   isSharing.value = true;
   shareError.value = "";
   try {
-    await fileStore.shareFiles(shareTargets.value.map((file) => file.id), recipientEmail);
+    const result = await shareFilesWithTargets({
+      fileIds: shareTargets.value.map((file) => file.id),
+      userIds: selectedUserIds,
+      groupIds: selectedGroupIds,
+      emails: recipientEmail ? [recipientEmail] : [],
+    });
+    await fileStore.refreshAll();
     shareEmail.value = "";
+    shareTargetUserIds.value = [];
+    shareTargetGroupIds.value = [];
+    sharePendingInvites.value = result?.pendingInvites || [];
     await loadShareInfo();
   } catch (error) {
     shareError.value = error?.response?.data?.message || error?.message || "\uD30C\uC77C\uC744 \uACF5\uC720\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
@@ -662,9 +758,9 @@ const closeFilePreview = () => {
 
 onMounted(() => {
   if (props.sharedLibrary) {
-    side_list();                          // 워크스페이스 + 공유 파일 통합 로드
-    setLayoutPreset('10x10');
-    sortOption.value = 'updatedAt-desc';
+    fileStore.fetchFiles().catch(() => {});
+    setLayoutPreset("10x10");
+    sortOption.value = "sharedAt-desc";
   } else if (!fileStore.hasLoaded && !fileStore.isLoading) {
     fileStore.fetchFiles().catch(() => {});
   }
@@ -758,6 +854,7 @@ onMounted(() => {
       <div class="flex flex-wrap items-center gap-2">
         <button v-if="selectedDownloadableFiles.length > 0" type="button" class="batch-button bg-white text-blue-700 hover:bg-blue-100" @click="handleBatchDownload">{{ "\uC120\uD0DD \uB2E4\uC6B4\uB85C\uB4DC" }}</button>
         <button v-if="selectedSharedFiles.length > 0" type="button" class="batch-button bg-white text-cyan-700 hover:bg-cyan-100" @click="handleBatchSaveShared">{{ "\uC120\uD0DD \uD30C\uC77C \uC800\uC7A5" }}</button>
+        <button v-if="sharedLibrary && selectedCancelableSentSharedFiles.length > 0" type="button" class="batch-button bg-white text-violet-700 hover:bg-violet-100" @click="handleBatchCancelSentShares">선택 공유 취소</button>
         <button v-if="!sharedLibrary && deleteMode !== 'permanent' && selectedOwnedShareableFiles.length > 0" type="button" class="batch-button bg-white text-emerald-700 hover:bg-emerald-100" @click="openShareDialog()">{{ "\uC120\uD0DD \uACF5\uC720" }}</button>
         <button v-if="!sharedLibrary && deleteMode !== 'permanent' && canCreateLocks && selectedLockCandidates.length > 0" type="button" class="batch-button bg-white text-amber-700 hover:bg-amber-100" @click="handleBatchLock(true)">{{ "\uC120\uD0DD \uC7A0\uAE08" }}</button>
         <button v-if="!sharedLibrary && deleteMode !== 'permanent' && selectedLockedFiles.length > 0" type="button" class="batch-button bg-white text-slate-700 hover:bg-slate-200" @click="handleBatchLock(false)">{{ "\uC7A0\uAE08 \uD574\uC81C" }}</button>
@@ -882,15 +979,56 @@ onMounted(() => {
             <input v-model="shareEmail" type="email" class="file-filter__input" :disabled="!canCreateShares" :placeholder="canCreateShares ? '\uACF5\uC720\uD560 \uC0C1\uB300\uC758 \uC774\uBA54\uC77C' : '\uD50C\uB7EC\uC2A4 \uC774\uC0C1 \uBA64\uBC84\uC2ED\uC5D0\uC11C \uC0C8 \uACF5\uC720 \uCD94\uAC00 \uAC00\uB2A5'" @keydown.enter.prevent="submitShare" />
             <button type="button" class="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300" :disabled="isSharing || !canCreateShares" @click="submitShare">{{ isSharing ? "\uACF5\uC720 \uC911..." : "\uACF5\uC720 \uC801\uC6A9" }}</button>
           </div>
+        <div class="mt-4 rounded-2xl border border-gray-200 p-4">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-sm font-semibold text-gray-900">대상 선택</p>
+            <p class="text-xs text-gray-500">사용자, 그룹, 이메일을 함께 선택할 수 있습니다.</p>
+          </div>
+          <div v-if="isShareGroupOverviewLoading" class="mt-4 rounded-2xl bg-slate-50 px-4 py-6 text-center text-sm text-gray-500">공유 대상을 불러오는 중입니다.</div>
+          <div v-else class="mt-4 grid gap-4 lg:grid-cols-2">
+            <div class="rounded-2xl bg-slate-50 p-4">
+              <p class="text-sm font-semibold text-gray-900">사용자</p>
+              <div v-if="shareOverviewUsers.length" class="mt-3 space-y-2">
+                <label v-for="relationship in shareOverviewUsers" :key="relationship.relationshipId" class="flex items-start gap-3 rounded-2xl border border-white/70 bg-white px-3 py-3 text-sm text-gray-700">
+                  <input v-model="shareTargetUserIds" type="checkbox" :value="relationship.targetUser?.userId" class="mt-1" />
+                  <span class="flex flex-col">
+                    <strong class="text-gray-900">{{ relationship.targetUser?.name || '이름 없음' }}</strong>
+                    <span>{{ relationship.targetUser?.email || '-' }}</span>
+                  </span>
+                </label>
+              </div>
+              <div v-else class="mt-3 text-sm text-gray-500">선택 가능한 사용자가 없습니다.</div>
+            </div>
+            <div class="rounded-2xl bg-slate-50 p-4">
+              <p class="text-sm font-semibold text-gray-900">그룹</p>
+              <div v-if="shareOverviewGroups.length" class="mt-3 space-y-2">
+                <label v-for="group in shareOverviewGroups" :key="group.groupId" class="flex items-center gap-3 rounded-2xl border border-white/70 bg-white px-3 py-3 text-sm text-gray-700">
+                  <input v-model="shareTargetGroupIds" type="checkbox" :value="group.groupId" class="mt-0.5" />
+                  <span class="flex flex-col">
+                    <strong class="text-gray-900">{{ group.name }}</strong>
+                    <span>{{ group.relationshipCount || 0 }}명 연결</span>
+                  </span>
+                </label>
+              </div>
+              <div v-else class="mt-3 text-sm text-gray-500">생성된 그룹이 없습니다.</div>
+            </div>
+          </div>
+        </div>
         <div class="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
           <input v-model="shareCancelEmail" type="email" class="file-filter__input" :placeholder="'\uACF5\uC720 \uCDE8\uC18C\uD560 \uC774\uBA54\uC77C'" @keydown.enter.prevent="cancelShare()" />
           <button type="button" class="rounded-2xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed" :disabled="isSharing" @click="cancelShare()">{{ "\uACF5\uC720 \uCDE8\uC18C" }}</button>
         </div>
         <p v-if="shareError" class="mt-3 text-sm text-rose-500">{{ shareError }}</p>
+        <div v-if="sharePendingInvites.length" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          <p class="font-semibold">회원이 아닌 이메일은 초대로 저장되었습니다.</p>
+          <ul class="mt-2 space-y-1">
+            <li v-for="invite in sharePendingInvites" :key="invite.inviteId">{{ invite.email }}</li>
+          </ul>
+        </div>
         <div class="mt-6 rounded-2xl border border-gray-200 p-4">
           <div class="flex items-center justify-between gap-2">
             <p class="text-sm font-semibold text-gray-900">{{ "\uD604\uC7AC \uACF5\uC720 \uBAA9\uB85D" }}</p>
-            <p class="text-xs text-gray-500">{{ "\uD55C \uD30C\uC77C\uC5D0 \uB300\uD55C \uACF5\uC720 \uBAA9\uB85D\uB9CC \uD45C\uC2DC\uD558\uBA70, \uC77C\uAD04 \uACF5\uC720\uB294 \uC704\uC5D0\uC11C \uC774\uBA54\uC77C\uB85C \uC801\uC6A9\uD569\uB2C8\uB2E4." }}</p>
+            <p class="text-xs text-gray-500">{{ "\uC120\uD0DD\uD55C \uD30C\uC77C\uB4E4\uC744 \uAE30\uC900\uC73C\uB85C \uC218\uC2E0\uC790\uC640 \uACF5\uC720 \uD30C\uC77C \uBAA9\uB85D\uC744 \uD568\uAED8 \uD45C\uC2DC\uD569\uB2C8\uB2E4." }}</p>
           </div>
           <div v-if="isShareInfoLoading" class="mt-4 rounded-2xl bg-slate-50 px-4 py-8 text-center text-sm text-gray-500">{{ "\uACF5\uC720 \uC815\uBCF4\uB97C \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4." }}</div>
           <div v-else-if="shareInfo.length === 0" class="mt-4 rounded-2xl bg-slate-50 px-4 py-8 text-center text-sm text-gray-500">{{ "\uD604\uC7AC \uACF5\uC720 \uC911\uC778 \uC0C1\uB300\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." }}</div>
@@ -899,6 +1037,7 @@ onMounted(() => {
               <div>
                 <p class="text-sm font-semibold text-gray-900">{{ item.recipientName || item.recipientEmail }}</p>
                 <p class="text-xs text-gray-500">{{ item.recipientEmail }}</p>
+                <p class="mt-1 text-xs text-gray-500">파일: {{ formatSharedFilesLabel(item) }}</p>
                 <p class="mt-1 text-xs text-gray-400">{{ formatDisplayDate(item.createdAt) }}</p>
               </div>
               <button type="button" class="rounded-full bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-100" @click="cancelShare(item.recipientEmail)">{{ "\uC774 \uC0C1\uB300 \uACF5\uC720 \uCDE8\uC18C" }}</button>
