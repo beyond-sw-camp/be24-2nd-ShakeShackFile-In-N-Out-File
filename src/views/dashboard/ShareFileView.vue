@@ -38,9 +38,7 @@ const mergeUniqueFiles = (files) => {
 };
 
 const receivedSharedFiles = computed(() => sortByLatestShared(fileStore.sharedFiles));
-const sentSharedFiles = computed(() => sortByLatestShared(
-  fileStore.allOnlyFiles.filter((file) => file?.sharedFile && !file?.sharedWithMe),
-));
+const sentSharedFiles = computed(() => sortByLatestShared(fileStore.sentSharedFiles));
 
 const allSharedFiles = computed(() => mergeUniqueFiles([
   ...receivedSharedFiles.value,
