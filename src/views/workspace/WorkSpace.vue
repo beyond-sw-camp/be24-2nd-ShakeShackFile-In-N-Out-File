@@ -25,8 +25,9 @@ const workspaceAssetLoading = ref(false)
 const workspaceAssetUploading = ref(false)
 const workspaceAssetError = ref('')
 const deletingAssetIds = ref([])
-const imageInput = ref(null)
 const fileInput = ref(null)
+const activeWorkspaceAssetId = ref(null)
+const savingWorkspaceAssetIds = ref([])
 
 const isValid = computed(() => title.value.trim().length > 0)
 const remoteCursors = computed(() => editorApi.value?.remoteCursorsRef?.value || {})
@@ -37,6 +38,7 @@ const canManageAssets = computed(() => {
 })
 const workspaceImages = computed(() => workspaceAssets.value.filter((asset) => asset.assetType === 'IMAGE'))
 const workspaceFiles = computed(() => workspaceAssets.value.filter((asset) => asset.assetType === 'FILE'))
+const hasWorkspaceAssets = computed(() => workspaceAssets.value.length > 0)
 
 let currentSetupId = 0
 let workspaceAssetStompClient = null
@@ -252,6 +254,12 @@ watch(title, (newVal) => {
   }
 })
 
+watch(workspaceAssets, (assets) => {
+  if (!assets.some((asset) => asset.id === activeWorkspaceAssetId.value)) {
+    activeWorkspaceAssetId.value = null
+  }
+})
+
 const prepareData = async () => {
   const id = route.params.id
   if (!id || route.path === '/workspace') {
@@ -333,6 +341,9 @@ const uploadWorkspaceFiles = async (files, { autoPersist = true } = {}) => {
     const uploaded = await postApi.uploadWorkspaceAssets(targetWorkspaceId, selectedFiles)
     const normalizedAssets = (Array.isArray(uploaded) ? uploaded : []).map(normalizeWorkspaceAsset)
     mergeWorkspaceAssets(normalizedAssets)
+    if (normalizedAssets[0]?.id != null) {
+      activeWorkspaceAssetId.value = normalizedAssets[0].id
+    }
     return normalizedAssets
   } catch (error) {
     workspaceAssetError.value =
@@ -371,12 +382,16 @@ const handleAssetSelection = async (event) => {
 
 const triggerImageSelect = () => {
   if (!canManageAssets.value) return
-  imageInput.value?.click()
 }
 
 const triggerFileSelect = () => {
   if (!canManageAssets.value) return
   fileInput.value?.click()
+}
+
+const toggleWorkspaceAssetActions = (assetId) => {
+  if (assetId == null) return
+  activeWorkspaceAssetId.value = activeWorkspaceAssetId.value === assetId ? null : assetId
 }
 
 const handleAssetDelete = async (asset) => {
@@ -388,6 +403,9 @@ const handleAssetDelete = async (asset) => {
   try {
     await postApi.deleteWorkspaceAsset(workspaceId.value, asset.id)
     workspaceAssets.value = workspaceAssets.value.filter((item) => item.id !== asset.id)
+    if (activeWorkspaceAssetId.value === asset.id) {
+      activeWorkspaceAssetId.value = null
+    }
   } catch (error) {
     workspaceAssetError.value =
       error?.response?.data?.message ||
@@ -399,6 +417,26 @@ const handleAssetDelete = async (asset) => {
 }
 
 const isDeletingAsset = (assetId) => deletingAssetIds.value.includes(assetId)
+const isSavingWorkspaceAsset = (assetId) => savingWorkspaceAssetIds.value.includes(assetId)
+
+const saveWorkspaceAssetToDrive = async (asset) => {
+  if (!asset?.id || !workspaceId.value) return
+
+  savingWorkspaceAssetIds.value = [...savingWorkspaceAssetIds.value, asset.id]
+  workspaceAssetError.value = ''
+
+  try {
+    await postApi.saveWorkspaceAssetToDrive(workspaceId.value, asset.id)
+    window.alert('파일이 드라이브에 저장되었습니다.')
+  } catch (error) {
+    workspaceAssetError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      '파일을 드라이브에 저장하지 못했습니다.'
+  } finally {
+    savingWorkspaceAssetIds.value = savingWorkspaceAssetIds.value.filter((id) => id !== asset.id)
+  }
+}
 
 const downloadWorkspaceAsset = async (asset) => {
   if (!asset?.downloadUrl) return
@@ -414,6 +452,10 @@ const downloadWorkspaceAsset = async (asset) => {
   } catch (error) {
     workspaceAssetError.value = '파일 다운로드에 실패했습니다.'
   }
+}
+
+const getWorkspaceAssetBadge = (asset) => {
+  return asset?.assetType === 'IMAGE' ? '이미지' : '파일'
 }
 
 const setupEditor = async () => {
@@ -539,7 +581,8 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <div class="editor-shell">
+  <div class="workspace-layout">
+    <div class="editor-shell">
     <div class="editor-header">
       <input v-model="title" placeholder="제목 없음" class="title-input" />
 
@@ -580,6 +623,10 @@ onBeforeUnmount(async () => {
     <div class="workspace-assets">
       <div class="workspace-assets__header">
         <div>
+          <p class="workspace-assets__summary workspace-assets__summary--plain">첨부 파일 {{ workspaceAssets.length }}개</p>
+          <p class="workspace-assets__hint workspace-assets__hint--plain">
+            업로드한 파일은 오른쪽 플로팅 목록에서 바로 저장하거나 확인할 수 있습니다.
+          </p>
           <p class="workspace-assets__summary">
             이미지 {{ workspaceImages.length }}개 · 파일 {{ workspaceFiles.length }}개
           </p>
@@ -676,6 +723,84 @@ onBeforeUnmount(async () => {
         <div class="cursor-label" :style="{ background: cursor.color }">{{ cursor.name }}</div>
       </div>
     </div>
+
+    </div>
+
+    <aside class="workspace-floating-sidebar">
+      <div class="workspace-floating-panel">
+        <div class="workspace-floating-panel__header">
+          <div>
+            <h3>첨부 파일</h3>
+          </div>
+          <span class="workspace-floating-panel__count">{{ workspaceAssets.length }}</span>
+        </div>
+
+        <div v-if="workspaceAssetLoading" class="workspace-floating-panel__empty">
+          첨부 파일을 불러오는 중입니다...
+        </div>
+        <div v-else-if="!hasWorkspaceAssets" class="workspace-floating-panel__empty">
+          아직 첨부된 파일이 없습니다.
+        </div>
+        <div v-else class="workspace-floating-list">
+          <article
+            v-for="asset in workspaceAssets"
+            :key="asset.id"
+            class="workspace-floating-item"
+            :class="{ 'workspace-floating-item--active': activeWorkspaceAssetId === asset.id }"
+          >
+            <button
+              type="button"
+              class="workspace-floating-item__main"
+              @click="toggleWorkspaceAssetActions(asset.id)"
+            >
+              <div
+                class="workspace-floating-item__icon"
+                :class="asset.assetType === 'IMAGE' ? 'workspace-floating-item__icon--image' : 'workspace-floating-item__icon--file'"
+              >
+                <i :class="asset.assetType === 'IMAGE' ? 'fa-regular fa-image' : 'fa-regular fa-file-lines'"></i>
+              </div>
+
+              <div class="workspace-floating-item__meta">
+                <div class="workspace-floating-item__title-row">
+                  <strong>{{ asset.originalName }}</strong>
+                  <span class="workspace-floating-item__badge">{{ getWorkspaceAssetBadge(asset) }}</span>
+                </div>
+                <span>{{ asset.fileSizeLabel }}</span>
+                <span v-if="asset.createdAtLabel">{{ asset.createdAtLabel }}</span>
+              </div>
+            </button>
+
+            <button
+              v-if="canManageAssets"
+              type="button"
+              class="workspace-floating-item__remove"
+              :disabled="isDeletingAsset(asset.id)"
+              @click.stop="handleAssetDelete(asset)"
+            >
+              ×
+            </button>
+
+            <div v-if="activeWorkspaceAssetId === asset.id" class="workspace-floating-item__actions">
+              <button
+                type="button"
+                class="workspace-floating-item__action workspace-floating-item__action--drive"
+                :disabled="isSavingWorkspaceAsset(asset.id)"
+                @click.stop="saveWorkspaceAssetToDrive(asset)"
+              >
+                {{ isSavingWorkspaceAsset(asset.id) ? '저장 중...' : '드라이브에 저장' }}
+              </button>
+              <button
+                type="button"
+                class="workspace-floating-item__action workspace-floating-item__action--download"
+                @click.stop="downloadWorkspaceAsset(asset)"
+              >
+                로컬에 저장
+              </button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </aside>
   </div>
 </template>
 
@@ -694,11 +819,20 @@ onBeforeUnmount(async () => {
   --editor-input-bg: #2d2d2d;
 }
 
+.workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+  max-width: 1380px;
+  margin: 24px auto;
+  padding: 0 20px 28px;
+}
+
 .editor-shell {
   position: relative;
   overflow: visible;
-  max-width: 980px;
-  margin: 24px auto;
+  min-width: 0;
   background: var(--editor-bg);
   color: var(--editor-text);
   border-radius: 16px;
@@ -716,6 +850,7 @@ onBeforeUnmount(async () => {
 
 .title-input {
   flex: 1;
+  min-width: 0;
   font-size: 20px;
   padding: 10px 14px;
   border-radius: 10px;
@@ -736,7 +871,9 @@ onBeforeUnmount(async () => {
 }
 
 .save-btn:disabled,
-.asset-action-btn:disabled {
+.asset-action-btn:disabled,
+.workspace-floating-item__action:disabled,
+.workspace-floating-item__remove:disabled {
   background: #94a3b8;
   cursor: not-allowed;
 }
@@ -791,11 +928,15 @@ onBeforeUnmount(async () => {
   font-weight: 600;
 }
 
+.user-item-list {
+  display: grid;
+  gap: 10px;
+}
+
 .user-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 10px;
 }
 
 .user-avatar {
@@ -859,11 +1000,46 @@ onBeforeUnmount(async () => {
   color: #64748b;
 }
 
+.workspace-assets__summary--plain,
+.workspace-assets__hint--plain {
+  display: block;
+}
+
+.workspace-assets__summary:not(.workspace-assets__summary--plain) {
+  display: none;
+}
+
+.workspace-assets__hint--notice {
+  margin-top: 12px;
+}
+
+.workspace-assets__hint:not(.workspace-assets__hint--plain) {
+  font-size: 0;
+}
+
+.workspace-assets__hint:not(.workspace-assets__hint--plain)::before {
+  content: "처음 파일을 추가하면 워크스페이스가 먼저 저장됩니다.";
+  font-size: 13px;
+}
+
 .workspace-assets__actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.workspace-assets__actions .asset-action-btn:first-of-type {
+  display: none;
+}
+
+.workspace-assets__actions .asset-action-btn--secondary {
+  font-size: 0;
+}
+
+.workspace-assets__actions .asset-action-btn--secondary::after {
+  content: "파일 추가";
+  font-size: 14px;
 }
 
 .workspace-assets__error {
@@ -884,8 +1060,18 @@ onBeforeUnmount(async () => {
   text-align: center;
 }
 
-.workspace-assets__group {
-  margin-top: 18px;
+.workspace-assets__group,
+.workspace-assets__empty {
+  display: none;
+}
+
+.workspace-assets__loading {
+  font-size: 0;
+}
+
+.workspace-assets__loading::before {
+  content: "첨부 파일을 불러오는 중입니다...";
+  font-size: 13px;
 }
 
 .workspace-assets__group-header {
@@ -1004,6 +1190,200 @@ onBeforeUnmount(async () => {
   cursor: not-allowed;
 }
 
+.workspace-floating-sidebar {
+  position: sticky;
+  top: 24px;
+}
+
+.workspace-floating-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 48px);
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--editor-border);
+  background: color-mix(in srgb, var(--editor-bg) 96%, #eff6ff 4%);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+}
+
+.workspace-floating-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-floating-panel__header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.workspace-floating-panel__header p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.workspace-floating-panel__count {
+  display: inline-flex;
+  min-width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.workspace-floating-panel__empty {
+  padding: 18px 14px;
+  border-radius: 14px;
+  border: 1px dashed var(--editor-border);
+  text-align: center;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.workspace-floating-list {
+  display: grid;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 2px;
+}
+
+.workspace-floating-item {
+  position: relative;
+  border: 1px solid var(--editor-border);
+  border-radius: 16px;
+  background: var(--editor-input-bg);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.workspace-floating-item--active {
+  border-color: rgba(37, 99, 235, 0.38);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.08);
+}
+
+.workspace-floating-item__main {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  padding: 14px 44px 14px 14px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.workspace-floating-item__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.workspace-floating-item__icon--image {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
+.workspace-floating-item__icon--file {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.workspace-floating-item__meta {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workspace-floating-item__title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-floating-item__title-row strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+
+.workspace-floating-item__meta span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.workspace-floating-item__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-floating-item__remove {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15, 23, 42, 0.72);
+  color: white;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.workspace-floating-item__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+
+.workspace-floating-item__action {
+  border: none;
+  border-radius: 12px;
+  padding: 11px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.workspace-floating-item__action--drive {
+  background: rgba(6, 182, 212, 0.14);
+  color: #0f766e;
+}
+
+.workspace-floating-item__action--download {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
 .editor-body {
   position: relative;
   min-height: 60vh;
@@ -1068,6 +1448,20 @@ onBeforeUnmount(async () => {
   font-weight: 700;
 }
 
+@media (max-width: 1100px) {
+  .workspace-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-floating-sidebar {
+    position: static;
+  }
+
+  .workspace-floating-panel {
+    max-height: none;
+  }
+}
+
 @media (max-width: 900px) {
   .editor-header,
   .workspace-assets__header {
@@ -1078,9 +1472,15 @@ onBeforeUnmount(async () => {
   .workspace-assets__actions {
     justify-content: flex-start;
   }
+}
 
-  .workspace-image-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+@media (max-width: 640px) {
+  .workspace-layout {
+    padding: 0 12px 20px;
+  }
+
+  .workspace-floating-item__actions {
+    grid-template-columns: 1fr;
   }
 }
 </style>
