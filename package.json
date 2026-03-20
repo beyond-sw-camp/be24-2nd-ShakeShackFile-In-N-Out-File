@@ -39,6 +39,7 @@
     "axios": "^1.13.2",
     "editorjs-text-alignment-blocktune": "^1.0.3",
     "editorjs-youtube-embed": "^1.0.3",
+    "event-source-polyfill": "^1.0.31",
     "lodash-es": "^4.17.22",
     "pinia": "^3.0.4",
     "sockjs-client": "^1.6.1",
