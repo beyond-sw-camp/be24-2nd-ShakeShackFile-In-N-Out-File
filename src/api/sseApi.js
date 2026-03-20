@@ -12,19 +12,20 @@
  * @returns {EventSource} 생성된 EventSource 객체
  */
 const connectWorkspaceSse = ({ userId, onConnect, onTitleUpdated, onError }) => {
-  // 주의: EventSource는 기본적으로 커스텀 헤더(Authorization 등)를 지원하지 않습니다.
-  // JWT 토큰 인증이 필요하다면 아래처럼 쿼리 파라미터로 넘기고, 백엔드에서 처리하도록 구성해야 합니다.
-  // const token = localStorage.getItem('accessToken')
-  // const url = `/api/sse/subscribe/${userId}?token=${token}`
-  
-  const url = `/api/sse/subscribe/${userId}`
+  // EventSource는 기본적으로 커스텀 헤더(Authorization 등)를 지원하지 않습니다.
+  // 따라서 access token을 쿼리로 전달하고, 백엔드에서 이를 인증에 사용하도록 매핑합니다.
+  const token = typeof window !== 'undefined' ? localStorage.getItem('ACCESS_TOKEN') : null
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : ''
+
+  // 프론트엔드(Vite)에는 proxy 설정이 없으므로 백엔드 주소를 명시합니다.
+  const url = `http://localhost:8080/api/sse/connect${tokenQuery}`
   const eventSource = new EventSource(url)
 
-  // 1. 초기 연결 성공 이벤트
-  eventSource.addEventListener('connect', (event) => {
-    console.log('[SSE] 연결 성공:', event.data)
-    if (onConnect) onConnect(event.data)
-  })
+  // 1. 초기 연결 성공 이벤트 (EventSource는 onopen을 주로 사용)
+  eventSource.onopen = (event) => {
+    console.log('[SSE] 연결 성공 (userId:', userId, ')')
+    if (onConnect) onConnect(event)
+  }
 
   // 2. 타이틀 업데이트 이벤트 수신
   eventSource.addEventListener('title-updated', (event) => {
