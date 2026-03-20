@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import FileUpload from '@/components/function/FilesUploadWidget.vue';
 import loadpost from '@/components/workspace/loadpost';
 import { useFileStore } from '@/stores/useFileStore';
@@ -41,6 +41,23 @@ const scrollToTop = () => {
   });
 }
 
+// SSE: 협업 페이지(sharedItems) 타이틀 실시간 반영
+const handleSseTitleUpdated = (evt) => {
+  const updatedData = evt?.detail || {}
+  const postId = Number(updatedData?.postId)
+  const newTitle = updatedData?.title
+
+  if (!Number.isFinite(postId)) return
+  if (typeof newTitle !== 'string') return
+
+  // 협업 페이지(sharedItems)에서만 title 갱신
+  sharedItems.value = (sharedItems.value || []).map((item) => {
+    if (Number(item?.post_idx) !== postId) return item
+    // 새 객체로 교체해서 Vue 반응성 안정화
+    return { ...item, title: newTitle }
+  })
+}
+
 // 메뉴 토글 함수 (이벤트 전파 방지 포함)
 const toggleMenu = (event, idx) => {
   event.stopPropagation();
@@ -55,18 +72,20 @@ const closeMenu = () => {
 onMounted(() => {
   side_list();
   fileStore.fetchStorageSummary().catch(() => {})
+  window.addEventListener('sse-title-updated', handleSseTitleUpdated)
   window.addEventListener('click', closeMenu);
 
-  sideListTimer = setInterval(() => {
-    console.log('실시간 리스트 갱신 중...');
-    side_list();
-  }, 30000);
+  // sideListTimer = setInterval(() => {
+  //   console.log('실시간 리스트 갱신 중...');
+  //   side_list();
+  // }, 30000);
 })
 
 onBeforeUnmount(() => {
   if (sideListTimer) {
     clearInterval(sideListTimer);
   }
+  window.removeEventListener('sse-title-updated', handleSseTitleUpdated)
   window.removeEventListener('click', closeMenu);
 })
  
@@ -118,8 +137,16 @@ const sidebarToggleStyle = computed(() => ({
 }))
 
 const router = useRouter();
+const route = useRoute();
+
 const goToPost = async (idx) => {
   if (!idx) return;
+
+  // 현재 보고 있는 페이지와 동일한 idx를 클릭하면 새로고침 X
+  if (String(route.params.id) === String(idx)) {
+    return;
+  }
+
   if (typeof window.__activeEditorDestroy === 'function') {
     window.__activeEditorDestroy();
     window.__activeEditorDestroy = null;

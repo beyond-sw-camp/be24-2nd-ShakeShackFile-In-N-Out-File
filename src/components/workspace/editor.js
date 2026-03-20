@@ -28,14 +28,14 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   const ydoc = new Y.Doc()
   let provider = null
   let currentIdx = idx ?? null
-  
-  // type이 true일 때만 웹소켓 연결
+
+  // isCollaborative(= !!data.idx)일 때만 웹소켓 연결
   if (isCollaborative) {
     provider = new WebsocketProvider('ws://localhost:1234', room, ydoc)
   }
-  
-  const yMap = ydoc.getMap('workspace_data')
-  const yTitle = ydoc.getText('title')
+
+  const yMap         = ydoc.getMap('workspace_data')
+  const yTitle       = ydoc.getText('title')
   const yPermissions = ydoc.getMap('permissions')
 
   if (provider) {
@@ -46,23 +46,23 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     })
   }
 
-  const awareness = provider ? provider.awareness : null
+  const awareness       = provider ? provider.awareness : null
   const remoteCursorsRef = ref({})
-  const activeUsersRef = ref([])
-  
-  const colors = ['#FF6B6B','#6BCB77','#4D96FF','#FF7BD1','#FFD93D','#8E6BFF']
-  const myId = Math.floor(Math.random() * colors.length)
+  const activeUsersRef   = ref([])
+
+  const colors = ['#FF6B6B', '#6BCB77', '#4D96FF', '#FF7BD1', '#FFD93D', '#8E6BFF']
+  const myId    = Math.floor(Math.random() * colors.length)
   const myColor = colors[myId]
 
   let myName = `사용자 ${myId + 1}`
-  const token = localStorage.getItem('ACCESS_TOKEN') 
+  const token = localStorage.getItem('ACCESS_TOKEN')
   if (token) {
     try {
-      const base64Url = token.split('.')[1]
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
-      const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-      }).join(''));
+      const base64Url    = token.split('.')[1]
+      const base64       = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+      const jsonPayload  = decodeURIComponent(
+        atob(base64).split('').map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
+      )
       const payload = JSON.parse(jsonPayload)
       myName = payload.name || payload.username || payload.nickname || myName
     } catch (e) {
@@ -70,16 +70,62 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     }
   }
 
-  if (awareness) {
-    awareness.setLocalState({ user: { name: myName, color: myColor, clientId: ydoc.clientID } })
+  // ─── awareness 업데이트 핸들러 ────────────────────────────────────────────
+  // ① 핸들러를 먼저 함수로 정의
+  function runAwarenessUpdate() {
+    if (!awareness) return
+    const states   = awareness.getStates()
+    const remotes  = {}
+    const userList = []
+
+    states.forEach((state, clientId) => {
+      if (!state || !state.user) return
+
+      userList.push({
+        clientId: String(clientId),
+        name:     state.user.name,
+        color:    state.user.color,
+        isMe:     clientId === ydoc.clientID,
+      })
+
+      if (clientId === ydoc.clientID) return
+
+      const mouse = state.mouse || {}
+      if (mouse.x != null) {
+        remotes[clientId] = {
+          name:  state.user.name,
+          color: state.user.color,
+          style: {
+            position:   'absolute',
+            left:       `${mouse.x}%`,
+            top:        `${mouse.y}%`,
+            willChange: 'left, top',
+            transition: 'none',
+          },
+        }
+      }
+    })
+
+    remoteCursorsRef.value = remotes
+    activeUsersRef.value   = userList
   }
 
-  yPermissions.observe((event) => {
+  if (awareness) {
+    // ② on('update') 먼저 등록
+    awareness.on('update', runAwarenessUpdate)
+    // ③ 그 다음 setLocalState → update 이벤트 즉시 발생 → 핸들러 실행
+    awareness.setLocalState({
+      user: { name: myName, color: myColor, clientId: ydoc.clientID },
+    })
+  }
+
+  yPermissions.observe(() => {
     if (yPermissions.get(String(ydoc.clientID)) === 'redirect') {
-      window.location.href = '/workspace';
+      window.location.href = '/workspace'
     }
   })
 
+  // ─── 이미지 업로드 설정 ────────────────────────────────────────────────────
   const imageToolConfig = options?.uploadImage
     ? {
         class: ImageTool,
@@ -87,26 +133,15 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
           uploader: {
             async uploadByFile(file) {
               const uploadedAsset = await options.uploadImage(file)
-              const imageUrl = uploadedAsset?.previewUrl || uploadedAsset?.downloadUrl || uploadedAsset?.url
+              const imageUrl =
+                uploadedAsset?.previewUrl || uploadedAsset?.downloadUrl || uploadedAsset?.url
 
-              if (!imageUrl) {
-                throw new Error('Image upload failed')
-              }
+              if (!imageUrl) throw new Error('Image upload failed')
 
-              return {
-                success: 1,
-                file: {
-                  url: imageUrl,
-                },
-              }
+              return { success: 1, file: { url: imageUrl } }
             },
             async uploadByUrl(url) {
-              return {
-                success: 1,
-                file: {
-                  url,
-                },
-              }
+              return { success: 1, file: { url } }
             },
           },
         },
@@ -114,68 +149,71 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     : { class: ImageTool }
 
   const tools = {
-    header: { class: Header, tunes: ['alignment'], config: { levels: [1,2,3,4], defaultLevel: 1 } },
-    list: { class: List, inlineToolbar: true, tunes: ['alignment'] },
-    quote: { class: Quote, inlineToolbar: true, tunes: ['alignment'] },
-    table: { class: Table, inlineToolbar: true },
-    code: { class: CodeTool },
-    embed: { class: Embed, inlineToolbar: false },
-    image: imageToolConfig,
-    linkTool: { class: LinkTool },
+    header:     { class: Header, tunes: ['alignment'], config: { levels: [1, 2, 3, 4], defaultLevel: 1 } },
+    list:       { class: List, inlineToolbar: true, tunes: ['alignment'] },
+    quote:      { class: Quote, inlineToolbar: true, tunes: ['alignment'] },
+    table:      { class: Table, inlineToolbar: true },
+    code:       { class: CodeTool },
+    embed:      { class: Embed, inlineToolbar: false },
+    image:      imageToolConfig,
+    linkTool:   { class: LinkTool },
     inlineCode: { class: InlineCode },
-    delimiter: Delimiter,
-    marker: Marker,
-    warning: Warning,
-    alignment: { class: AlignmentTuneTool, config: { default: 'left' } },
-    youtube: { class: YouTubeEmbed }
+    delimiter:  Delimiter,
+    marker:     Marker,
+    warning:    Warning,
+    alignment:  { class: AlignmentTuneTool, config: { default: 'left' } },
+    youtube:    { class: YouTubeEmbed },
   }
 
-  let editor = null
+  let editor        = null
   let suppressLocal = false
-  let isRendering = false 
+  let isRendering   = false
 
+  // ─── Y.js → 에디터 렌더 ────────────────────────────────────────────────────
   async function renderFromY(yval) {
     if (!editor || isRendering) return
-    if (!yval || yval === '""' || yval === '') return;
+    if (!yval || yval === '""' || yval === '') return
 
     try {
-      await editor.isReady;
+      await editor.isReady
       const parsed = JSON.parse(yval)
       if (parsed && Array.isArray(parsed.blocks)) {
-        const currentData = await editor.save();
-        if (JSON.stringify(currentData.blocks) === JSON.stringify(parsed.blocks)) return;
+        const currentData = await editor.save()
+        if (JSON.stringify(currentData.blocks) === JSON.stringify(parsed.blocks)) return
 
-        isRendering = true; 
-        suppressLocal = true;
-        await editor.render(parsed);
-        
+        isRendering   = true
+        suppressLocal = true
+        await editor.render(parsed)
+
         setTimeout(() => {
-          suppressLocal = false;
-          isRendering = false;
-        }, 100);
+          suppressLocal = false
+          isRendering   = false
+        }, 100)
       }
     } catch (e) {
       console.warn('failed to parse yval', e)
       suppressLocal = false
-      isRendering = false;
+      isRendering   = false
     }
   }
 
-  let parsedData = { blocks: [] }; 
+  // ─── 초기 데이터 파싱 ─────────────────────────────────────────────────────
+  let parsedData = { blocks: [] }
   try {
     if (typeof initialData === 'string' && initialData.trim() !== '' && initialData !== '""') {
-      parsedData = JSON.parse(initialData);
+      parsedData = JSON.parse(initialData)
     } else if (initialData && typeof initialData === 'object' && initialData.blocks) {
-      parsedData = initialData;
+      parsedData = initialData
     }
   } catch (e) {
-    console.warn('Initial data parsing failed', e);
+    console.warn('Initial data parsing failed', e)
   }
 
+  // ─── EditorJS 인스턴스 ────────────────────────────────────────────────────
   editor = new EditorJS({
-    holder: holderElement,
+    holder:      holderElement,
     placeholder: '명령어 "/" 로 블록 추가',
-    data: parsedData,
+    data:        parsedData,
     tools,
     onReady: async () => {
       const initialY = yMap.get('contents')
@@ -189,7 +227,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       if (suppressLocal || isRendering) return
       try {
         const saved = await editor.save()
-        if (saved.blocks.length === 0) return;
+        if (saved.blocks.length === 0) return
         const newString = JSON.stringify(saved)
         if (yMap.get('contents') === newString) return
         ydoc.transact(() => {
@@ -198,11 +236,12 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       } catch (err) {
         console.error('editor save failed', err)
       }
-    }
+    },
   })
 
-  await editor.isReady;
+  await editor.isReady
 
+  // ─── 타이틀 바인딩 ────────────────────────────────────────────────────────
   function bindTitleRef(titleRef) {
     if (!titleRef) return
     yTitle.observe(() => {
@@ -221,90 +260,59 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     }
   }
 
+  // ─── 저장 ─────────────────────────────────────────────────────────────────
   async function savePost() {
-    if (!editor) return;
+    if (!editor) return
     try {
-      await editor.isReady;
-      const savedData = await editor.save(); 
+      await editor.isReady
+      const savedData = await editor.save()
+
+      const resolvedTitle =
+        yTitle.toString().trim() || (initialTitle ?? '').trim() || '제목 없음'
+
       const postData = {
-        idx : currentIdx,
-        title: yTitle.toString(), 
-        contents: JSON.stringify(savedData)
-      };
-      const response = await postApi.savePost(postData);
-      const savedIdx = response?.result?.body?.idx ?? response?.data?.idx ?? response?.idx ?? null
-      if (savedIdx != null) {
-        currentIdx = savedIdx
+        idx:      currentIdx,
+        title:    resolvedTitle,
+        contents: JSON.stringify(savedData),
       }
-      await loadpost.side_list();
-      return response;
+
+      const response = await postApi.savePost(postData)
+      const savedIdx = response?.idx ?? null
+      if (savedIdx != null) currentIdx = savedIdx
+
+      await loadpost.side_list()
+      return response
     } catch (e) {
-      console.error('savePost error:', e);
+      console.error('savePost error:', e)
     }
   }
 
-  if (awareness) {
-    awareness.on('update', () => {
-      const states = awareness.getStates();
-      const remotes = {};
-      const userList = [];
-
-      states.forEach((state, clientId) => {
-        if (!state || !state.user) return;
-        
-        userList.push({
-          clientId: String(clientId),
-          name: state.user.name,
-          color: state.user.color,
-          isMe: clientId === ydoc.clientID
-        });
-
-        if (clientId === ydoc.clientID) return;
-        
-        const mouse = state.mouse || {};
-        if (mouse.x != null) {
-          remotes[clientId] = {
-            name: state.user.name,
-            color: state.user.color,
-            style: {
-              position: 'absolute',
-              left: `${mouse.x}%`, 
-              top: `${mouse.y}%`,
-              willChange: 'left, top',
-              transition: 'none'
-            }
-          };
-        }
-      });
-      remoteCursorsRef.value = remotes;
-      activeUsersRef.value = userList;
-    });
-  }
-
+  // ─── Y.js 콘텐츠 변경 감지 ────────────────────────────────────────────────
   yMap.observe(() => {
     const newContents = yMap.get('contents')
     renderFromY(newContents)
   })
 
-  let animationFrameId = null;
+  // ─── 마우스 커서 트래킹 ────────────────────────────────────────────────────
+  let animationFrameId = null
 
   function handleMouseMove(e) {
-    if (animationFrameId || !awareness) return;
+    if (animationFrameId || !awareness) return
 
     animationFrameId = requestAnimationFrame(() => {
-      const shell = holderElement.closest('.editor-shell');
+      const shell = holderElement.closest('.editor-shell')
       if (!shell) {
-        animationFrameId = null;
-        return;
+        animationFrameId = null
+        return
       }
 
-      const rect = shell.getBoundingClientRect();
-      const xPercentage = ((e.clientX - rect.left) / rect.width) * 100;
-      const yPercentage = ((e.clientY - rect.top) / rect.height) * 100;
+      const rect       = shell.getBoundingClientRect()
+      const xPercentage = ((e.clientX - rect.left) / rect.width)  * 100
+      const yPercentage = ((e.clientY - rect.top)  / rect.height) * 100
 
-      awareness.setLocalStateField('mouse', { x: xPercentage, y: yPercentage });
-      animationFrameId = null;
-    });
+      awareness.setLocalStateField('mouse', { x: xPercentage, y: yPercentage })
+      animationFrameId = null
+    })
   }
 
   // 협업 모드일 때만 마우스 트래킹 활성화
@@ -312,32 +320,38 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     window.addEventListener('mousemove', handleMouseMove)
   }
 
+  // ─── 권한 변경 ────────────────────────────────────────────────────────────
+  function updateUserPermission(clientId, status) {
+    yPermissions.set(String(clientId), status)
+  }
+
+  // ─── 정리 ─────────────────────────────────────────────────────────────────
   function destroy() {
-    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    if (animationFrameId) cancelAnimationFrame(animationFrameId)
     window.removeEventListener('mousemove', handleMouseMove)
-    try { 
+    try {
       if (provider) {
         provider.disconnect()
-        provider.destroy() 
-      } 
+        provider.destroy()
+      }
     } catch (e) {}
-    try { if (editor && typeof editor.destroy === 'function') editor.destroy() } catch (e) {}
-    try { if (ydoc) ydoc.destroy() } catch (e) {}
+    try {
+      if (editor && typeof editor.destroy === 'function') editor.destroy()
+    } catch (e) {}
+    try {
+      if (ydoc) ydoc.destroy()
+    } catch (e) {}
   }
-  window.__activeEditorDestroy = destroy;
+  window.__activeEditorDestroy = destroy
 
-  function updateUserPermission(clientId, status) {
-    yPermissions.set(String(clientId), status);
-  }
-
-  return { 
-    editor, 
-    destroy, 
-    remoteCursorsRef, 
-    activeUsersRef, 
-    updateUserPermission, 
-    bindTitleRef, 
-    updateTitleFromLocal, 
-    savePost 
+  return {
+    editor,
+    destroy,
+    remoteCursorsRef,
+    activeUsersRef,
+    updateUserPermission,
+    bindTitleRef,
+    updateTitleFromLocal,
+    savePost,
   }
 }
