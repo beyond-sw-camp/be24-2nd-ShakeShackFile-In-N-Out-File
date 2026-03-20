@@ -302,6 +302,10 @@ const handleSseNewMessage = (e) => {
   applyNewMessageToChatList(e?.detail)
 }
 
+const handleAppForegroundSync = async () => {
+  await fetchRooms(true)
+}
+
 const handleBack = async () => {
   if (selectedRoom.value) {
     try {
@@ -325,6 +329,7 @@ onMounted(() => {
   // Header 알림 클릭(인앱) → 채팅 패널을 열고 해당 방을 선택
   window.addEventListener('open-chat-room', handleOpenChatRoomEvent)
   window.addEventListener('sse-new-message', handleSseNewMessage)
+  window.addEventListener('app-foreground-sync', handleAppForegroundSync)
 
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data.type === 'OPEN_CHAT_ROOM') {
@@ -346,6 +351,7 @@ onUnmounted(() => {
   window.removeEventListener('click', closeMenuOutside)
   window.removeEventListener('open-chat-room', handleOpenChatRoomEvent)
   window.removeEventListener('sse-new-message', handleSseNewMessage)
+  window.removeEventListener('app-foreground-sync', handleAppForegroundSync)
 })
 </script>
 

@@ -130,30 +130,15 @@ const formatRelativeTime = (dateStr) => {
 };
 
 const toNotificationItem = (item = {}) => {
-  // 백엔드/SSE/푸시 페이로드에서 타입 키가 매번 다를 수 있어(`type` vs `notifType`),
-  // 채팅류는 둘 다 확인해서 일관되게 `type: 'chat'`으로 분류합니다.
-  const rawType = item.type ?? item.notifType ?? "general";
+  const rawType = item.type ?? "general";
   const isChat = rawType === "message" || rawType === "NEW_MESSAGE";
   const type = isChat ? "chat" : rawType;
   const read = Boolean(item.read);
   const actionableTypes = ["invite", "group_invite", "relationship_invite"];
   const processed = actionableTypes.includes(type) && read;
 
-  const roomIdxForKey =
-    item.roomIdx ?? item.roomId ?? item.chatRoomIdx ?? item.referenceId ?? null;
-  /** DB 알림 행 id (없으면 SSE/푸시만 있는 채팅 등 — 서버 DELETE 불가) */
-  // 채팅은 백엔드/실시간 페이로드에서 idx/id가 "알림 PK"가 아니라 "방 id"로 들어올 수 있어,
-  // 서버 read/delete에 넘기면 400이 날 수 있습니다. 채팅은 notificationId 계열만 서버 id로 인정합니다.
-  const serverRowId = isChat
-    ? (item.notificationId ?? item.notificationIdx ?? null)
-    : (item.notificationId ?? item.idx ?? item.id ?? null);
-  const displayId =
-    serverRowId ??
-    (isChat ? `local-chat-${roomIdxForKey ?? "na"}` : Date.now());
-
   return {
-    id: displayId,
-    serverRowId,
+    id: item.notificationId ?? item.idx ?? item.id ?? Date.now(),
     uuid: item.uuid ?? null,
     referenceId: item.referenceId ?? null,
     // 백엔드/SSE 페이로드 키가 버전마다 다를 수 있어 방 인덱스 매핑을 유연하게 처리
@@ -181,43 +166,6 @@ const findNotificationIndex = (target) => notifications.value.findIndex((item) =
   );
 });
 
-/** GET /notification/list 응답 형태가 버전마다 달라져도 배열만 안정적으로 뽑음 */
-const extractNotificationListPayload = (raw) => {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  if (Array.isArray(raw.result?.body)) return raw.result.body;
-  if (Array.isArray(raw.result)) return raw.result;
-  if (Array.isArray(raw.data)) return raw.data;
-  if (Array.isArray(raw.body)) return raw.body;
-  return [];
-};
-
-const chatNotificationDedupeKey = (n) => {
-  if (!n || n.type !== "chat") return null;
-  return n.roomIdx != null ? `room_${n.roomIdx}` : `title_${n.title}`;
-};
-
-const groupChatNotificationRows = (mapped) => {
-  const seen = new Map();
-  const grouped = [];
-  for (const notif of mapped) {
-    if (notif.type === "chat") {
-      const key = notif.roomIdx != null ? `room_${notif.roomIdx}` : `title_${notif.title}`;
-      if (seen.has(key)) {
-        const existing = grouped[seen.get(key)];
-        if (!notif.read) existing.unreadCount = (existing.unreadCount ?? 0) + 1;
-      } else {
-        seen.set(key, grouped.length);
-        notif.unreadCount = notif.read ? 0 : 1;
-        grouped.push(notif);
-      }
-    } else {
-      grouped.push(notif);
-    }
-  }
-  return grouped;
-};
-
 const fetchNotifications = async () => {
   if (!authStore.user?.idx) {
     notifications.value = [];
@@ -227,19 +175,26 @@ const fetchNotifications = async () => {
 
   try {
     const response = await postApi.getNotifications();
-    const items = extractNotificationListPayload(response);
-    const grouped = groupChatNotificationRows(items.map(toNotificationItem));
-
-    // 서버 목록에 없는 채팅 알림(SSE/푸시만 반영된 항목)은 드롭다운 열 때 통째로 덮어쓰면 사라지므로 유지
-    const serverChatKeys = new Set(
-      grouped.map(chatNotificationDedupeKey).filter((k) => k != null),
-    );
-    const clientOnlyChats = notifications.value.filter((n) => {
-      const key = chatNotificationDedupeKey(n);
-      return n.type === "chat" && key != null && !serverChatKeys.has(key);
-    });
-
-    notifications.value = [...clientOnlyChats, ...grouped];
+    const items = Array.isArray(response?.result?.body) ? response.result.body : [];
+    const mapped = items.map(toNotificationItem);
+    const seen = new Map();
+    const grouped = [];
+    for (const notif of mapped) {
+      if (notif.type === "chat") {
+        const key = notif.roomIdx != null ? `room_${notif.roomIdx}` : `title_${notif.title}`;
+        if (seen.has(key)) {
+          const existing = grouped[seen.get(key)];
+          if (!notif.read) existing.unreadCount = (existing.unreadCount ?? 0) + 1;
+        } else {
+          seen.set(key, grouped.length);
+          notif.unreadCount = notif.read ? 0 : 1;
+          grouped.push(notif);
+        }
+      } else {
+        grouped.push(notif);
+      }
+    }
+    notifications.value = grouped;
     updateNotifBadge();
   } catch (error) {
     console.error("\uC54C\uB9BC \uBAA9\uB85D \uBD88\uB7EC\uC624\uAE30 \uC2E4\uD328:", error);
@@ -262,7 +217,6 @@ const pushNewNotification = (data) => {
       notifications.value.unshift({
         ...incoming,
         id: previous.id,
-        serverRowId: previous.serverRowId ?? incoming.serverRowId,
         unreadCount: data.unreadCount ?? (prevUnread + 1),
       });
     } else {
@@ -281,11 +235,11 @@ const pushNewNotification = (data) => {
 };
 
 const markNotificationAsRead = async (notification) => {
-  if (!notification?.serverRowId && !notification?.uuid) return;
+  if (!notification?.id && !notification?.uuid) return;
 
   try {
     await postApi.markNotificationAsRead({
-      id: notification.serverRowId ?? null,
+      id: notification.id ?? null,
       uuid: notification.uuid ?? null,
     });
   } catch (error) {
@@ -427,28 +381,17 @@ const handleNotificationClick = async (notification) => {
 
 const handleDeleteNotification = async (notification) => {
   try {
-    // 채팅 메시지 알림은 SSE/푸시로만 쌓이는 경우가 많아 서버의 /notification 대상이 아닐 수 있습니다.
-    // 채팅 알림은 서버 DELETE 호출 없이 목록만 제거합니다.
-    if (notification.type === "chat") {
-      const index = findNotificationIndex(notification);
-      if (index >= 0) notifications.value.splice(index, 1);
-      updateNotifBadge();
-      return;
-    }
-
-    const canDeleteOnServer =
-      notification.uuid != null || notification.serverRowId != null;
-
-    if (canDeleteOnServer) {
+    if (notification?.id || notification?.uuid) {
       await postApi.deleteNotification({
-        id: notification.serverRowId ?? null,
+        id: notification.id ?? null,
         uuid: notification.uuid ?? null,
       });
     }
 
-    const index = findNotificationIndex(notification);
-    if (index >= 0) notifications.value.splice(index, 1);
-
+    notifications.value = notifications.value.filter((item) => (
+      !(notification.id != null && item.id === notification.id) &&
+      !(notification.uuid && item.uuid === notification.uuid)
+    ));
     updateNotifBadge();
   } catch (error) {
     console.error("\uC54C\uB9BC \uC0AD\uC81C \uC2E4\uD328:", error);
