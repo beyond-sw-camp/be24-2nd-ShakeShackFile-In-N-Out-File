@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import SockJS from "sockjs-client";
 import Stomp from "stompjs";
+import { SOCKET_BASE_URL } from "@/config/runtime";
 
 const createEmptyRoomState = (roomId = "") => ({
   roomId,
@@ -47,7 +48,7 @@ export function useRockPaperScissorsSocket(authStore) {
     connectionState.value = "connecting";
     socketError.value = "";
 
-    const socket = new SockJS("http://localhost:8080/ws-stomp");
+    const socket = new SockJS(SOCKET_BASE_URL);
     stompClient = Stomp.over(socket);
     stompClient.debug = () => {};
 

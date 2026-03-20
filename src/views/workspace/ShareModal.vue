@@ -4,6 +4,7 @@ import postApi from "@/api/postApi";
 import loadpost from "@/components/workspace/loadpost";
 import { fetchGroupOverview, shareWorkspacesWithTargets } from "@/api/groupApi";
 import GroupRecipientSelector from "@/components/group/GroupRecipientSelector.vue";
+import { FRONTEND_BASE_URL } from "@/config/runtime";
 
 const props = defineProps({
   isOpen: Boolean,
@@ -27,7 +28,7 @@ const isSharing = ref(false);
 const isSavingStatus = ref(false);
 
 const inviteUrl = computed(() => (
-  `http://localhost:5173/workspace/invite?uuid=${props.uuid || ""}`
+  `${FRONTEND_BASE_URL}/workspace/invite?uuid=${props.uuid || ""}`
 ));
 
 const resetShareState = () => {

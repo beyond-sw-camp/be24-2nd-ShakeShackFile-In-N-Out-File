@@ -7,6 +7,7 @@ import { initEditor } from '@/components/workspace/editor'
 import { useAuthStore } from '@/stores/useAuthStore'
 import SockJS from 'sockjs-client'
 import Stomp from 'stompjs'
+import { SOCKET_BASE_URL } from '@/config/runtime'
 
 const route = useRoute()
 const router = useRouter()
@@ -170,7 +171,7 @@ const connectWorkspaceAssetRealtime = (targetWorkspaceId = workspaceId.value) =>
 
   disconnectWorkspaceAssetRealtime()
 
-  const socket = new SockJS('http://localhost:8080/ws-stomp')
+  const socket = new SockJS(SOCKET_BASE_URL)
   const stompClient = Stomp.over(socket)
   stompClient.debug = null
 
