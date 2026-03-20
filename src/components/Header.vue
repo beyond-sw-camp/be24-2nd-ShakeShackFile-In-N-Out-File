@@ -17,8 +17,10 @@ import {
   rejectGroupInvite,
   rejectRelationshipInvite,
 } from "@/api/groupApi";
+import { useFileStore } from "@/stores/useFileStore";
 import { registerPushNotification } from "@/utils/pushNotification";
 import ProfileModal from "./ProfileModal.vue";
+import GamesHubModal from "@/components/games/GamesHubModal.vue";
 import postApi from "@/api/postApi";
 
 const emit = defineEmits(["toggle-chat", "toggle-theme", "switch-view"]);
@@ -26,18 +28,28 @@ const emit = defineEmits(["toggle-chat", "toggle-theme", "switch-view"]);
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
+const fileStore = useFileStore();
 const headerSearchStore = useHeaderSearchStore();
 
 const showNotifDropdown = ref(false);
 const showProfileDropdown = ref(false);
 const showSearchDropdown = ref(false);
 const isProfileModalOpen = ref(false);
+const isGamesModalOpen = ref(false);
 
 const notifications = ref([]);
 const hasNewNotif = ref(false);
 
+// ─── 캐시 제어 ────────────────────────────────────────────────────────────────
+// 마지막으로 서버에서 알림을 가져온 시각을 기록합니다.
+// CACHE_TTL_MS 이내에 다시 드롭다운을 열면 서버 조회를 건너뜁니다.
+const lastFetchedAt = ref(0);
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2분
+
+// ─── 폴링 제거 ────────────────────────────────────────────────────────────────
+// 기존 30초 폴링 대신 ServiceWorker push / BroadcastChannel로 실시간 수신합니다.
+// 폴링은 완전히 제거합니다.
 let broadcastChannel = null;
-let notificationRefreshTimer = null;
 
 const isDarkMode = ref(false);
 const themeIcon = ref("fa-solid fa-moon");
@@ -56,10 +68,10 @@ const customSizeRangeLabel = computed(() => {
   const min = searchState.value.customMinSize?.trim();
   const max = searchState.value.customMaxSize?.trim();
 
-  if (!min && !max) return "\uBC94\uC704\uB97C \uC785\uB825\uD558\uC138\uC694";
+  if (!min && !max) return "범위를 입력하세요";
   if (min && max) return `${min}MB ~ ${max}MB`;
-  if (min) return `${min}MB \uC774\uC0C1`;
-  return `${max}MB \uC774\uD558`;
+  if (min) return `${min}MB 이상`;
+  return `${max}MB 이하`;
 });
 
 const activeSearchFilterCount = computed(() => {
@@ -76,29 +88,42 @@ const activeSearchFilterCount = computed(() => {
 
 const searchPlaceholder = computed(() => (
   canUseFileSearch.value
-    ? "\uD30C\uC77C\uBA85, \uD655\uC7A5\uC790, \uACF5\uC720\uC790 \uC774\uBA54\uC77C\uC744 \uAC80\uC0C9\uD558\uC138\uC694"
-    : "\uD30C\uC77C \uAC80\uC0C9\uC740 \uB4DC\uB77C\uC774\uBE0C \uD654\uBA74\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."
+    ? "파일명, 확장자, 공유자 이메일을 검색하세요"
+    : "파일 검색은 드라이브 화면에서 사용할 수 있습니다."
 ));
 
 const userName = computed(() => (
   settingsProfile.value?.displayName ||
   authStore.user?.userName ||
   authStore.user?.name ||
-  "\uC0AC\uC6A9\uC790"
+  "사용자"
 ));
 
 const userEmail = computed(() => (
   settingsProfile.value?.email ||
   authStore.user?.email ||
   authStore.user?.userEmail ||
-  "\uC774\uBA54\uC77C \uC815\uBCF4 \uC5C6\uC74C"
+  "이메일 정보 없음"
 ));
 
 const userLocaleLabel = computed(() => settingsProfile.value?.localeCode || "KO");
 const membershipLabel = computed(() => settingsProfile.value?.membershipLabel || "FREE MEMBER");
+const canUseGames = computed(() => {
+  const capability = fileStore.planCapabilities || {};
+  const planCode = String(capability.planCode || "").toUpperCase();
+  const settingsMembershipCode = String(settingsProfile.value?.membershipCode || "").toUpperCase();
+
+  return (
+    Boolean(capability.adminAccount) ||
+    planCode === "PREMIUM" ||
+    planCode === "ADMIN" ||
+    settingsMembershipCode === "PREMIUM" ||
+    settingsMembershipCode === "ADMIN"
+  );
+});
 const userProfileImage = computed(() => settingsProfile.value?.profileImageUrl || "");
 const avatarInitials = computed(() => (
-  (userName.value || "\uC0AC\uC6A9\uC790")
+  (userName.value || "사용자")
     .split(" ")
     .filter(Boolean)
     .slice(0, 2)
@@ -111,21 +136,21 @@ const updateNotifBadge = () => {
 };
 
 const formatRelativeTime = (dateStr) => {
-  if (!dateStr) return "\uBC29\uAE08 \uC804";
+  if (!dateStr) return "방금 전";
 
   const parsed = new Date(dateStr);
-  if (Number.isNaN(parsed.getTime())) return "\uBC29\uAE08 \uC804";
+  if (Number.isNaN(parsed.getTime())) return "방금 전";
 
   const diff = Date.now() - parsed.getTime();
   const minutes = Math.floor(diff / 60000);
 
-  if (minutes < 1) return "\uBC29\uAE08 \uC804";
-  if (minutes < 60) return `${minutes}\uBD84 \uC804`;
+  if (minutes < 1) return "방금 전";
+  if (minutes < 60) return `${minutes}분 전`;
 
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}\uC2DC\uAC04 \uC804`;
+  if (hours < 24) return `${hours}시간 전`;
 
-  return `${Math.floor(hours / 24)}\uC77C \uC804`;
+  return `${Math.floor(hours / 24)}일 전`;
 };
 
 const toNotificationItem = (item = {}) => {
@@ -139,10 +164,10 @@ const toNotificationItem = (item = {}) => {
     uuid: item.uuid ?? null,
     referenceId: item.referenceId ?? null,
     type,
-    title: item.title ?? "\uC54C\uB9BC",
+    title: item.title ?? "알림",
     message: item.message ?? item.contents ?? "",
     createdAt: item.createdAt ?? null,
-    time: item.createdAt ? formatRelativeTime(item.createdAt) : "\uBC29\uAE08 \uC804",
+    time: item.createdAt ? formatRelativeTime(item.createdAt) : "방금 전",
     read,
     processed,
     processedLabel: processed ? "이미 확인하셨습니다" : "",
@@ -154,6 +179,9 @@ const findNotificationIndex = (target) => notifications.value.findIndex((item) =
   (target.uuid && item.uuid === target.uuid)
 ));
 
+// ─── 서버 조회 (최소화) ───────────────────────────────────────────────────────
+// 호출 시점: ① 로그인 직후 1회  ② 드롭다운 열 때 (캐시 만료 시만)
+//            ③ 수락/거절 직후 상태 동기화
 const fetchNotifications = async () => {
   if (!authStore.user?.idx) {
     notifications.value = [];
@@ -162,15 +190,26 @@ const fetchNotifications = async () => {
   }
 
   try {
+    // postApi.getNotifications()는 배열을 unwrap해서 반환
     const response = await postApi.getNotifications();
-    const items = Array.isArray(response?.result?.body) ? response.result.body : [];
+    const items = Array.isArray(response) ? response : [];
     notifications.value = items.map(toNotificationItem);
+    lastFetchedAt.value = Date.now();
     updateNotifBadge();
   } catch (error) {
-    console.error("\uC54C\uB9BC \uBAA9\uB85D \uBD88\uB7EC\uC624\uAE30 \uC2E4\uD328:", error);
+    console.error("알림 목록 불러오기 실패:", error);
   }
 };
 
+// 캐시가 살아있으면 서버 조회를 건너뛰는 래퍼
+const fetchNotificationsIfStale = async () => {
+  const elapsed = Date.now() - lastFetchedAt.value;
+  if (lastFetchedAt.value > 0 && elapsed < CACHE_TTL_MS) return;
+  await fetchNotifications();
+};
+
+// ─── 실시간 push 수신 ─────────────────────────────────────────────────────────
+// 서버에서 push된 알림을 in-memory로 바로 반영합니다. DB 조회 없음.
 const pushNewNotification = (data) => {
   if (!data) return;
   if (data.type && !["invite", "general", "group_invite", "relationship_invite"].includes(data.type)) return;
@@ -205,7 +244,7 @@ const markNotificationAsRead = async (notification) => {
       uuid: notification.uuid ?? null,
     });
   } catch (error) {
-    console.error("\uC54C\uB9BC \uC77D\uC74C \uCC98\uB9AC \uC2E4\uD328:", error);
+    console.error("알림 읽음 처리 실패:", error);
   }
 };
 
@@ -245,27 +284,28 @@ const handleInviteVerify = async (notification, type) => {
 
   try {
     await postApi.verifyEmail(notification.uuid, type);
-    await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
+    await applyProcessedState(notification, type === "accept" ? "수락됨" : "거절됨");
+    // 수락/거절 후에는 캐시를 무시하고 서버 상태를 정확히 동기화
     await fetchNotifications();
     await loadpost.side_list();
   } catch (error) {
     const message = getErrorMessage(error);
 
-    if (type === "reject" && (error?.response?.status === 500 || message.includes("\uAC70\uC808"))) {
-      await applyProcessedState(notification, "\uAC70\uC808\uB428");
+    if (type === "reject" && (error?.response?.status === 500 || message.includes("거절"))) {
+      await applyProcessedState(notification, "거절됨");
       await fetchNotifications();
       return;
     }
 
-    console.error(type === "accept" ? "\uCD08\uB300 \uC218\uB77D \uC2E4\uD328:" : "\uCD08\uB300 \uAC70\uC808 \uC2E4\uD328:", error);
+    console.error(type === "accept" ? "초대 수락 실패:" : "초대 거절 실패:", error);
     await fetchNotifications();
 
-    if (type === "accept" && message.includes("\uC720\uD6A8\uD558\uC9C0 \uC54A\uC740 \uD1A0\uD070")) {
-      alert("\uC774\uBBF8 \uCC98\uB9AC\uB418\uC5C8\uAC70\uB098 \uB9CC\uB8CC\uB41C \uCD08\uB300\uC785\uB2C8\uB2E4.");
+    if (type === "accept" && message.includes("유효하지 않은 토큰")) {
+      alert("이미 처리되었거나 만료된 초대입니다.");
       return;
     }
 
-    alert(message || (type === "accept" ? "\uCD08\uB300 \uC218\uB77D\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4." : "\uCD08\uB300 \uAC70\uC808\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4."));
+    alert(message || (type === "accept" ? "초대 수락에 실패했습니다." : "초대 거절에 실패했습니다."));
   }
 };
 
@@ -279,7 +319,7 @@ const handleGroupInviteAction = async (notification, type) => {
       await rejectGroupInvite(notification.referenceId);
     }
 
-    await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
+    await applyProcessedState(notification, type === "accept" ? "수락됨" : "거절됨");
     await fetchNotifications();
   } catch (error) {
     console.error(type === "accept" ? "그룹 초대 수락 실패:" : "그룹 초대 거절 실패:", error);
@@ -298,7 +338,7 @@ const handleRelationshipInviteAction = async (notification, type) => {
       await rejectRelationshipInvite(notification.referenceId);
     }
 
-    await applyProcessedState(notification, type === "accept" ? "\uC218\uB77D\uB428" : "\uAC70\uC808\uB428");
+    await applyProcessedState(notification, type === "accept" ? "수락됨" : "거절됨");
     await fetchNotifications();
   } catch (error) {
     console.error(type === "accept" ? "연결 초대 수락 실패:" : "연결 초대 거절 실패:", error);
@@ -338,8 +378,8 @@ const handleDeleteNotification = async (notification) => {
     ));
     updateNotifBadge();
   } catch (error) {
-    console.error("\uC54C\uB9BC \uC0AD\uC81C \uC2E4\uD328:", error);
-    alert("\uC54C\uB9BC \uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
+    console.error("알림 삭제 실패:", error);
+    alert("알림 삭제에 실패했습니다.");
   }
 };
 
@@ -399,8 +439,9 @@ const toggleNotifMenu = async () => {
   showProfileDropdown.value = false;
   showSearchDropdown.value = false;
 
+  // 드롭다운을 열 때만 조회하고, 캐시가 살아있으면 서버 요청 생략
   if (showNotifDropdown.value) {
-    await fetchNotifications();
+    await fetchNotificationsIfStale();
   }
 };
 
@@ -443,8 +484,29 @@ const openSettings = async (tab = "profile") => {
   await loadSettingsProfile();
 };
 
+const openGamesHub = async () => {
+  if (!fileStore.storageSummary && !fileStore.storageLoading) {
+    try {
+      await fileStore.fetchStorageSummary();
+    } catch (error) {
+      console.error("게임 권한 확인 실패:", error);
+    }
+  }
+
+  if (!canUseGames.value) {
+    return;
+  }
+
+  showProfileDropdown.value = false;
+  isGamesModalOpen.value = true;
+};
+
 const handleCloseProfileModal = () => {
   isProfileModalOpen.value = false;
+};
+
+const handleCloseGamesModal = () => {
+  isGamesModalOpen.value = false;
 };
 
 const handleSavedProfile = (savedProfile) => {
@@ -452,7 +514,7 @@ const handleSavedProfile = (savedProfile) => {
 };
 
 const handleLogout = async () => {
-  if (confirm("\uB85C\uADF8\uC544\uC6C3 \uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?")) {
+  if (confirm("로그아웃 하시겠습니까?")) {
     await authStore.logout();
     router.push("/login");
   }
@@ -466,22 +528,6 @@ const handleClickOutside = (event) => {
   if (!event.target.closest("#header-search-container")) showSearchDropdown.value = false;
 };
 
-const stopNotificationPolling = () => {
-  if (notificationRefreshTimer) {
-    window.clearInterval(notificationRefreshTimer);
-    notificationRefreshTimer = null;
-  }
-};
-
-const startNotificationPolling = () => {
-  stopNotificationPolling();
-  notificationRefreshTimer = window.setInterval(() => {
-    if (authStore.user?.idx) {
-      fetchNotifications();
-    }
-  }, 30000);
-};
-
 watch(() => route.fullPath, () => {
   showSearchDropdown.value = false;
 });
@@ -490,19 +536,23 @@ watch(
   () => authStore.user?.idx,
   async (userIdx) => {
     if (!userIdx) {
-      stopNotificationPolling();
       notifications.value = [];
+      lastFetchedAt.value = 0;
       updateNotifBadge();
       return;
     }
 
+    // 로그인 직후 1회만 조회
     await fetchNotifications();
-    startNotificationPolling();
+
+    if (!fileStore.storageSummary && !fileStore.storageLoading) {
+      fileStore.fetchStorageSummary().catch(() => {});
+    }
 
     try {
       await registerPushNotification();
     } catch (error) {
-      console.error("\uC54C\uB9BC \uAD6C\uB3C5 \uC2E4\uD328:", error);
+      console.error("알림 구독 실패:", error);
     }
   },
   { immediate: true },
@@ -513,6 +563,9 @@ onMounted(() => {
   authStore.checkLogin();
   loadSettingsProfile();
   setupNotificationChannel();
+  if (!fileStore.storageSummary && !fileStore.storageLoading) {
+    fileStore.fetchStorageSummary().catch(() => {});
+  }
   document.addEventListener("click", handleClickOutside);
 });
 
@@ -525,7 +578,6 @@ onBeforeUnmount(() => {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.removeEventListener("message", swDirectMessageHandler);
   }
-  stopNotificationPolling();
 });
 </script>
 
@@ -538,6 +590,11 @@ onBeforeUnmount(() => {
       :is-loading="isSettingsLoading"
       @close="handleCloseProfileModal"
       @saved="handleSavedProfile"
+    />
+    <GamesHubModal
+      :is-open="isGamesModalOpen"
+      :can-access="canUseGames"
+      @close="handleCloseGamesModal"
     />
 
     <header class="header-container">
@@ -611,12 +668,6 @@ onBeforeUnmount(() => {
             </div>
             <div class="py-2 max-h-64 overflow-y-auto">
               <template v-if="notifications.length > 0">
-                <!--
-                  클래스 우선순위:
-                    notif-processed  → 수락/거절 완료 (가장 어둡게)
-                    notif-read       → 읽었지만 미처리 (약하게 흐리게)
-                    notif-unread     → 아직 읽지 않음 (파란 강조)
-                -->
                 <div
                   v-for="n in notifications"
                   :key="n.id"
@@ -679,6 +730,7 @@ onBeforeUnmount(() => {
             <div class="py-2">
               <button type="button" class="dropdown-item" @click="openSettings('profile')"><i class="fa-solid fa-user-gear"></i><span>개인 프로필 설정</span></button>
               <button type="button" class="dropdown-item" @click="openSettings('group')"><i class="fa-solid fa-user-group"></i><span>그룹 관리</span></button>
+              <button v-if="canUseGames" type="button" class="dropdown-item" @click="openGamesHub"><i class="fa-solid fa-gamepad"></i><span>Games</span></button>
               <button type="button" class="dropdown-item" @click="openSettings('security')"><i class="fa-solid fa-shield-halved"></i><span>보안 및 비밀번호</span></button>
               <button type="button" class="dropdown-item" @click="openSettings('language')"><i class="fa-solid fa-language"></i><span>언어 설정 ({{ userLocaleLabel }})</span></button>
             </div>
@@ -777,7 +829,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border-color);
   cursor: default;
   transition: background-color 0.15s ease, opacity 0.15s ease;
-  border-left: 3px solid transparent; /* 기본: 투명 테두리 (레이아웃 고정) */
+  border-left: 3px solid transparent;
 }
 
 .notification-item:last-child {
@@ -791,33 +843,28 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
 }
 
-/* 읽지 않은 알림: 파란 강조 */
 .notif-unread {
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated) 93%);
   border-left-color: var(--accent);
 }
 
-/* ★ [이슈2] 읽은 알림: 살짝 흐리게 */
 .notif-read {
   opacity: 0.65;
   border-left-color: transparent;
 }
 
-/* 수락/거절 처리된 알림: 더 어둡게 + 흑백 */
 .notif-processed {
   opacity: 0.4;
   filter: grayscale(50%);
   border-left-color: transparent;
 }
 
-/* ★ 제목 행: 제목 + 읽음 뱃지 가로 배치 */
 .notif-title-row {
   display: flex;
   align-items: center;
   gap: 0.45rem;
 }
 
-/* ★ [이슈2] 읽음 뱃지 */
 .notif-read-badge {
   flex-shrink: 0;
   font-size: 0.65rem;
@@ -885,7 +932,6 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, #ef4444 22%, transparent);
 }
 
-/* 처리 완료 뱃지 */
 .notif-processed-label {
   font-size: 0.72rem;
   font-weight: 700;
