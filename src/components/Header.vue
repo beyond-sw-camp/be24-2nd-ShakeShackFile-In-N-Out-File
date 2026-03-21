@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { fetchSettingsProfile } from "@/api/featerApi";
 import loadpost from "./workspace/loadpost";
+import { EventSourcePolyfill } from 'event-source-polyfill';
 import {
   FILE_SIZE_OPTIONS,
   FILE_STATUS_OPTIONS,
@@ -50,6 +51,7 @@ const CACHE_TTL_MS = 2 * 60 * 1000; // 2분
 // 기존 30초 폴링 대신 ServiceWorker push / BroadcastChannel로 실시간 수신합니다.
 // 폴링은 완전히 제거합니다.
 let broadcastChannel = null;
+let sseEventSource = null;
 
 const isDarkMode = ref(false);
 const themeIcon = ref("fa-solid fa-moon");
@@ -154,7 +156,9 @@ const formatRelativeTime = (dateStr) => {
 };
 
 const toNotificationItem = (item = {}) => {
-  const type = item.type ?? "general";
+  const rawType = item.type ?? "general";
+  const isChat = rawType === "message" || rawType === "NEW_MESSAGE";
+  const type = isChat ? "chat" : rawType;
   const read = Boolean(item.read);
   const actionableTypes = ["invite", "group_invite", "relationship_invite"];
   const processed = actionableTypes.includes(type) && read;
@@ -163,21 +167,30 @@ const toNotificationItem = (item = {}) => {
     id: item.notificationId ?? item.idx ?? item.id ?? Date.now(),
     uuid: item.uuid ?? null,
     referenceId: item.referenceId ?? null,
+    // 백엔드/SSE 페이로드 키가 버전마다 다를 수 있어 방 인덱스 매핑을 유연하게 처리
+    roomIdx: item.roomIdx ?? item.roomId ?? item.chatRoomIdx ?? item.referenceId ?? null,
     type,
     title: item.title ?? "알림",
     message: item.message ?? item.contents ?? "",
     createdAt: item.createdAt ?? null,
     time: item.createdAt ? formatRelativeTime(item.createdAt) : "방금 전",
     read,
+    unreadCount: isChat ? (item.unreadCount ?? 1) : 0,
     processed,
     processedLabel: processed ? "이미 확인하셨습니다" : "",
   };
 };
 
-const findNotificationIndex = (target) => notifications.value.findIndex((item) => (
-  (target.id != null && item.id === target.id) ||
-  (target.uuid && item.uuid === target.uuid)
-));
+const findNotificationIndex = (target) => notifications.value.findIndex((item) => {
+  if (target.type === "chat" && item.type === "chat") {
+    if (target.roomIdx != null && item.roomIdx != null) return target.roomIdx === item.roomIdx;
+    return target.title === item.title;
+  }
+  return (
+    (target.id != null && item.id === target.id) ||
+    (target.uuid && item.uuid === target.uuid)
+  );
+});
 
 // ─── 서버 조회 (최소화) ───────────────────────────────────────────────────────
 // 호출 시점: ① 로그인 직후 1회  ② 드롭다운 열 때 (캐시 만료 시만)
@@ -190,10 +203,27 @@ const fetchNotifications = async () => {
   }
 
   try {
-    // postApi.getNotifications()는 배열을 unwrap해서 반환
     const response = await postApi.getNotifications();
-    const items = Array.isArray(response) ? response : [];
-    notifications.value = items.map(toNotificationItem);
+    const items = Array.isArray(response?.result?.body) ? response.result.body : [];
+    const mapped = items.map(toNotificationItem);
+    const seen = new Map();
+    const grouped = [];
+    for (const notif of mapped) {
+      if (notif.type === "chat") {
+        const key = notif.roomIdx != null ? `room_${notif.roomIdx}` : `title_${notif.title}`;
+        if (seen.has(key)) {
+          const existing = grouped[seen.get(key)];
+          if (!notif.read) existing.unreadCount = (existing.unreadCount ?? 0) + 1;
+        } else {
+          seen.set(key, grouped.length);
+          notif.unreadCount = notif.read ? 0 : 1;
+          grouped.push(notif);
+        }
+      } else {
+        grouped.push(notif);
+      }
+    }
+    notifications.value = grouped;
     lastFetchedAt.value = Date.now();
     updateNotifBadge();
   } catch (error) {
@@ -212,22 +242,30 @@ const fetchNotificationsIfStale = async () => {
 // 서버에서 push된 알림을 in-memory로 바로 반영합니다. DB 조회 없음.
 const pushNewNotification = (data) => {
   if (!data) return;
-  if (data.type && !["invite", "general", "group_invite", "relationship_invite"].includes(data.type)) return;
+  const allowed = ["invite", "general", "group_invite", "relationship_invite", "message", "NEW_MESSAGE"];
+  if (data.type && !allowed.includes(data.type)) return;
 
-  const incoming = toNotificationItem({
-    ...data,
-    read: false,
-  });
+  const incoming = toNotificationItem({ ...data, read: false });
 
   const existingIndex = findNotificationIndex(incoming);
   if (existingIndex >= 0) {
     const previous = notifications.value[existingIndex];
-    notifications.value[existingIndex] = {
-      ...previous,
-      ...incoming,
-      processed: previous.processed,
-      processedLabel: previous.processedLabel,
-    };
+    if (incoming.type === "chat") {
+      const prevUnread = previous.unreadCount ?? 0;
+      notifications.value.splice(existingIndex, 1);
+      notifications.value.unshift({
+        ...incoming,
+        id: previous.id,
+        unreadCount: data.unreadCount ?? (prevUnread + 1),
+      });
+    } else {
+      notifications.value[existingIndex] = {
+        ...previous,
+        ...incoming,
+        processed: previous.processed,
+        processedLabel: previous.processedLabel,
+      };
+    }
   } else {
     notifications.value.unshift(incoming);
   }
@@ -363,6 +401,24 @@ const handleNotificationAction = async (notification, type) => {
   }
 };
 
+const handleNotificationClick = async (notification) => {
+  if (notification.type !== "chat") return;
+
+  if (!notification.read) {
+    notification.read = true;
+    notification.unreadCount = 0;
+    updateNotifBadge();
+    await markNotificationAsRead(notification);
+  }
+
+  showNotifDropdown.value = false;
+
+  // Chat.vue에 채팅 패널 열고 해당 방 선택 요청
+  window.dispatchEvent(new CustomEvent("open-chat-room", {
+    detail: { roomIdx: notification.roomIdx, roomTitle: notification.title }
+  }));
+};
+
 const handleDeleteNotification = async (notification) => {
   try {
     if (notification?.id || notification?.uuid) {
@@ -392,7 +448,12 @@ const swDirectMessageHandler = (event) => {
     return;
   }
 
-  if (["invite", "general", "group_invite", "relationship_invite"].includes(data.type)) {
+  if (data.type === "NEW_MESSAGE") {
+    pushNewNotification({ ...data, type: data.notifType ?? "message" });
+    return;
+  }
+
+  if (["invite", "general", "group_invite", "relationship_invite", "message"].includes(data.type)) {
     pushNewNotification(data);
   }
 };
@@ -528,6 +589,50 @@ const handleClickOutside = (event) => {
   if (!event.target.closest("#header-search-container")) showSearchDropdown.value = false;
 };
 
+const stopSse = () => {
+  if (sseEventSource) {
+    sseEventSource.close();
+    sseEventSource = null;
+  }
+};
+
+const startSse = () => {
+  stopSse();
+  const token = localStorage.getItem('ACCESS_TOKEN');
+  sseEventSource = new EventSourcePolyfill("http://localhost:8080/sse/connect", {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    },
+    withCredentials: true
+  });
+
+  // 알림 (invite, group_invite, relationship_invite, general)
+  sseEventSource.addEventListener("notification", (e) => {
+    try {
+      const payload = JSON.parse(e.data);
+      pushNewNotification(payload);
+    } catch {}
+  });
+
+  // 채팅 메시지 알림
+  sseEventSource.addEventListener("new-message", (e) => {
+    try {
+      const payload = JSON.parse(e.data);
+      pushNewNotification(payload);
+      // Chat.vue에도 채팅목록 갱신 참참시
+      window.dispatchEvent(new CustomEvent("sse-new-message", { detail: payload }));
+    } catch {}
+  });
+
+  sseEventSource.onerror = () => {
+    stopSse();
+    // 재연결 (5초 후)
+    if (authStore.user?.idx) {
+      setTimeout(() => startSse(), 5000);
+    }
+  };
+};
+
 watch(() => route.fullPath, () => {
   showSearchDropdown.value = false;
 });
@@ -536,6 +641,7 @@ watch(
   () => authStore.user?.idx,
   async (userIdx) => {
     if (!userIdx) {
+      stopSse();
       notifications.value = [];
       lastFetchedAt.value = 0;
       updateNotifBadge();
@@ -544,6 +650,7 @@ watch(
 
     // 로그인 직후 1회만 조회
     await fetchNotifications();
+    startSse();
 
     if (!fileStore.storageSummary && !fileStore.storageLoading) {
       fileStore.fetchStorageSummary().catch(() => {});
@@ -578,6 +685,7 @@ onBeforeUnmount(() => {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.removeEventListener("message", swDirectMessageHandler);
   }
+  stopSse();
 });
 </script>
 
@@ -676,13 +784,16 @@ onBeforeUnmount(() => {
                     'notif-processed': n.processed,
                     'notif-read':      n.read && !n.processed,
                     'notif-unread':    !n.read && !n.processed,
+                    'cursor-pointer':  n.type === 'chat',
                   }"
+                  @click="handleNotificationClick(n)"
                 >
                   <div class="notification-item__top">
                     <div class="flex flex-col gap-1">
                       <div class="notif-title-row">
                         <p class="notif-title">{{ n.title }}</p>
-                        <span v-if="n.read && !n.processed" class="notif-read-badge">읽음</span>
+                        <span v-if="n.type === 'chat' && !n.read && n.unreadCount > 0" class="notif-unread-count">{{ n.unreadCount > 99 ? '99+' : n.unreadCount }}</span>
+                        <span v-else-if="n.read && !n.processed" class="notif-read-badge">읽음</span>
                       </div>
                       <p class="notif-message">{{ n.message }}</p>
                       <span class="notif-time">{{ n.time }}</span>
@@ -875,6 +986,22 @@ onBeforeUnmount(() => {
   padding: 0.1rem 0.45rem;
 }
 
+.notif-unread-count {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0 0.32rem;
+  line-height: 1;
+}
+
 .notif-delete-button {
   display: inline-flex;
   align-items: center;
@@ -932,6 +1059,7 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, #ef4444 22%, transparent);
 }
 
+/* 처리 완료 뱃지 */
 .notif-processed-label {
   font-size: 0.72rem;
   font-weight: 700;
