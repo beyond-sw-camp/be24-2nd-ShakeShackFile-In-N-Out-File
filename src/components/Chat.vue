@@ -292,6 +292,8 @@ const applyNewMessageToChatList = (payload) => {
   const target = chatRooms.value.find((r) => r.id == roomIdx)
   if (target) {
     if (lastMsg != null && lastMsg !== '') target.lastMsg = lastMsg
+    if (payload.time != null) target.time = payload.time
+    if (payload.lastMessageTime != null) target.time = payload.lastMessageTime
     if (payload.unreadCount != null) target.unreadCount = payload.unreadCount
   } else {
     fetchRooms(true)
@@ -299,6 +301,10 @@ const applyNewMessageToChatList = (payload) => {
 }
 
 const handleSseNewMessage = (e) => {
+  applyNewMessageToChatList(e?.detail)
+}
+
+const handleSseChatPreviewUpdate = (e) => {
   applyNewMessageToChatList(e?.detail)
 }
 
@@ -321,6 +327,14 @@ const handleBack = async () => {
   viewMode.value = 'list'
 }
 
+const handleClosePanel = async () => {
+  if (viewMode.value === 'room' && selectedRoom.value) {
+    await handleBack()
+  }
+
+  emit('close')
+}
+
 onMounted(() => {
   window.addEventListener('click', closeMenuOutside)
   fetchRooms(true)
@@ -329,6 +343,7 @@ onMounted(() => {
   // Header 알림 클릭(인앱) → 채팅 패널을 열고 해당 방을 선택
   window.addEventListener('open-chat-room', handleOpenChatRoomEvent)
   window.addEventListener('sse-new-message', handleSseNewMessage)
+  window.addEventListener('sse-chat-preview-update', handleSseChatPreviewUpdate)
   window.addEventListener('app-foreground-sync', handleAppForegroundSync)
 
   navigator.serviceWorker.addEventListener('message', (e) => {
@@ -351,6 +366,7 @@ onUnmounted(() => {
   window.removeEventListener('click', closeMenuOutside)
   window.removeEventListener('open-chat-room', handleOpenChatRoomEvent)
   window.removeEventListener('sse-new-message', handleSseNewMessage)
+  window.removeEventListener('sse-chat-preview-update', handleSseChatPreviewUpdate)
   window.removeEventListener('app-foreground-sync', handleAppForegroundSync)
 })
 </script>
@@ -404,7 +420,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <button @click="emit('close')" class="close-button p-2 hover:bg-gray-100 rounded-full">
+        <button @click="handleClosePanel" class="close-button p-2 hover:bg-gray-100 rounded-full">
           <i class="fa-solid fa-xmark text-gray-500"></i>
         </button>
       </div>

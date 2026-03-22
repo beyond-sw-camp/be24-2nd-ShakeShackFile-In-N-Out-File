@@ -18,9 +18,73 @@ const currentPage = ref(0)
 const isLastPage = ref(false)
 const isLoading = ref(false)
 const scrollObserver = ref(null)
+const messageMenuVisible = ref(false)
+const messageMenuPos = ref({ x: 0, y: 0 })
+const selectedMessage = ref(null)
 
 const myProfileImageUrl = computed(() => authStore.user?.profileImageUrl || null)
 const myName = computed(() => authStore.user?.userName || authStore.user?.name || 'Guest')
+const DELETED_MESSAGE_TEXT = '삭제된 메시지입니다.'
+
+const isDeletedMessagePayload = (payload = {}) => (
+  Boolean(payload.deleted) ||
+  (
+    String(payload.contents ?? payload.text ?? '').trim() === DELETED_MESSAGE_TEXT &&
+    !payload.fileUrl &&
+    !payload.fileName
+  )
+)
+
+const toChatMessage = (payload = {}, options = {}) => {
+  const deleted = isDeletedMessagePayload(payload)
+  const isMe = Boolean(options.isMe)
+  const isPending = Boolean(options.isPending)
+
+  return {
+    id: payload.idx ?? payload.id,
+    sender: payload.senderNickname ?? payload.sender ?? myName.value,
+    text: deleted ? DELETED_MESSAGE_TEXT : (payload.contents ?? payload.text ?? ''),
+    time: payload.createdAt ?? payload.time ?? new Date().toISOString(),
+    isMe,
+    isPending,
+    deleted,
+    messageUnreadCount: payload.messageUnreadCount ?? 0,
+    profileImageUrl: deleted ? null : (payload.profileImageUrl ?? null),
+    fileUrl: deleted ? null : (payload.fileUrl ?? null),
+    fileName: deleted ? null : (payload.fileName ?? null),
+    fileType: deleted ? null : (payload.fileType ?? null),
+    fileSize: deleted ? null : (payload.fileSize ?? null),
+    messageType: deleted ? 'TEXT' : (payload.messageType || 'TEXT'),
+  }
+}
+
+const applyDeletedMessage = (messageId, deletedText = DELETED_MESSAGE_TEXT) => {
+  const target = chatMessages.value.find((msg) => msg.id === messageId)
+  if (!target) return
+
+  target.text = deletedText || DELETED_MESSAGE_TEXT
+  target.deleted = true
+  target.isPending = false
+  target.fileUrl = null
+  target.fileName = null
+  target.fileType = null
+  target.fileSize = null
+  target.messageType = 'TEXT'
+}
+
+const openMessageMenu = (event, msg) => {
+  if (!msg?.isMe || msg?.isSystem || msg?.isPending || msg?.deleted) return
+
+  event.preventDefault()
+  selectedMessage.value = msg
+  messageMenuPos.value = { x: event.clientX, y: event.clientY }
+  messageMenuVisible.value = true
+}
+
+const closeMessageMenu = () => {
+  messageMenuVisible.value = false
+  selectedMessage.value = null
+}
 
 const formatTime = (isoString) => {
   if (!isoString) return ''
@@ -62,20 +126,9 @@ const fetchHistory = async (isFirst = false) => {
     })
 
     if (response.data.success && response.data.result.messageList) {
-      const newMsgs = response.data.result.messageList.map(msg => ({
-        id: msg.idx,
-        sender: msg.senderNickname,
-        text: msg.contents,
-        time: msg.createdAt,
-        isMe: msg.senderIdx === authStore.user.idx,
-        messageUnreadCount: msg.messageUnreadCount,
-        profileImageUrl: msg.profileImageUrl,
-        fileUrl: msg.fileUrl,     
-        fileName: msg.fileName,   
-        fileType: msg.fileType,   
-        fileSize: msg.fileSize,     
-        messageType: msg.messageType 
-      }))
+      const newMsgs = response.data.result.messageList.map((msg) =>
+        toChatMessage(msg, { isMe: msg.senderIdx === authStore.user.idx })
+      )
 
       if (newMsgs.length < size) isLastPage.value = true
 
@@ -149,25 +202,16 @@ const initChat = () => {
           return
         }
 
+        if (data.type === 'MESSAGE_DELETED') {
+          applyDeletedMessage(data.messageIdx ?? data.idx, data.contents)
+          return
+        }
+
         // 내가 보낸 메시지 → 임시 메시지 교체
         if (data.senderIdx === authStore.user.idx) {
           const tempIdx = chatMessages.value.findLastIndex(m => m.isPending && m.isMe)
           if (tempIdx !== -1) {
-            chatMessages.value[tempIdx] = {
-              id: data.idx,
-              sender: data.senderNickname,
-              text: data.contents,
-              time: data.createdAt,
-              isMe: true,
-              isPending: false,
-              messageUnreadCount: data.messageUnreadCount,
-              profileImageUrl: data.profileImageUrl,
-              fileUrl: data.fileUrl,       
-              fileName: data.fileName,     
-              fileType: data.fileType,     
-              fileSize: data.fileSize,     
-              messageType: data.messageType || 'TEXT' 
-            }
+            chatMessages.value[tempIdx] = toChatMessage(data, { isMe: true })
             sortMessages()
             nextTick(() => scrollToBottom())
             return
@@ -176,20 +220,7 @@ const initChat = () => {
 
         // 상대방 메시지 (중복 방지)
         if (!chatMessages.value.some(m => m.id === data.idx && !m.isPending)) {
-          chatMessages.value.push({
-            id: data.idx,
-            sender: data.senderNickname,
-            text: data.contents,
-            time: data.createdAt,
-            isMe: false,
-            messageUnreadCount: data.messageUnreadCount,
-            profileImageUrl: data.profileImageUrl,
-            fileUrl: data.fileUrl,    
-            fileName: data.fileName, 
-            fileType: data.fileType, 
-            fileSize: data.fileSize, 
-            messageType: data.messageType 
-          })
+          chatMessages.value.push(toChatMessage(data, { isMe: false }))
           sortMessages()
           nextTick(() => scrollToBottom())
           markAsRead()
@@ -323,7 +354,22 @@ const openFile = (url) => {
   window.open(url, '_blank')
 }
 
+const deleteMessage = async () => {
+  const messageId = selectedMessage.value?.id
+  if (!messageId) return
+
+  try {
+    await api.delete(`/chat/${props.room.id}/${messageId}`)
+    applyDeletedMessage(messageId)
+    closeMessageMenu()
+  } catch (error) {
+    console.error('메시지 삭제 실패:', error.response?.status, error.response?.data, error)
+    alert('메시지 삭제에 실패했습니다.')
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('click', closeMessageMenu)
   await api.post(`/chatRoom/${props.room.id}/enter`)
   requestNotificationPermission()
   await fetchHistory(true)
@@ -333,12 +379,14 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('click', closeMessageMenu)
   api.post(`/chatRoom/${props.room.id}/leave`).catch(() => {})
   if (scrollObserver.value) scrollObserver.value.disconnect()
   if (stompClient) stompClient.disconnect()
 })
 
 watch(() => props.room.id, async () => {
+  closeMessageMenu()
   markAsRead()
   await fetchHistory(true)
   initObserver()
@@ -393,10 +441,14 @@ watch(() => props.room.id, async () => {
                   msg.isMe ? 'bg-[#4169E1] text-white' : 'bg-[var(--bg-input)] text-[var(--text-main)]',
                   msg.isPending ? 'opacity-60' : ''
                 ]"
+                @contextmenu="openMessageMenu($event, msg)"
               >
+                <span v-if="msg.deleted" :class="['italic opacity-70', msg.isMe ? 'text-white' : 'text-[var(--text-muted)]']">
+                  {{ msg.text }}
+                </span>
                 <!-- 이미지 -->
                 <img
-                  v-if="msg.messageType === 'IMAGE'"
+                  v-else-if="msg.messageType === 'IMAGE'"
                   :src="msg.fileUrl"
                   class="max-w-[200px] max-h-[200px] rounded-xl object-cover cursor-pointer"
                   @click="window.open(msg.fileUrl, '_blank')"
@@ -435,6 +487,21 @@ watch(() => props.room.id, async () => {
         </div>
 
       </div>
+    </div>
+
+    <div
+      v-if="messageMenuVisible"
+      :style="{ top: `${messageMenuPos.y}px`, left: `${messageMenuPos.x}px` }"
+      class="fixed z-[999] min-w-[120px] rounded-lg border border-gray-200 bg-white py-2 text-xs shadow-xl"
+      @click.stop
+    >
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 px-4 py-2 text-left text-red-500 hover:bg-gray-100"
+        @click.stop="deleteMessage"
+      >
+        <i class="fa-solid fa-trash text-[10px]"></i> 삭제
+      </button>
     </div>
 
     <div class="p-4 border-t border-gray-100">

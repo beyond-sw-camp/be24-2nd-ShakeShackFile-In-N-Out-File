@@ -662,7 +662,8 @@ const startSse = () => {
     headers: {
       'Authorization': `Bearer ${token}`
     },
-    withCredentials: true
+    withCredentials: true,
+    heartbeatTimeout: 1000 * 60 * 65
   });
 
   // 알림 (invite, group_invite, relationship_invite, general)
@@ -680,6 +681,13 @@ const startSse = () => {
       pushNewNotification(payload);
       // Chat.vue에도 채팅목록 갱신 참참시
       window.dispatchEvent(new CustomEvent("sse-new-message", { detail: payload }));
+    } catch {}
+  });
+
+  sseEventSource.addEventListener("chat-preview-update", (e) => {
+    try {
+      const payload = JSON.parse(e.data);
+      window.dispatchEvent(new CustomEvent("sse-chat-preview-update", { detail: payload }));
     } catch {}
   });
 
