@@ -155,23 +155,47 @@ const formatRelativeTime = (dateStr) => {
   return `${Math.floor(hours / 24)}일 전`;
 };
 
+const getChatNotificationMessage = (item = {}) => {
+  const text = String(item.message ?? item.contents ?? item.lastMsg ?? "").trim();
+  if (text) return text;
+
+  const normalizedMessageType = String(item.messageType ?? "").toUpperCase();
+  if (normalizedMessageType === "IMAGE") return "사진";
+  if (normalizedMessageType === "FILE") return "문서";
+
+  const normalizedFileType = String(item.fileType ?? "").toLowerCase();
+  if (normalizedFileType.startsWith("image/")) return "사진";
+  if (normalizedFileType) return "문서";
+
+  return "";
+};
+
 const toNotificationItem = (item = {}) => {
-  const rawType = item.type ?? "general";
+  const rawType = item.type ?? item.notifType ?? "general";
   const isChat = rawType === "message" || rawType === "NEW_MESSAGE";
   const type = isChat ? "chat" : rawType;
   const read = Boolean(item.read);
   const actionableTypes = ["invite", "group_invite", "relationship_invite"];
   const processed = actionableTypes.includes(type) && read;
+  const roomIdxForKey =
+    item.roomIdx ?? item.roomId ?? item.chatRoomIdx ?? item.referenceId ?? null;
+  const serverRowId = isChat
+    ? (item.notificationId ?? item.notificationIdx ?? null)
+    : (item.notificationId ?? item.idx ?? item.id ?? null);
+  const displayId =
+    serverRowId ??
+    (isChat ? `local-chat-${roomIdxForKey ?? "na"}` : Date.now());
 
   return {
-    id: item.notificationId ?? item.idx ?? item.id ?? Date.now(),
+    id: displayId,
+    serverRowId,
     uuid: item.uuid ?? null,
     referenceId: item.referenceId ?? null,
     // 백엔드/SSE 페이로드 키가 버전마다 다를 수 있어 방 인덱스 매핑을 유연하게 처리
-    roomIdx: item.roomIdx ?? item.roomId ?? item.chatRoomIdx ?? item.referenceId ?? null,
+    roomIdx: roomIdxForKey,
     type,
     title: item.title ?? "알림",
-    message: item.message ?? item.contents ?? "",
+    message: isChat ? getChatNotificationMessage(item) : (item.message ?? item.contents ?? item.lastMsg ?? ""),
     createdAt: item.createdAt ?? null,
     time: item.createdAt ? formatRelativeTime(item.createdAt) : "방금 전",
     read,
@@ -192,6 +216,23 @@ const findNotificationIndex = (target) => notifications.value.findIndex((item) =
   );
 });
 
+const extractNotificationListPayload = (raw) => {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw.result?.body)) return raw.result.body;
+  if (Array.isArray(raw.result)) return raw.result;
+  if (Array.isArray(raw.data)) return raw.data;
+  if (Array.isArray(raw.body)) return raw.body;
+  return [];
+};
+
+const chatNotificationDedupeKey = (notification) => {
+  if (!notification || notification.type !== "chat") return null;
+  return notification.roomIdx != null
+    ? `room_${notification.roomIdx}`
+    : `title_${notification.title}`;
+};
+
 // ─── 서버 조회 (최소화) ───────────────────────────────────────────────────────
 // 호출 시점: ① 로그인 직후 1회  ② 드롭다운 열 때 (캐시 만료 시만)
 //            ③ 수락/거절 직후 상태 동기화
@@ -204,7 +245,7 @@ const fetchNotifications = async () => {
 
   try {
     const response = await postApi.getNotifications();
-    const items = Array.isArray(response?.result?.body) ? response.result.body : [];
+    const items = extractNotificationListPayload(response);
     const mapped = items.map(toNotificationItem);
     const seen = new Map();
     const grouped = [];
@@ -223,7 +264,15 @@ const fetchNotifications = async () => {
         grouped.push(notif);
       }
     }
-    notifications.value = grouped;
+    const serverChatKeys = new Set(
+      grouped.map(chatNotificationDedupeKey).filter((key) => key != null)
+    );
+    const clientOnlyChats = notifications.value.filter((notification) => {
+      const key = chatNotificationDedupeKey(notification);
+      return notification.type === "chat" && key != null && !serverChatKeys.has(key);
+    });
+
+    notifications.value = [...clientOnlyChats, ...grouped];
     lastFetchedAt.value = Date.now();
     updateNotifBadge();
   } catch (error) {
@@ -256,6 +305,7 @@ const pushNewNotification = (data) => {
       notifications.value.unshift({
         ...incoming,
         id: previous.id,
+        serverRowId: previous.serverRowId ?? incoming.serverRowId,
         unreadCount: data.unreadCount ?? (prevUnread + 1),
       });
     } else {
@@ -274,11 +324,11 @@ const pushNewNotification = (data) => {
 };
 
 const markNotificationAsRead = async (notification) => {
-  if (!notification?.id && !notification?.uuid) return;
+  if (!notification?.serverRowId && !notification?.uuid) return;
 
   try {
     await postApi.markNotificationAsRead({
-      id: notification.id ?? null,
+      id: notification.serverRowId ?? null,
       uuid: notification.uuid ?? null,
     });
   } catch (error) {
@@ -421,6 +471,15 @@ const handleNotificationClick = async (notification) => {
 
 const handleDeleteNotification = async (notification) => {
   try {
+    if (notification.type === "chat") {
+      const index = findNotificationIndex(notification);
+      if (index >= 0) {
+        notifications.value.splice(index, 1);
+      }
+      updateNotifBadge();
+      return;
+    }
+
     if (notification?.id || notification?.uuid) {
       await postApi.deleteNotification({
         id: notification.id ?? null,
@@ -599,7 +658,7 @@ const stopSse = () => {
 const startSse = () => {
   stopSse();
   const token = localStorage.getItem('ACCESS_TOKEN');
-  sseEventSource = new EventSourcePolyfill("http://localhost:8080/sse/connect", {
+  sseEventSource = new EventSourcePolyfill("http://localhost:8080/api/sse/connect", {
     headers: {
       'Authorization': `Bearer ${token}`
     },
