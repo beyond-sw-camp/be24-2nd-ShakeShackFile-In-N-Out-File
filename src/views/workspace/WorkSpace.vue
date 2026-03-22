@@ -12,11 +12,11 @@ const route     = useRoute()
 const router    = useRouter()
 const authStore = useAuthStore()
 
-const editorHolder   = ref(null)
-const editorApi      = ref(null)
-const title          = ref('')
+const editorHolder    = ref(null)
+const editorApi       = ref(null)
+const title           = ref('')
 const isEditorLoading = ref(false)
-const showUserList   = ref(false)
+const showUserList    = ref(false)
 
 const workspaceId             = ref(null)
 const workspaceAccessRole     = ref('ADMIN')
@@ -25,14 +25,17 @@ const workspaceAssetLoading   = ref(false)
 const workspaceAssetUploading = ref(false)
 const workspaceAssetError     = ref('')
 const deletingAssetIds        = ref([])
+const imageInput              = ref(null)
 const fileInput               = ref(null)
 const activeWorkspaceAssetId  = ref(null)
 const savingWorkspaceAssetIds = ref([])
 
+// ✅ 드롭다운 열림 상태
+const openRoleDropdownId = ref(null)
+
 // ─── 계산 속성 ────────────────────────────────────────────────────────────────
 const isValid = computed(() => title.value.trim().length > 0)
 
-// markRaw로 저장된 객체이므로 .value 접근이 정상 동작
 const remoteCursors = computed(() => editorApi.value?.remoteCursorsRef?.value || {})
 const activeUsers   = computed(() => editorApi.value?.activeUsersRef?.value   || [])
 
@@ -43,25 +46,29 @@ const canManageAssets = computed(() => {
   return ['ADMIN', 'WRITE'].includes(role)
 })
 
-const workspaceImages   = computed(() => workspaceAssets.value.filter((a) => a.assetType === 'IMAGE'))
-const workspaceFiles    = computed(() => workspaceAssets.value.filter((a) => a.assetType === 'FILE'))
+const workspaceImages    = computed(() => workspaceAssets.value.filter((a) => a.assetType === 'IMAGE'))
+const workspaceFiles     = computed(() => workspaceAssets.value.filter((a) => a.assetType === 'FILE'))
 const hasWorkspaceAssets = computed(() => workspaceAssets.value.length > 0)
 
 // ─── 모듈 수준 변수 ──────────────────────────────────────────────────────────
-let currentSetupId              = 0
-let workspaceAssetStompClient   = null
+let currentSetupId                = 0
+let workspaceAssetStompClient     = null
 let connectedWorkspaceAssetRoomId = null
+
+// ─── 역할 레이블 헬퍼 ────────────────────────────────────────────────────────
+const roleLabel = (role) => {
+  const map = { ADMIN: '관리자', WRITE: '편집자', READ: '뷰어' }
+  return map[role] || '뷰어'
+}
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 const formatBytes = (bytes) => {
   const size = Number(bytes || 0)
   if (!Number.isFinite(size) || size <= 0) return '0 B'
-
   const units     = ['B', 'KB', 'MB', 'GB', 'TB']
   const unitIndex = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1)
   const value     = size / 1024 ** unitIndex
   const fractionDigits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
-
   return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
 }
 
@@ -121,7 +128,6 @@ const removeWorkspaceAssets = (assetIds) => {
 // ─── 에셋 실시간 이벤트 ───────────────────────────────────────────────────────
 const handleWorkspaceAssetRealtimeEvent = (payload = {}) => {
   if (Number(payload.workspaceIdx || 0) !== Number(workspaceId.value || 0)) return
-
   if (payload.action === 'UPSERT') {
     mergeWorkspaceAssets(Array.isArray(payload.assets) ? payload.assets : [])
     return
@@ -136,12 +142,9 @@ const handleWorkspaceAssetRealtimeEvent = (payload = {}) => {
 // ─── STOMP 연결 / 해제 ────────────────────────────────────────────────────────
 const disconnectWorkspaceAssetRealtime = () => {
   connectedWorkspaceAssetRoomId = null
-
   const client = workspaceAssetStompClient
-  workspaceAssetStompClient = null   // 먼저 null로 교체해 중복 호출 방지
-
+  workspaceAssetStompClient = null
   if (!client) return
-
   try {
     if (client.connected) {
       client.disconnect(() => {})
@@ -208,10 +211,8 @@ const refreshWorkspaceAssets = async (targetWorkspaceId = workspaceId.value) => 
     workspaceAssetError.value = ''
     return []
   }
-
   workspaceAssetLoading.value = true
   workspaceAssetError.value   = ''
-
   try {
     const result = await postApi.getWorkspaceAssets(targetWorkspaceId)
     workspaceAssets.value = (Array.isArray(result) ? result : []).map(normalizeWorkspaceAsset)
@@ -229,23 +230,52 @@ const refreshWorkspaceAssets = async (targetWorkspaceId = workspaceId.value) => 
 // ─── 저장 ─────────────────────────────────────────────────────────────────────
 const handleSave = async () => {
   if (!editorApi.value?.savePost) return
-
   const response         = await editorApi.value.savePost()
   const savedWorkspaceId = response?.result?.body?.idx ?? response?.data?.idx ?? response?.idx ?? null
   if (!savedWorkspaceId) return
-
   workspaceId.value         = Number(savedWorkspaceId)
   workspaceAccessRole.value = 'ADMIN'
   router.push(`/workspace/read/${savedWorkspaceId}`)
 }
 
-// ─── 권한 변경 ────────────────────────────────────────────────────────────────
-const handlePermissionChange = (clientId, event) => {
-  const newStatus = event.target.value
-  if (editorApi.value?.updateUserPermission) {
-    editorApi.value.updateUserPermission(clientId, newStatus)
-    alert('권한 설정이 저장되었습니다.')
+// ─── 권한 변경 (드롭다운) ────────────────────────────────────────────────────
+const handleRoleAction = async (user, action) => {
+  openRoleDropdownId.value = null
+  if (!workspaceId.value || !user.userIdx) return
+
+  try {
+    if (action === 'KICKED') {
+      if (!confirm(`${user.name} 님을 추방하시겠습니까?`)) return
+      await postApi.kickUser(workspaceId.value, user.userIdx)
+    } else {
+      await postApi.changeUserRole(workspaceId.value, user.userIdx, action)
+    }
+  } catch (e) {
+    alert('권한 변경에 실패했습니다.')
   }
+}
+
+// ─── SSE role-changed 핸들러 ────────────────────────────────────────────────
+// 현재 보고 있는 페이지와 같은 워크스페이스일 때만 처리
+const handleSseRoleChanged = (evt) => {
+  const { postIdx, newRole } = evt?.detail || {}
+  if (!postIdx) return
+
+  // 현재 내가 보고 있는 워크스페이스가 아니면 무시
+  if (Number(postIdx) !== Number(workspaceId.value)) return
+
+  if (newRole === 'KICKED') {
+    alert('해당 워크스페이스에서 추방되었습니다.')
+    router.push('/workspace')
+  } else {
+    // 권한이 변경되면 페이지 새로고침으로 최신 권한 반영
+    window.location.reload()
+  }
+}
+
+// ─── 드롭다운 외부 클릭 시 닫기 ──────────────────────────────────────────────
+const closeRoleDropdown = () => {
+  openRoleDropdownId.value = null
 }
 
 // ─── 워처 ─────────────────────────────────────────────────────────────────────
@@ -267,13 +297,10 @@ const prepareData = async () => {
   if (!id || route.path === '/workspace') {
     return { idx: null, title: '', contents: '', type: false, status: 'Private', uuid: '', accessRole: 'ADMIN' }
   }
-
   if (route.meta.initialData && String(route.meta.initialData.idx) === String(id)) {
     return route.meta.initialData
   }
-
   try {
-    // postApi.getPost는 apiCall → extractBody로 body를 직접 반환
     const data = await postApi.getPost(id)
     return data
   } catch (error) {
@@ -281,24 +308,18 @@ const prepareData = async () => {
   }
 }
 
-// ─── 워크스페이스 자동 저장 (파일 업로드 전) ────────────────────────────────
+// ─── 워크스페이스 자동 저장 ──────────────────────────────────────────────────
 const ensureWorkspacePersisted = async ({ navigate = false } = {}) => {
   if (workspaceId.value) return workspaceId.value
-
   if (!editorApi.value?.savePost) throw new Error('워크스페이스를 먼저 저장할 수 없습니다.')
-
   const response         = await editorApi.value.savePost()
   const savedWorkspaceId = response?.result?.body?.idx ?? response?.data?.idx ?? response?.idx ?? null
-
   if (!savedWorkspaceId) throw new Error('워크스페이스 저장에 실패했습니다.')
-
   workspaceId.value         = Number(savedWorkspaceId)
   workspaceAccessRole.value = 'ADMIN'
-
   if (navigate && String(route.params.id || '') !== String(savedWorkspaceId)) {
     await router.replace(`/workspace/read/${savedWorkspaceId}`)
   }
-
   return workspaceId.value
 }
 
@@ -306,16 +327,13 @@ const ensureWorkspacePersisted = async ({ navigate = false } = {}) => {
 const uploadWorkspaceFiles = async (files, { autoPersist = true } = {}) => {
   const selectedFiles = Array.from(files || []).filter(Boolean)
   if (!selectedFiles.length) return []
-
   let targetWorkspaceId = workspaceId.value
   if (!targetWorkspaceId && autoPersist) {
     targetWorkspaceId = await ensureWorkspacePersisted({ navigate: false })
   }
   if (!targetWorkspaceId) throw new Error('워크스페이스를 먼저 저장한 뒤 업로드해 주세요.')
-
   workspaceAssetUploading.value = true
   workspaceAssetError.value     = ''
-
   try {
     const uploaded         = await postApi.uploadWorkspaceAssets(targetWorkspaceId, selectedFiles)
     const normalizedAssets = (Array.isArray(uploaded) ? uploaded : []).map(normalizeWorkspaceAsset)
@@ -350,7 +368,7 @@ const handleAssetSelection = async (event) => {
   }
 }
 
-const triggerImageSelect = () => { if (!canManageAssets.value) return }
+const triggerImageSelect = () => { if (!canManageAssets.value) return; imageInput.value?.click() }
 const triggerFileSelect  = () => { if (!canManageAssets.value) return; fileInput.value?.click() }
 
 // ─── 에셋 액션 ────────────────────────────────────────────────────────────────
@@ -361,10 +379,8 @@ const toggleWorkspaceAssetActions = (assetId) => {
 
 const handleAssetDelete = async (asset) => {
   if (!asset?.id || !workspaceId.value || !canManageAssets.value) return
-
   deletingAssetIds.value    = [...deletingAssetIds.value, asset.id]
   workspaceAssetError.value = ''
-
   try {
     await postApi.deleteWorkspaceAsset(workspaceId.value, asset.id)
     workspaceAssets.value = workspaceAssets.value.filter((item) => item.id !== asset.id)
@@ -382,10 +398,8 @@ const isSavingWorkspaceAsset = (assetId) => savingWorkspaceAssetIds.value.includ
 
 const saveWorkspaceAssetToDrive = async (asset) => {
   if (!asset?.id || !workspaceId.value) return
-
   savingWorkspaceAssetIds.value = [...savingWorkspaceAssetIds.value, asset.id]
   workspaceAssetError.value     = ''
-
   try {
     await postApi.saveWorkspaceAssetToDrive(workspaceId.value, asset.id)
     window.alert('파일이 드라이브에 저장되었습니다.')
@@ -414,25 +428,13 @@ const getWorkspaceAssetBadge = (asset) => (asset?.assetType === 'IMAGE' ? '이�
 // ─── 에디터 초기화 ────────────────────────────────────────────────────────────
 const setupEditor = async () => {
   const setupId = ++currentSetupId
-
   if (!editorHolder.value) return
 
   isEditorLoading.value = true
   const data = await prepareData()
   if (setupId !== currentSetupId) return
 
-  title.value               = data.title || ''
-  workspaceId.value         = data.idx ? Number(data.idx) : null
-  workspaceAccessRole.value = data.accessRole || data.level || 'ADMIN'
-
-  // READ 권한이면 읽기 전용 페이지로 리다이렉트
-  if (String(workspaceAccessRole.value).toUpperCase() === 'READ' && data.idx) {
-    await router.replace(`/workspace/readonly/${data.idx}`)
-    return
-  }
-
-  await refreshWorkspaceAssets(workspaceId.value)
-
+  // ✅ 기존 에디터 먼저 destroy → title watch가 updateTitleFromLocal 호출 방지
   if (editorApi.value) {
     try {
       if (editorApi.value.editor?.isReady) await editorApi.value.editor.isReady
@@ -443,18 +445,34 @@ const setupEditor = async () => {
     editorApi.value = null
   }
 
+  title.value               = data.title || ''
+  workspaceId.value         = data.idx ? Number(data.idx) : null
+  workspaceAccessRole.value = data.accessRole || data.level || 'ADMIN'
+
+  if (String(workspaceAccessRole.value).toUpperCase() === 'READ' && data.idx) {
+    await router.replace(`/workspace/readonly/${data.idx}`)
+    return
+  }
+
+  await refreshWorkspaceAssets(workspaceId.value)
+
   await nextTick()
   if (editorHolder.value) editorHolder.value.innerHTML = ''
 
   try {
+    const isPrivate = data.status === 'Private'
+
     const newEditorApi = await initEditor(
       editorHolder.value,
       `notion-room-${data.idx ? data.idx : `new-${Date.now()}`}`,
       data.contents,
       data.idx ?? null,
       data.title,
-      !!data.idx,   // idx가 있는 기존 문서만 협업(웹소켓) 모드
-      { uploadImage: handleEditorImageUpload },
+      isPrivate,
+      {
+        uploadImage: handleEditorImageUpload,
+        userRole: workspaceAccessRole.value,  // ✅ 역할 전달
+      },
     )
 
     if (setupId !== currentSetupId) {
@@ -463,8 +481,6 @@ const setupEditor = async () => {
       return
     }
 
-    // ★ markRaw: Vue가 내부 ref를 자동 언래핑하지 않도록 방지
-    //    → remoteCursorsRef.value, activeUsersRef.value 정상 추적
     editorApi.value = markRaw(newEditorApi)
     editorApi.value?.bindTitleRef?.(title)
   } catch (error) {
@@ -478,7 +494,6 @@ const setupEditor = async () => {
 const checkAndRedirectUuid = async () => {
   const uuid = route.query.uuid
   if (!route.path.includes('/invite') || !uuid) return false
-
   try {
     const response = await postApi.getPostByUuid(uuid)
     const data     = response?.result?.body || response?.data || response
@@ -489,7 +504,6 @@ const checkAndRedirectUuid = async () => {
   } catch (error) {
     console.error('UUID redirect failed:', error)
   }
-
   await router.replace('/workspace')
   return true
 }
@@ -499,6 +513,11 @@ onMounted(async () => {
   syncTheme()
   const redirected = await checkAndRedirectUuid()
   if (!redirected) await setupEditor()
+
+  // ✅ SSE role-changed 리스너 등록
+  window.addEventListener('sse-role-changed', handleSseRoleChanged)
+  // 드롭다운 외부 클릭 닫기
+  window.addEventListener('click', closeRoleDropdown)
 })
 
 watch(() => route.params.id, async () => { await setupEditor() })
@@ -515,6 +534,11 @@ watch(
 
 onBeforeUnmount(async () => {
   disconnectWorkspaceAssetRealtime()
+
+  // ✅ SSE role-changed 리스너 해제
+  window.removeEventListener('sse-role-changed', handleSseRoleChanged)
+  window.removeEventListener('click', closeRoleDropdown)
+
   if (editorApi.value?.destroy) {
     if (editorApi.value.editor?.isReady) await editorApi.value.editor.isReady
     await editorApi.value.destroy()
@@ -529,12 +553,11 @@ onBeforeUnmount(async () => {
         <input v-model="title" placeholder="제목 없음" class="title-input" />
 
         <div class="user-presence-wrapper">
-          <button class="presence-toggle-btn" @click="showUserList = !showUserList">
+          <button class="presence-toggle-btn" @click.stop="showUserList = !showUserList">
             <span class="user-count-badge">{{ activeUsers.length }}</span>
             참여자
           </button>
-
-          <div v-if="showUserList" class="user-list-popover">
+          <div v-if="showUserList" class="user-list-popover" @click.stop>
             <div class="popover-title">현재 참여 중인 사용자</div>
             <div class="user-item-list">
               <div v-for="user in activeUsers" :key="user.clientId" class="user-item">
@@ -542,17 +565,47 @@ onBeforeUnmount(async () => {
                   {{ user.name.charAt(0) }}
                 </div>
                 <div class="user-info">
-                  <div class="user-name">
-                    {{ user.name }} <span v-if="user.isMe" class="me-tag">(나)</span>
+                  <!-- 이름 + (나) + 역할 배지 -->
+                  <div class="user-name-row">
+                    <span class="user-name">{{ user.name }}</span>
+                    <span v-if="user.isMe" class="me-tag">(나)</span>
+                    <span
+                      class="role-badge"
+                      :class="`role-badge--${(user.role || 'READ').toLowerCase()}`"
+                    >
+                      {{ roleLabel(user.role) }}
+                    </span>
                   </div>
-                  <select
-                    v-if="!user.isMe"
-                    class="permission-select"
-                    @change="handlePermissionChange(user.clientId, $event)"
+
+                  <!-- ADMIN이고 본인이 아닐 때만 드롭다운 표시 -->
+                  <div
+                    v-if="workspaceAccessRole === 'ADMIN' && !user.isMe"
+                    class="permission-dropdown-wrapper"
+                    @click.stop
                   >
-                    <option value="edit">편집 가능</option>
-                    <option value="redirect">권한 회수</option>
-                  </select>
+                    <button
+                      class="permission-dropdown-trigger"
+                      @click.stop="openRoleDropdownId = openRoleDropdownId === user.clientId ? null : user.clientId"
+                    >
+                      권한 변경 <span class="dropdown-arrow">▼</span>
+                    </button>
+
+                    <div v-if="openRoleDropdownId === user.clientId" class="permission-dropdown-menu">
+                      <button class="dropdown-item" @click.stop="handleRoleAction(user, 'ADMIN')">
+                        관리자로 변경
+                      </button>
+                      <button class="dropdown-item" @click.stop="handleRoleAction(user, 'WRITE')">
+                        편집자로 변경
+                      </button>
+                      <button class="dropdown-item" @click.stop="handleRoleAction(user, 'READ')">
+                        뷰어로 변경
+                      </button>
+                      <div class="dropdown-divider"></div>
+                      <button class="dropdown-item dropdown-item--danger" @click.stop="handleRoleAction(user, 'KICKED')">
+                        추방하기
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -774,6 +827,9 @@ onBeforeUnmount(async () => {
   align-items: center;
   padding: 20px;
   border-bottom: 1px solid var(--editor-border);
+  position: relative;
+  z-index: 200;          /* ✅ 추가 */
+  overflow: visible;     /* ✅ 추가 */
 }
 
 .title-input {
@@ -796,6 +852,7 @@ onBeforeUnmount(async () => {
   cursor: pointer;
   border: none;
   font-weight: 700;
+  z-index: 10;
 }
 
 .save-btn:disabled,
@@ -836,12 +893,12 @@ onBeforeUnmount(async () => {
   position: absolute;
   top: 45px;
   right: 0;
-  width: 260px;
+  width: 280px;
   background: var(--editor-bg);
   border: 1px solid var(--editor-border);
   border-radius: 12px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
+  z-index: 9999;         /* ✅ 1000 → 9999 */
   padding: 16px;
 }
 
@@ -856,7 +913,7 @@ onBeforeUnmount(async () => {
 
 .user-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
 }
 
@@ -870,22 +927,94 @@ onBeforeUnmount(async () => {
   color: white;
   font-weight: bold;
   font-size: 14px;
+  flex-shrink: 0;
 }
 
-.user-info { flex: 1; }
+.user-info { flex: 1; min-width: 0; }
+
+/* ✅ 이름 + 배지 한 줄 */
+.user-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .user-name { font-size: 14px; font-weight: 500; }
 .me-tag    { font-size: 11px; color: #888; }
 
-.permission-select {
+/* ✅ 역할 배지 */
+.role-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.role-badge--admin { background: rgba(37, 99, 235, 0.12); color: #2563eb; }
+.role-badge--write { background: rgba(22, 163, 74, 0.12);  color: #16a34a; }
+.role-badge--read  { background: rgba(100, 116, 139, 0.12); color: #64748b; }
+
+/* ✅ 드롭다운 */
+.permission-dropdown-wrapper {
+  position: relative;
+  margin-top: 4px;
+}
+
+.permission-dropdown-trigger {
+  font-size: 11px;
+  color: #2563eb;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+}
+
+.dropdown-arrow { font-size: 9px; }
+
+.permission-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 150px;
+  background: var(--editor-bg);
+  border: 1px solid var(--editor-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  z-index: 2000;
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+.dropdown-item {
   display: block;
   width: 100%;
-  margin-top: 4px;
-  font-size: 11px;
-  background: transparent;
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  background: none;
   border: none;
-  color: #2563eb;
   cursor: pointer;
+  color: var(--editor-text);
+  transition: background 0.15s;
 }
+.dropdown-item:hover { background: rgba(0, 0, 0, 0.05); }
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--editor-border);
+  margin: 4px 0;
+}
+
+.dropdown-item--danger       { color: #dc2626; }
+.dropdown-item--danger:hover { background: rgba(220, 38, 38, 0.07); }
+
+/* ─── 나머지 기존 스타일 유지 ────────────────────────────────────────────── */
 
 .workspace-assets {
   padding: 20px;
@@ -898,8 +1027,6 @@ onBeforeUnmount(async () => {
   gap: 16px;
   align-items: flex-start;
 }
-
-.workspace-assets__title { font-size: 16px; font-weight: 800; }
 
 .workspace-assets__summary,
 .workspace-assets__hint {

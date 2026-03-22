@@ -3,10 +3,6 @@ import api from '@/plugins/axiosinterceptor'
 const VAPID_PUBLIC_KEY =
   'BLHgfPga02L2u89uc4xjhbUFTy_U04rQCjGq7o24oxtqfVmAPHTxOmp6xndSHZtGQpmt7gqTFdMXco2gRNP7_p8'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 내부 유틸
-// ─────────────────────────────────────────────────────────────────────────────
-
 const urlBase64ToUint8Array = (base64String) => {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -59,20 +55,17 @@ const apiCall = async (label, request, fallback = undefined) => {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 알림 (원본 코드 유지)
+// 알림
 // ─────────────────────────────────────────────────────────────────────────────
 
 const subscribeWebPush = async () => {
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
     return null
   }
-
   try {
     const permission = await Notification.requestPermission()
     if (permission !== 'granted') return null
-
     const registration = await navigator.serviceWorker.register('/sw.js')
-
     let subscription = await registration.pushManager.getSubscription()
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
@@ -80,13 +73,11 @@ const subscribeWebPush = async () => {
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       })
     }
-
     const subscriptionJson = subscription.toJSON()
     const response = await api.post('/notification/subscribe', {
       endpoint: subscriptionJson.endpoint,
       keys: subscriptionJson.keys,
     })
-
     console.log('알림 구독 성공')
     return response.data
   } catch (error) {
@@ -151,31 +142,21 @@ const list_delete = async (idx) =>
 const inviteUser = async (inviteData) =>
   apiCall(
     'inviteUser',
-    () =>
-      api.post('/workspace/invite', null, {
-        params: {
-          uuid: inviteData.uuid,
-          type: inviteData.type,
-          email: inviteData.email,
-        },
-        timeout: 15000,
-      }),
+    () => api.post('/workspace/invite', null, {
+      params: { uuid: inviteData.uuid, type: inviteData.type, email: inviteData.email },
+      timeout: 15000,
+    }),
   )
 
 const getPostByUuid = async (uuid) =>
   apiCall('getPostByUuid', () => api.get(`/workspace/by-uuid/${uuid}`))
 
 const verifyEmail = async (uuid, type) =>
-  apiCall('verifyEmail', () =>
-    api.get('/workspace/verify', { params: { uuid, type } }),
-  )
+  apiCall('verifyEmail', () => api.get('/workspace/verify', { params: { uuid, type } }))
 
 const updateShareStatus = async (idx, status) =>
   apiCall('updateShareStatus', () =>
-    api.post(`/workspace/isShared/${idx}`, {
-      type: status !== 'Private',
-      status,
-    }),
+    api.post(`/workspace/isShared/${idx}`, { type: status !== 'Private', status }),
   )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,32 +169,62 @@ const loadRole = async (idx) =>
 const saveRole = async (idx, roleData) =>
   apiCall('saveRole', () => api.post(`/workspace/saveRole/${idx}`, roleData))
 
+// ✅ 단일 유저 역할 변경 (SSE로 해당 유저에게 알림)
+const changeUserRole = async (postIdx, targetUserIdx, role) =>
+  apiCall(
+    'changeUserRole',
+    () => api.post(`/workspace/${postIdx}/role/${targetUserIdx}`, { role }),
+  )
+
+// ✅ 유저 추방 (SSE로 해당 유저에게 알림)
+const kickUser = async (postIdx, targetUserIdx) =>
+  apiCall(
+    'kickUser',
+    () => api.delete(`/workspace/${postIdx}/member/${targetUserIdx}`, {
+      headers: { 'Content-Type': undefined },
+    }),
+  )
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 첨부 파일(에셋)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const getWorkspaceAssets = async (workspaceId) =>
-  apiCall(
-    'getWorkspaceAssets',
-    () => api.get(`/workspace/${workspaceId}/assets`),
-    [],
-  )
+  apiCall('getWorkspaceAssets', () => api.get(`/workspace/${workspaceId}/assets`), [])
 
 const uploadWorkspaceAssets = async (workspaceId, files) => {
   const formData = new FormData()
-  Array.from(files || []).forEach((file) => formData.append('files', file))
-
+  const fileList = files instanceof File ? [files] : Array.from(files || [])
+  if (fileList.length === 0) throw new Error('업로드할 파일이 없습니다.')
+  fileList.forEach((file) => formData.append('files', file))
   return apiCall(
     'uploadWorkspaceAssets',
-    () => api.post(`/workspace/${workspaceId}/assets`, formData, { timeout: 600000 }),
+    () => api.post(`/workspace/${workspaceId}/assets`, formData, {
+      timeout: 600000,
+      transformRequest: [(data, headers) => { delete headers['Content-Type']; delete headers.common?.['Content-Type']; return data }],
+    }),
     [],
   )
 }
 
 const deleteWorkspaceAsset = async (workspaceId, assetId) =>
-  apiCall('deleteWorkspaceAsset', () =>
-    api.delete(`/workspace/${workspaceId}/assets/${assetId}`),
+  apiCall('deleteWorkspaceAsset', () => api.delete(`/workspace/${workspaceId}/assets/${assetId}`))
+
+const deleteEditorJsImage = async (workspaceId, assetIdx) =>
+  apiCall('deleteEditorJsImage', () => api.delete(`/workspace/${workspaceId}/assets/${assetIdx}/editorjs`))
+
+const uploadEditorJsImage = async (workspaceId, file) => {
+  if (!workspaceId) throw new Error('워크스페이스 ID가 없습니다. 먼저 게시물을 저장해주세요.')
+  const formData = new FormData()
+  formData.append('image', file)
+  return apiCall(
+    'uploadEditorJsImage',
+    () => api.post(`/workspace/${workspaceId}/assets/editorjs`, formData, {
+      timeout: 600000,
+      transformRequest: [(data, headers) => { delete headers['Content-Type']; return data }],
+    }),
   )
+}
 
 const saveWorkspaceAssetToDrive = async (workspaceId, assetId, parentId = null) =>
   apiCall('saveWorkspaceAssetToDrive', () =>
@@ -240,8 +251,12 @@ export default {
   updateShareStatus,
   loadRole,
   saveRole,
+  changeUserRole,   // ✅ 추가
+  kickUser,         // ✅ 추가
   getWorkspaceAssets,
   uploadWorkspaceAssets,
   deleteWorkspaceAsset,
+  deleteEditorJsImage,
+  uploadEditorJsImage,
   saveWorkspaceAssetToDrive,
 }

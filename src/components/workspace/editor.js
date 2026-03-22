@@ -22,15 +22,14 @@ import { ref } from 'vue'
 import postApi from '@/api/postApi'
 import loadpost from './loadpost'
 
-export async function initEditor(holderElement, room, initialData, idx, initialTitle, isCollaborative = false, options = {}) {
+export async function initEditor(holderElement, room, initialData, idx, initialTitle, isCollaborative, options = {}) {
   if (!holderElement) throw new Error('holderElement is required')
 
   const ydoc = new Y.Doc()
   let provider = null
   let currentIdx = idx ?? null
 
-  // isCollaborative(= !!data.idx)일 때만 웹소켓 연결
-  if (isCollaborative) {
+  if (!isCollaborative) {
     provider = new WebsocketProvider('ws://localhost:1234', room, ydoc)
   }
 
@@ -46,7 +45,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     })
   }
 
-  const awareness       = provider ? provider.awareness : null
+  const awareness        = provider ? provider.awareness : null
   const remoteCursorsRef = ref({})
   const activeUsersRef   = ref([])
 
@@ -54,24 +53,27 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   const myId    = Math.floor(Math.random() * colors.length)
   const myColor = colors[myId]
 
-  let myName = `사용자 ${myId + 1}`
+  let myName    = `사용자 ${myId + 1}`
+  let myUserIdx = null
+  const userRole = options?.userRole ?? 'READ'  // ✅ 옵션에서 역할 수신
+
   const token = localStorage.getItem('ACCESS_TOKEN')
   if (token) {
     try {
-      const base64Url    = token.split('.')[1]
-      const base64       = base64Url.replace(/-/g, '+').replace(/_/g, '/')
-      const jsonPayload  = decodeURIComponent(
+      const base64Url   = token.split('.')[1]
+      const base64      = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+      const jsonPayload = decodeURIComponent(
         atob(base64).split('').map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
       )
       const payload = JSON.parse(jsonPayload)
-      myName = payload.name || payload.username || payload.nickname || myName
+      myName    = payload.name || payload.username || payload.nickname || myName
+      myUserIdx = payload.idx ?? null  // ✅ 백엔드 유저 ID 추출
     } catch (e) {
       console.warn('토큰에서 사용자 정보를 읽어오는데 실패했습니다.', e)
     }
   }
 
   // ─── awareness 업데이트 핸들러 ────────────────────────────────────────────
-  // ① 핸들러를 먼저 함수로 정의
   function runAwarenessUpdate() {
     if (!awareness) return
     const states   = awareness.getStates()
@@ -86,6 +88,8 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
         name:     state.user.name,
         color:    state.user.color,
         isMe:     clientId === ydoc.clientID,
+        role:     state.user.role    ?? 'READ',  // ✅ 역할
+        userIdx:  state.user.userIdx ?? null,     // ✅ 백엔드 유저 ID
       })
 
       if (clientId === ydoc.clientID) return
@@ -111,11 +115,15 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   }
 
   if (awareness) {
-    // ② on('update') 먼저 등록
     awareness.on('update', runAwarenessUpdate)
-    // ③ 그 다음 setLocalState → update 이벤트 즉시 발생 → 핸들러 실행
     awareness.setLocalState({
-      user: { name: myName, color: myColor, clientId: ydoc.clientID },
+      user: {
+        name:     myName,
+        color:    myColor,
+        clientId: ydoc.clientID,
+        role:     userRole,   // ✅ 역할 공유
+        userIdx:  myUserIdx,  // ✅ 백엔드 유저 ID 공유
+      },
     })
   }
 
@@ -126,27 +134,30 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   })
 
   // ─── 이미지 업로드 설정 ────────────────────────────────────────────────────
-  const imageToolConfig = options?.uploadImage
-    ? {
-        class: ImageTool,
-        config: {
-          uploader: {
-            async uploadByFile(file) {
-              const uploadedAsset = await options.uploadImage(file)
-              const imageUrl =
-                uploadedAsset?.previewUrl || uploadedAsset?.downloadUrl || uploadedAsset?.url
-
-              if (!imageUrl) throw new Error('Image upload failed')
-
-              return { success: 1, file: { url: imageUrl } }
-            },
-            async uploadByUrl(url) {
-              return { success: 1, file: { url } }
-            },
-          },
+  const trackedImageAssets = new Map()
+  const imageToolConfig = {
+    class: ImageTool,
+    config: {
+      uploader: {
+        async uploadByFile(files) {
+          try {
+            if (!currentIdx) {
+              await savePost()
+              if (!currentIdx) throw new Error('게시물 생성에 실패하여 이미지를 업로드할 수 없습니다.')
+            }
+            const result = await postApi.uploadEditorJsImage(currentIdx, files)
+            if (result?.file?.assetIdx) {
+              trackedImageAssets.set(result.file.assetIdx, true)
+            }
+            return result
+          } catch (e) {
+            console.error('[Editor] 이미지 업로드 실패:', e)
+            return { success: 0, message: e.message || '업로드 중 오류가 발생했습니다.' }
+          }
         },
-      }
-    : { class: ImageTool }
+      },
+    },
+  }
 
   const tools = {
     header:     { class: Header, tunes: ['alignment'], config: { levels: [1, 2, 3, 4], defaultLevel: 1 } },
@@ -165,30 +176,68 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     youtube:    { class: YouTubeEmbed },
   }
 
-  let editor        = null
-  let suppressLocal = false
-  let isRendering   = false
+  let editor              = null
+  let suppressLocal       = false
+  let isRendering         = false
+  let previousImageAssets = new Map()
+  let mutationObserver    = null
+  let pendingYVal         = null
 
-  // ─── Y.js → 에디터 렌더 ────────────────────────────────────────────────────
-  async function renderFromY(yval) {
-    if (!editor || isRendering) return
-    if (!yval || yval === '""' || yval === '') return
+  // ─── 블록 단위 diff 적용 ──────────────────────────────────────────────────
+  async function applyBlockDiff(nextBlocks) {
+    await editor.isReady
+    const currentData   = await editor.save()
+    const currentBlocks = currentData.blocks
+    if (JSON.stringify(currentBlocks) === JSON.stringify(nextBlocks)) return
 
+    isRendering   = true
+    suppressLocal = true
+
+    try {
+      const currentMap = new Map(currentBlocks.map((b, i) => [b.id, { block: b, index: i }]))
+      const nextMap    = new Map(nextBlocks.map((b, i)    => [b.id, { block: b, index: i }]))
+
+      const deletedIds = [...currentMap.keys()].filter(id => !nextMap.has(id))
+      for (const id of [...deletedIds].reverse()) {
+        const blockIdx = editor.blocks.getBlockIndex(id)
+        if (blockIdx !== -1) editor.blocks.delete(blockIdx)
+      }
+
+      for (let i = 0; i < nextBlocks.length; i++) {
+        const nextBlock = nextBlocks[i]
+        const existing  = currentMap.get(nextBlock.id)
+        if (!existing) {
+          editor.blocks.insert(nextBlock.type, nextBlock.data, {}, i, true)
+        } else if (JSON.stringify(existing.block.data) !== JSON.stringify(nextBlock.data)) {
+          await editor.blocks.update(nextBlock.id, nextBlock.data)
+        }
+      }
+
+      const afterUpdate = await editor.save()
+      const afterIds    = afterUpdate.blocks.map(b => b.id)
+      const nextIds     = nextBlocks.map(b => b.id)
+      if (JSON.stringify(afterIds) !== JSON.stringify(nextIds)) {
+        await editor.render({ blocks: nextBlocks })
+      }
+    } finally {
+      previousImageAssets = new Map(
+        nextBlocks
+          .filter(b => b.type === 'image' && b.data?.file?.assetIdx)
+          .map(b => [b.data.file.assetIdx, true])
+      )
+      setTimeout(() => {
+        suppressLocal = false
+        isRendering   = false
+      }, 50)
+    }
+  }
+
+  async function applyRender(yval) {
     try {
       await editor.isReady
       const parsed = JSON.parse(yval)
       if (parsed && Array.isArray(parsed.blocks)) {
-        const currentData = await editor.save()
-        if (JSON.stringify(currentData.blocks) === JSON.stringify(parsed.blocks)) return
-
-        isRendering   = true
-        suppressLocal = true
-        await editor.render(parsed)
-
-        setTimeout(() => {
-          suppressLocal = false
-          isRendering   = false
-        }, 100)
+        await applyBlockDiff(parsed.blocks)
       }
     } catch (e) {
       console.warn('failed to parse yval', e)
@@ -196,6 +245,27 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       isRendering   = false
     }
   }
+
+  async function renderFromY(yval) {
+    if (!editor || isRendering) return
+    if (!yval || yval === '""' || yval === '') return
+
+    if (holderElement.contains(document.activeElement)) {
+      pendingYVal = yval
+      return
+    }
+
+    await applyRender(yval)
+  }
+
+  holderElement.addEventListener('focusout', async (e) => {
+    if (holderElement.contains(e.relatedTarget)) return
+    if (pendingYVal) {
+      const val = pendingYVal
+      pendingYVal = null
+      await applyRender(val)
+    }
+  })
 
   // ─── 초기 데이터 파싱 ─────────────────────────────────────────────────────
   let parsedData = { blocks: [] }
@@ -222,17 +292,57 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
       } else if (parsedData.blocks && parsedData.blocks.length > 0) {
         yMap.set('contents', JSON.stringify(parsedData))
       }
+
+      const initialSaved = await editor.save()
+      initialSaved.blocks
+        .filter(b => b.type === 'image' && b.data?.file?.assetIdx)
+        .forEach(b => previousImageAssets.set(b.data.file.assetIdx, true))
+
+      let syncTimer = null
+      mutationObserver = new MutationObserver(() => {
+        if (suppressLocal || isRendering) return
+        clearTimeout(syncTimer)
+        syncTimer = setTimeout(async () => {
+          try {
+            const saved = await editor.save()
+            if (saved.blocks.length === 0) return
+            const newString = JSON.stringify(saved)
+            if (yMap.get('contents') === newString) return
+            ydoc.transact(() => { yMap.set('contents', newString) })
+          } catch (e) {}
+        }, 30)
+      })
+
+      mutationObserver.observe(holderElement, {
+        childList:     true,
+        subtree:       true,
+        characterData: true,
+      })
     },
     onChange: async () => {
       if (suppressLocal || isRendering) return
       try {
         const saved = await editor.save()
+
+        const currentImageAssets = new Map()
+        saved.blocks
+          .filter(b => b.type === 'image' && b.data?.file?.assetIdx)
+          .forEach(b => currentImageAssets.set(b.data.file.assetIdx, true))
+
+        for (const assetIdx of previousImageAssets.keys()) {
+          if (!currentImageAssets.has(assetIdx) && currentIdx) {
+            postApi.deleteEditorJsImage(currentIdx, assetIdx).catch(e =>
+              console.warn('[Editor] 이미지 삭제 실패:', assetIdx, e)
+            )
+          }
+        }
+
+        previousImageAssets = currentImageAssets
+
         if (saved.blocks.length === 0) return
         const newString = JSON.stringify(saved)
         if (yMap.get('contents') === newString) return
-        ydoc.transact(() => {
-          yMap.set('contents', newString)
-        })
+        ydoc.transact(() => { yMap.set('contents', newString) })
       } catch (err) {
         console.error('editor save failed', err)
       }
@@ -265,21 +375,12 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
     if (!editor) return
     try {
       await editor.isReady
-      const savedData = await editor.save()
-
-      const resolvedTitle =
-        yTitle.toString().trim() || (initialTitle ?? '').trim() || '제목 없음'
-
-      const postData = {
-        idx:      currentIdx,
-        title:    resolvedTitle,
-        contents: JSON.stringify(savedData),
-      }
-
-      const response = await postApi.savePost(postData)
-      const savedIdx = response?.idx ?? null
+      const savedData     = await editor.save()
+      const resolvedTitle = yTitle.toString().trim() || (initialTitle ?? '').trim() || '제목 없음'
+      const postData      = { idx: currentIdx, title: resolvedTitle, contents: JSON.stringify(savedData) }
+      const response      = await postApi.savePost(postData)
+      const savedIdx      = response?.idx ?? null
       if (savedIdx != null) currentIdx = savedIdx
-
       await loadpost.side_list()
       return response
     } catch (e) {
@@ -298,29 +399,21 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
 
   function handleMouseMove(e) {
     if (animationFrameId || !awareness) return
-
     animationFrameId = requestAnimationFrame(() => {
       const shell = holderElement.closest('.editor-shell')
-      if (!shell) {
-        animationFrameId = null
-        return
-      }
-
-      const rect       = shell.getBoundingClientRect()
+      if (!shell) { animationFrameId = null; return }
+      const rect        = shell.getBoundingClientRect()
       const xPercentage = ((e.clientX - rect.left) / rect.width)  * 100
       const yPercentage = ((e.clientY - rect.top)  / rect.height) * 100
-
       awareness.setLocalStateField('mouse', { x: xPercentage, y: yPercentage })
       animationFrameId = null
     })
   }
 
-  // 협업 모드일 때만 마우스 트래킹 활성화
-  if (isCollaborative) {
+  if (!isCollaborative) {
     window.addEventListener('mousemove', handleMouseMove)
   }
 
-  // ─── 권한 변경 ────────────────────────────────────────────────────────────
   function updateUserPermission(clientId, status) {
     yPermissions.set(String(clientId), status)
   }
@@ -329,18 +422,10 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   function destroy() {
     if (animationFrameId) cancelAnimationFrame(animationFrameId)
     window.removeEventListener('mousemove', handleMouseMove)
-    try {
-      if (provider) {
-        provider.disconnect()
-        provider.destroy()
-      }
-    } catch (e) {}
-    try {
-      if (editor && typeof editor.destroy === 'function') editor.destroy()
-    } catch (e) {}
-    try {
-      if (ydoc) ydoc.destroy()
-    } catch (e) {}
+    mutationObserver?.disconnect()
+    try { if (provider) { provider.disconnect(); provider.destroy() } } catch (e) {}
+    try { if (editor && typeof editor.destroy === 'function') editor.destroy() } catch (e) {}
+    try { if (ydoc) ydoc.destroy() } catch (e) {}
   }
   window.__activeEditorDestroy = destroy
 

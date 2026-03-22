@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { fetchSettingsProfile } from "@/api/featerApi";
 import loadpost from "./workspace/loadpost";
-import { EventSourcePolyfill } from 'event-source-polyfill';
+import sseApi from "@/api/sseApi";
 import {
   FILE_SIZE_OPTIONS,
   FILE_STATUS_OPTIONS,
@@ -42,14 +42,9 @@ const notifications = ref([]);
 const hasNewNotif = ref(false);
 
 // ─── 캐시 제어 ────────────────────────────────────────────────────────────────
-// 마지막으로 서버에서 알림을 가져온 시각을 기록합니다.
-// CACHE_TTL_MS 이내에 다시 드롭다운을 열면 서버 조회를 건너뜁니다.
 const lastFetchedAt = ref(0);
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2분
 
-// ─── 폴링 제거 ────────────────────────────────────────────────────────────────
-// 기존 30초 폴링 대신 ServiceWorker push / BroadcastChannel로 실시간 수신합니다.
-// 폴링은 완전히 제거합니다.
 let broadcastChannel = null;
 let sseEventSource = null;
 
@@ -167,7 +162,6 @@ const toNotificationItem = (item = {}) => {
     id: item.notificationId ?? item.idx ?? item.id ?? Date.now(),
     uuid: item.uuid ?? null,
     referenceId: item.referenceId ?? null,
-    // 백엔드/SSE 페이로드 키가 버전마다 다를 수 있어 방 인덱스 매핑을 유연하게 처리
     roomIdx: item.roomIdx ?? item.roomId ?? item.chatRoomIdx ?? item.referenceId ?? null,
     type,
     title: item.title ?? "알림",
@@ -192,9 +186,6 @@ const findNotificationIndex = (target) => notifications.value.findIndex((item) =
   );
 });
 
-// ─── 서버 조회 (최소화) ───────────────────────────────────────────────────────
-// 호출 시점: ① 로그인 직후 1회  ② 드롭다운 열 때 (캐시 만료 시만)
-//            ③ 수락/거절 직후 상태 동기화
 const fetchNotifications = async () => {
   if (!authStore.user?.idx) {
     notifications.value = [];
@@ -231,15 +222,12 @@ const fetchNotifications = async () => {
   }
 };
 
-// 캐시가 살아있으면 서버 조회를 건너뛰는 래퍼
 const fetchNotificationsIfStale = async () => {
   const elapsed = Date.now() - lastFetchedAt.value;
   if (lastFetchedAt.value > 0 && elapsed < CACHE_TTL_MS) return;
   await fetchNotifications();
 };
 
-// ─── 실시간 push 수신 ─────────────────────────────────────────────────────────
-// 서버에서 push된 알림을 in-memory로 바로 반영합니다. DB 조회 없음.
 const pushNewNotification = (data) => {
   if (!data) return;
   const allowed = ["invite", "general", "group_invite", "relationship_invite", "message", "NEW_MESSAGE"];
@@ -323,7 +311,6 @@ const handleInviteVerify = async (notification, type) => {
   try {
     await postApi.verifyEmail(notification.uuid, type);
     await applyProcessedState(notification, type === "accept" ? "수락됨" : "거절됨");
-    // 수락/거절 후에는 캐시를 무시하고 서버 상태를 정확히 동기화
     await fetchNotifications();
     await loadpost.side_list();
   } catch (error) {
@@ -413,7 +400,6 @@ const handleNotificationClick = async (notification) => {
 
   showNotifDropdown.value = false;
 
-  // Chat.vue에 채팅 패널 열고 해당 방 선택 요청
   window.dispatchEvent(new CustomEvent("open-chat-room", {
     detail: { roomIdx: notification.roomIdx, roomTitle: notification.title }
   }));
@@ -500,7 +486,6 @@ const toggleNotifMenu = async () => {
   showProfileDropdown.value = false;
   showSearchDropdown.value = false;
 
-  // 드롭다운을 열 때만 조회하고, 캐시가 살아있으면 서버 요청 생략
   if (showNotifDropdown.value) {
     await fetchNotificationsIfStale();
   }
@@ -589,48 +574,29 @@ const handleClickOutside = (event) => {
   if (!event.target.closest("#header-search-container")) showSearchDropdown.value = false;
 };
 
+// ─── SSE ─────────────────────────────────────────────────────────────────────
 const stopSse = () => {
-  if (sseEventSource) {
-    sseEventSource.close();
-    sseEventSource = null;
-  }
+  sseApi.closeSse(sseEventSource);
+  sseEventSource = null;
 };
 
 const startSse = () => {
   stopSse();
-  const token = localStorage.getItem('ACCESS_TOKEN');
-  sseEventSource = new EventSourcePolyfill("http://localhost:8080/sse/connect", {
-    headers: {
-      'Authorization': `Bearer ${token}`
+  sseEventSource = sseApi.connectNotificationSse({
+    onNotification: (payload) => {
+      pushNewNotification(payload);
     },
-    withCredentials: true
-  });
-
-  // 알림 (invite, group_invite, relationship_invite, general)
-  sseEventSource.addEventListener("notification", (e) => {
-    try {
-      const payload = JSON.parse(e.data);
+    onNewMessage: (payload) => {
       pushNewNotification(payload);
-    } catch {}
-  });
-
-  // 채팅 메시지 알림
-  sseEventSource.addEventListener("new-message", (e) => {
-    try {
-      const payload = JSON.parse(e.data);
-      pushNewNotification(payload);
-      // Chat.vue에도 채팅목록 갱신 참참시
       window.dispatchEvent(new CustomEvent("sse-new-message", { detail: payload }));
-    } catch {}
+    },
+    onError: () => {
+      sseEventSource = null;
+      if (authStore.user?.idx) {
+        setTimeout(() => startSse(), 5000);
+      }
+    },
   });
-
-  sseEventSource.onerror = () => {
-    stopSse();
-    // 재연결 (5초 후)
-    if (authStore.user?.idx) {
-      setTimeout(() => startSse(), 5000);
-    }
-  };
 };
 
 watch(() => route.fullPath, () => {
@@ -648,7 +614,6 @@ watch(
       return;
     }
 
-    // 로그인 직후 1회만 조회
     await fetchNotifications();
     startSse();
 
@@ -857,7 +822,6 @@ onBeforeUnmount(() => {
 
 
 <style scoped>
-/* 제공해주신 기존 스타일을 그대로 유지합니다 */
 .header-container {
   min-height: 4rem;
   background-color: var(--bg-main);
@@ -1059,7 +1023,6 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, #ef4444 22%, transparent);
 }
 
-/* 처리 완료 뱃지 */
 .notif-processed-label {
   font-size: 0.72rem;
   font-weight: 700;

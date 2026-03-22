@@ -41,21 +41,35 @@ const scrollToTop = () => {
   });
 }
 
-// SSE: 협업 페이지(sharedItems) 타이틀 실시간 반영
+// ✅ SSE: 협업 페이지 타이틀 실시간 반영 핵심 로직
 const handleSseTitleUpdated = (evt) => {
   const updatedData = evt?.detail || {}
   const postId = Number(updatedData?.postId)
   const newTitle = updatedData?.title
 
-  if (!Number.isFinite(postId)) return
-  if (typeof newTitle !== 'string') return
+  if (!postId || !newTitle) return;
 
-  // 협업 페이지(sharedItems)에서만 title 갱신
-  sharedItems.value = (sharedItems.value || []).map((item) => {
-    if (Number(item?.post_idx) !== postId) return item
-    // 새 객체로 교체해서 Vue 반응성 안정화
-    return { ...item, title: newTitle }
-  })
+  console.log(`[SSE Vue] 타이틀 업데이트 감지: 게시글 ${postId} -> ${newTitle}`);
+
+  // 1. 협업 페이지(sharedItems) 리스트에서 해당 게시글 찾아서 제목 변경
+  if (sharedItems.value) {
+    sharedItems.value = sharedItems.value.map((item) => {
+      if (Number(item?.post_idx) === postId) {
+        return { ...item, title: newTitle }
+      }
+      return item
+    })
+  }
+
+  // 2. 혹시 본인이 만든 페이지(personalItems)를 공유 중일 수 있으므로 여기도 같이 갱신
+  if (personalItems.value) {
+    personalItems.value = personalItems.value.map((item) => {
+      if (Number(item?.post_idx) === postId) {
+        return { ...item, title: newTitle }
+      }
+      return item
+    })
+  }
 }
 
 // 메뉴 토글 함수 (이벤트 전파 방지 포함)
@@ -267,7 +281,7 @@ const handleAction = async (action, idx) => {
               active-class="!bg-blue-500/10 !text-blue-600 !font-bold dark:!bg-blue-400/20 dark:!text-blue-400"
             >
               <i class="fa-solid fa-people-group w-5 text-center flex-shrink-0 text-lg"></i>
-              <span>공유 문서함</span>
+              <span>공유 파일</span>
             </RouterLink>
 
             <RouterLink
@@ -276,7 +290,7 @@ const handleAction = async (action, idx) => {
               active-class="!bg-blue-500/10 !text-blue-600 !font-bold dark:!bg-blue-400/20 dark:!text-blue-400"
             >
               <i class="fa-solid fa-clock w-5 text-center flex-shrink-0 text-lg"></i>
-              <span>최근 문서함</span>
+              <span>최근 파일</span>
             </RouterLink>
           </div>
 
