@@ -162,6 +162,10 @@ const getChatNotificationMessage = (item = {}) => {
   if (normalizedFileType.startsWith("image/")) return "사진";
   if (normalizedFileType) return "문서";
 
+  const fileHint = String(item.fileName ?? item.fileUrl ?? "").toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(fileHint)) return "사진";
+  if (fileHint) return "문서";
+
   return "";
 };
 
