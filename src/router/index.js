@@ -161,9 +161,11 @@ router.beforeEach(async (to, from, next) => {
   // to.query는 라우터가 분석한 URL 쿼리 파라미터입니다.
   const hasTokenInUrl = to.query.accessToken || to.query.token
   const isAuthenticated = !!authStore.token
+  const adminEmail = String(authStore.user?.email || '').toLowerCase()
+  const adminRole = String(authStore.user?.role || '').toUpperCase()
   const isAdministrator =
-    authStore.user?.email === 'administrator@administrator.adm' &&
-    authStore.user?.role === 'ROLE_ADMIN'
+    adminRole.includes('ADMIN') ||
+    adminEmail === 'administrator@administrator.adm'
 
   // 3. 네비게이션 가드 로직
   if (to.meta.requiresAuth) {
