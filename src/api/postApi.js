@@ -95,6 +95,16 @@ const subscribeWebPush = async () => {
   }
 }
 
+const unsubscribeWebPush = async () => {
+  try {
+    const response = await api.post('/notification/unsubscribe')
+    return response.data
+  } catch (error) {
+    console.error('푸시 구독 비활성화 실패:', error)
+    throw error
+  }
+}
+
 const getNotifications = async () => {
   try {
     const response = await api.get('/notification/list')
@@ -226,6 +236,7 @@ const saveWorkspaceAssetToDrive = async (workspaceId, assetId, parentId = null) 
 
 export default {
   subscribeWebPush,
+  unsubscribeWebPush,
   getNotifications,
   markNotificationAsRead,
   deleteNotification,

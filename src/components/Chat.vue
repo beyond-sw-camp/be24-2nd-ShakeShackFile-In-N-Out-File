@@ -247,6 +247,71 @@ const handleSelectRoom = (room) => {
   viewMode.value = 'room'
 }
 
+const selectRoomByIdx = async (roomIdx) => {
+  if (roomIdx == null) return
+
+  const findRoom = () => chatRooms.value.find(r => r.id === roomIdx) || null
+
+  let room = findRoom()
+  if (!room) {
+    // 알림 클릭 시 해당 방이 아직 목록에 없을 수 있으니(페이지네이션) 우선 처음 페이지를 다시 로드
+    await fetchRooms(true)
+    room = findRoom()
+  }
+
+  // 그래도 없으면, 몇 페이지 더 로드해서 찾는다.
+  if (!room) {
+    const maxExtraPages = 5
+    let tries = 0
+    while (!room && tries < maxExtraPages && !isLastPage.value) {
+      await fetchRooms(false)
+      room = findRoom()
+      tries += 1
+    }
+  }
+
+  if (!room) return
+
+  // 목록 뱃지(표시용)만 즉시 갱신. 실제 읽음 처리는 ChatRoom 내부에서 수행.
+  room.unreadCount = 0
+  handleSelectRoom(room)
+}
+
+const handleOpenChatRoomEvent = (e) => {
+  const roomIdx = e?.detail?.roomIdx
+  if (roomIdx == null) return
+  selectRoomByIdx(roomIdx)
+}
+
+/** 푸시(SW) / SSE(new-message) 공통: 목록의 미리보기·안읽음 즉시 반영 */
+const applyNewMessageToChatList = (payload) => {
+  if (!payload) return
+  const roomIdx = payload.roomIdx ?? payload.roomId ?? payload.chatRoomIdx ?? payload.referenceId
+  if (roomIdx == null || roomIdx === '') return
+  const lastMsg = payload.lastMsg ?? payload.message ?? payload.contents
+  const target = chatRooms.value.find((r) => r.id == roomIdx)
+  if (target) {
+    if (lastMsg != null && lastMsg !== '') target.lastMsg = lastMsg
+    if (payload.time != null) target.time = payload.time
+    if (payload.lastMessageTime != null) target.time = payload.lastMessageTime
+    if (payload.unreadCount != null) target.unreadCount = payload.unreadCount
+  } else {
+    fetchRooms(true)
+  }
+}
+
+const handleSseNewMessage = (e) => {
+  applyNewMessageToChatList(e?.detail)
+}
+
+const handleSseChatPreviewUpdate = (e) => {
+  applyNewMessageToChatList(e?.detail)
+}
+
+const handleAppForegroundSync = async () => {
+  await fetchRooms(true)
+}
+
 const handleBack = async () => {
   if (selectedRoom.value) {
     try {
@@ -262,24 +327,36 @@ const handleBack = async () => {
   viewMode.value = 'list'
 }
 
+const handleClosePanel = async () => {
+  if (viewMode.value === 'room' && selectedRoom.value) {
+    await handleBack()
+  }
+
+  emit('close')
+}
+
 onMounted(() => {
   window.addEventListener('click', closeMenuOutside)
   fetchRooms(true)
   initObserver()
 
+  // Header 알림 클릭(인앱) → 채팅 패널을 열고 해당 방을 선택
+  window.addEventListener('open-chat-room', handleOpenChatRoomEvent)
+  window.addEventListener('sse-new-message', handleSseNewMessage)
+  window.addEventListener('sse-chat-preview-update', handleSseChatPreviewUpdate)
+  window.addEventListener('app-foreground-sync', handleAppForegroundSync)
+
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data.type === 'OPEN_CHAT_ROOM') {
-      const room = chatRooms.value.find(r => r.id === e.data.roomIdx);
-      if (room) handleSelectRoom(room);
+      // MainView의 패널 오픈까지 같이 되도록 동일 이벤트로 브로드캐스트
+      // (MainView → isChatOpen=true, Chat.vue → roomIdx로 방 선택)
+      window.dispatchEvent(new CustomEvent('open-chat-room', {
+        detail: { roomIdx: e.data.roomIdx }
+      }))
+      return
     }
     if (e.data.type === 'NEW_MESSAGE') {
-      const target = chatRooms.value.find(r => r.id === e.data.roomIdx);
-      if (target) {
-        target.lastMsg = e.data.lastMsg;
-        target.unreadCount = e.data.unreadCount;
-      } else {
-        fetchRooms(true);
-      }
+      applyNewMessageToChatList(e.data)
     }
   });
 });
@@ -287,6 +364,10 @@ onMounted(() => {
 onUnmounted(() => {
   // 컴포넌트 해제 시 이벤트 제거
   window.removeEventListener('click', closeMenuOutside)
+  window.removeEventListener('open-chat-room', handleOpenChatRoomEvent)
+  window.removeEventListener('sse-new-message', handleSseNewMessage)
+  window.removeEventListener('sse-chat-preview-update', handleSseChatPreviewUpdate)
+  window.removeEventListener('app-foreground-sync', handleAppForegroundSync)
 })
 </script>
 
@@ -339,7 +420,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <button @click="emit('close')" class="close-button p-2 hover:bg-gray-100 rounded-full">
+        <button @click="handleClosePanel" class="close-button p-2 hover:bg-gray-100 rounded-full">
           <i class="fa-solid fa-xmark text-gray-500"></i>
         </button>
       </div>

@@ -18,57 +18,77 @@ self.addEventListener('push', (event) => {
     payload.message = event.data.text()
   }
 
-  if (payload.type === 'invite' || payload.type === 'general') {
-    if (typeof BroadcastChannel !== 'undefined') {
-      const channel = new BroadcastChannel('notif_channel')
-      channel.postMessage(payload)
-      channel.close()
-    }
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const isAppOpen = clients.some((client) =>
+        client.url.includes(self.location.origin) && client.visibilityState === 'visible'
+      )
 
-    event.waitUntil(
-      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      if (isAppOpen) {
+        // 웹이 열려있으면 → Header 알림으로만 전달, OS 푸시 안 띄움
         clients.forEach((client) => {
-          client.postMessage({
-            channel: 'notification',
-            payload,
-          })
+          if (payload.type === 'invite' || payload.type === 'general') {
+            client.postMessage({ channel: 'notification', payload })
+          } else {
+            client.postMessage({
+              type: 'NEW_MESSAGE',
+              notifType: 'message',
+              title: payload.title,
+              roomIdx: payload.roomIdx,
+              lastMsg: payload.message,
+              message: payload.message,
+              unreadCount: payload.unreadCount,
+            })
+          }
         })
-      }),
-    )
-  } else {
-    event.waitUntil(
-      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+        return // OS 푸시 띄우지 않고 종료
+      }
+
+      // 웹이 닫혀있으면 → BroadcastChannel + OS 푸시
+      if (payload.type === 'invite' || payload.type === 'general') {
+        if (typeof BroadcastChannel !== 'undefined') {
+          const channel = new BroadcastChannel('notif_channel')
+          channel.postMessage(payload)
+          channel.close()
+        }
+        clients.forEach((client) => {
+          client.postMessage({ channel: 'notification', payload })
+        })
+      } else {
         clients.forEach((client) => {
           client.postMessage({
             type: 'NEW_MESSAGE',
+            notifType: 'message',
+            title: payload.title,
             roomIdx: payload.roomIdx,
             lastMsg: payload.message,
+            message: payload.message,
             unreadCount: payload.unreadCount,
           })
         })
-      }),
-    )
-  }
+      }
 
-  const isInvite = payload.type === 'invite'
-  const options = {
-    body: payload.message,
-    icon: '/favicon.ico',
-    badge: '/favicon.ico',
-    data: {
-      notificationId: payload.notificationId,
-      type: payload.type,
-      uuid: payload.uuid,
-      roomIdx: payload.roomIdx,
-    },
-    tag: isInvite
-      ? `invite-${payload.notificationId ?? payload.uuid ?? Date.now()}`
-      : `chat-room-${payload.roomIdx ?? Date.now()}`,
-    renotify: true,
-    vibrate: [200, 100, 200],
-  }
+      const isInvite = payload.type === 'invite'
+      const options = {
+        body: payload.message,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        data: {
+          notificationId: payload.notificationId,
+          type: payload.type,
+          uuid: payload.uuid,
+          roomIdx: payload.roomIdx,
+        },
+        tag: isInvite
+          ? `invite-${payload.notificationId ?? payload.uuid ?? Date.now()}`
+          : `chat-room-${payload.roomIdx ?? Date.now()}`,
+        renotify: true,
+        vibrate: [200, 100, 200],
+      }
 
-  event.waitUntil(self.registration.showNotification(payload.title, options))
+      return self.registration.showNotification(payload.title, options)
+    })
+  )
 })
 
 self.addEventListener('notificationclick', (event) => {

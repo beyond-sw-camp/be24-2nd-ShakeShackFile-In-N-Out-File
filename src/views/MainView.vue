@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router' // route와 router 추가
 import { useAuthStore } from '@/stores/useAuthStore' // 스토어 추가
 import Sidebar from '../components/Sidebar.vue'
@@ -12,6 +12,13 @@ const isChatOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+
+const handleOpenChatRoom = (event) => {
+  const roomIdx = event?.detail?.roomIdx
+  if (roomIdx == null) return
+  // 알림 클릭 시 채팅 패널이 열려있지 않아도 보이도록 강제 오픈
+  isChatOpen.value = true
+}
 
 onMounted(async() => {
   // 1. URL 쿼리 파라미터에서 token 추출 (백엔드가 주는 파라미터명 확인 필요)
@@ -37,6 +44,14 @@ onMounted(async() => {
       console.error('푸시 알림 등록 실패:', e)
     }
   }
+})
+
+onMounted(() => {
+  window.addEventListener('open-chat-room', handleOpenChatRoom)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('open-chat-room', handleOpenChatRoom)
 })
 
 // 2. 서버에서 가져오기 (GET)
