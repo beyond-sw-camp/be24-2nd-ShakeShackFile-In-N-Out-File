@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   acceptGroupInvite,
   acceptRelationshipInvite,
@@ -211,6 +211,14 @@ const refreshData = async (message = "") => {
   if (message) {
     successMessage.value = message;
   }
+};
+
+const handleExternalGroupStateChange = async () => {
+  if (!props.active || isLoading.value) {
+    return;
+  }
+
+  await loadData();
 };
 
 const handleCreateInvite = async () => {
@@ -459,6 +467,14 @@ watch(incomingPendingRequestItems, () => {
 
 watch(outgoingPendingRequestItems, () => {
   outgoingRequestPage.value = 1;
+});
+
+onMounted(() => {
+  window.addEventListener("group-state-changed", handleExternalGroupStateChange);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("group-state-changed", handleExternalGroupStateChange);
 });
 </script>
 

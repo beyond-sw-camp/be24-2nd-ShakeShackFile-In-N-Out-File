@@ -140,9 +140,13 @@ const storageUsageText = computed(() => {
 })
 
 const isAdministrator = computed(() => {
+  const email = String(authStore.user?.email || '').toLowerCase()
+  const role = String(authStore.user?.role || '').toUpperCase()
+
   return (
-    authStore.user?.email === 'administrator@administrator.adm' &&
-    authStore.user?.role === 'ROLE_ADMIN'
+    Boolean(fileStore.planCapabilities?.adminAccount) ||
+    role.includes('ADMIN') ||
+    email === 'administrator@administrator.adm'
   )
 })
 

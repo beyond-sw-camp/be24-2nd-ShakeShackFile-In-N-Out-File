@@ -21,3 +21,22 @@ export async function updateAdministratorUserStatus(userIdx, accountStatus) {
   });
   return extractObjectResult(response?.data);
 }
+
+export async function fetchAdministratorStorageAnalytics(rangeCode) {
+  const response = await api.get("/administrator/storage-analytics", {
+    params: rangeCode ? { range: rangeCode } : undefined,
+    timeout: 30000,
+  });
+  return extractObjectResult(response?.data);
+}
+
+export async function updateAdministratorStorageCapacity(providerCapacityBytes, rangeCode) {
+  const response = await api.patch(
+    "/administrator/storage-capacity",
+    { providerCapacityBytes },
+    {
+      params: rangeCode ? { range: rangeCode } : undefined,
+    },
+  );
+  return extractObjectResult(response?.data);
+}
