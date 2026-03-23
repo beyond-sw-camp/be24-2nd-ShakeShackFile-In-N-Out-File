@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import postApi from '@/api/postApi'
 import sseApi from '@/api/sseApi'
 import userApi from '@/api/user/index.js'
 
@@ -83,6 +84,12 @@ export const useAuthStore = defineStore('auth', () => {
       stopSseConnection();
 
       if (token.value || localStorage.getItem('ACCESS_TOKEN')) {
+        try {
+          await postApi.unsubscribeWebPush()
+        } catch (error) {
+          console.error('푸시 구독 해제 실패:', error)
+        }
+
         await userApi.logout()
       }
     } catch (error) {
@@ -125,5 +132,5 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  return { isLogin, user, token, login, setToken, checkLogin, logout, startSseConnection }
+  return { isLogin, user, token, login, setToken, checkLogin, logout }
 })
