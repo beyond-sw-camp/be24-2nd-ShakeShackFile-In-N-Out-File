@@ -6,7 +6,7 @@ import SockJS from 'sockjs-client'
 import Stomp from 'stompjs'
 
 const props = defineProps({ room: Object, currentUser: Object })
-const emit = defineEmits(['back', 'open-invite'])
+const emit = defineEmits(['back', 'open-invite', 'room-preview-update'])
 const authStore = useAuthStore()
 
 const chatMessages = ref([])
@@ -21,6 +21,8 @@ const scrollObserver = ref(null)
 const messageMenuVisible = ref(false)
 const messageMenuPos = ref({ x: 0, y: 0 })
 const selectedMessage = ref(null)
+const imagePreviewUrl = ref('')
+const imagePreviewName = ref('')
 
 const myProfileImageUrl = computed(() => authStore.user?.profileImageUrl || null)
 const myName = computed(() => authStore.user?.userName || authStore.user?.name || 'Guest')
@@ -58,6 +60,36 @@ const toChatMessage = (payload = {}, options = {}) => {
   }
 }
 
+const getPreviewText = (message = {}) => {
+  const text = String(message.text ?? message.contents ?? '').trim()
+  if (text) return text
+
+  const normalizedMessageType = String(message.messageType ?? '').toUpperCase()
+  if (normalizedMessageType === 'IMAGE') return '사진'
+  if (normalizedMessageType === 'FILE') return '문서'
+
+  const normalizedFileType = String(message.fileType ?? '').toLowerCase()
+  if (normalizedFileType.startsWith('image/')) return '사진'
+  if (normalizedFileType) return '문서'
+
+  const fileHint = String(message.fileName ?? message.fileUrl ?? '').toLowerCase()
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(fileHint)) return '사진'
+  if (fileHint) return '문서'
+
+  return ''
+}
+
+const emitRoomPreviewUpdate = (message = {}) => {
+  const lastMsg = getPreviewText(message)
+  if (!props.room?.id || !lastMsg) return
+
+  emit('room-preview-update', {
+    roomId: props.room.id,
+    lastMsg,
+    time: message.time ?? message.createdAt ?? new Date().toISOString(),
+  })
+}
+
 const applyDeletedMessage = (messageId, deletedText = DELETED_MESSAGE_TEXT) => {
   const target = chatMessages.value.find((msg) => msg.id === messageId)
   if (!target) return
@@ -70,6 +102,7 @@ const applyDeletedMessage = (messageId, deletedText = DELETED_MESSAGE_TEXT) => {
   target.fileType = null
   target.fileSize = null
   target.messageType = 'TEXT'
+  emitRoomPreviewUpdate(target)
 }
 
 const openMessageMenu = (event, msg) => {
@@ -84,6 +117,49 @@ const openMessageMenu = (event, msg) => {
 const closeMessageMenu = () => {
   messageMenuVisible.value = false
   selectedMessage.value = null
+}
+
+const openImagePreview = (message) => {
+  if (!message?.fileUrl) return
+  imagePreviewUrl.value = message.fileUrl
+  imagePreviewName.value = message.fileName ?? '이미지 미리보기'
+}
+
+const closeImagePreview = () => {
+  imagePreviewUrl.value = ''
+  imagePreviewName.value = ''
+}
+
+const downloadImagePreview = async () => {
+  if (!imagePreviewUrl.value) return
+
+  const fallbackName = imagePreviewName.value?.trim() || 'image'
+
+  try {
+    const response = await fetch(imagePreviewUrl.value)
+    if (!response.ok) {
+      throw new Error(`download failed: ${response.status}`)
+    }
+
+    const blob = await response.blob()
+    const objectUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = fallbackName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(objectUrl)
+  } catch (error) {
+    console.error('이미지 다운로드 실패:', error)
+    window.open(imagePreviewUrl.value, '_blank', 'noopener,noreferrer')
+  }
+}
+
+const handleWindowKeydown = (event) => {
+  if (event.key !== 'Escape') return
+  closeMessageMenu()
+  closeImagePreview()
 }
 
 const formatTime = (isoString) => {
@@ -212,6 +288,7 @@ const initChat = () => {
           const tempIdx = chatMessages.value.findLastIndex(m => m.isPending && m.isMe)
           if (tempIdx !== -1) {
             chatMessages.value[tempIdx] = toChatMessage(data, { isMe: true })
+            emitRoomPreviewUpdate(chatMessages.value[tempIdx])
             sortMessages()
             nextTick(() => scrollToBottom())
             return
@@ -220,7 +297,9 @@ const initChat = () => {
 
         // 상대방 메시지 (중복 방지)
         if (!chatMessages.value.some(m => m.id === data.idx && !m.isPending)) {
-          chatMessages.value.push(toChatMessage(data, { isMe: false }))
+          const nextMessage = toChatMessage(data, { isMe: false })
+          chatMessages.value.push(nextMessage)
+          emitRoomPreviewUpdate(nextMessage)
           sortMessages()
           nextTick(() => scrollToBottom())
           markAsRead()
@@ -250,6 +329,7 @@ const sendMessage = () => {
     profileImageUrl: myProfileImageUrl.value
   }
   chatMessages.value.push(tempMsg)
+  emitRoomPreviewUpdate(tempMsg)
   sortMessages()
   nextTick(() => scrollToBottom())
 
@@ -302,6 +382,7 @@ const handleFileSelect = async (e) => {
       contents: ''
     }
     chatMessages.value.push(tempMsg)
+    emitRoomPreviewUpdate(tempMsg)
     sortMessages()
     nextTick(() => scrollToBottom())
 
@@ -370,6 +451,7 @@ const deleteMessage = async () => {
 
 onMounted(async () => {
   window.addEventListener('click', closeMessageMenu)
+  window.addEventListener('keydown', handleWindowKeydown)
   await api.post(`/chatRoom/${props.room.id}/enter`)
   requestNotificationPermission()
   await fetchHistory(true)
@@ -380,6 +462,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('click', closeMessageMenu)
+  window.removeEventListener('keydown', handleWindowKeydown)
   api.post(`/chatRoom/${props.room.id}/leave`).catch(() => {})
   if (scrollObserver.value) scrollObserver.value.disconnect()
   if (stompClient) stompClient.disconnect()
@@ -451,7 +534,7 @@ watch(() => props.room.id, async () => {
                   v-else-if="msg.messageType === 'IMAGE'"
                   :src="msg.fileUrl"
                   class="max-w-[200px] max-h-[200px] rounded-xl object-cover cursor-pointer"
-                  @click="window.open(msg.fileUrl, '_blank')"
+                  @click="openImagePreview(msg)"
                 />
                 <!-- 파일 -->
                 <a
@@ -502,6 +585,44 @@ watch(() => props.room.id, async () => {
       >
         <i class="fa-solid fa-trash text-[10px]"></i> 삭제
       </button>
+    </div>
+
+    <div
+      v-if="imagePreviewUrl"
+      class="fixed inset-0 z-[998] flex items-center justify-center bg-black/85 px-4 py-8"
+      @click.self="closeImagePreview"
+    >
+      <div class="absolute right-5 top-5 flex items-center gap-2">
+        <button
+          type="button"
+          class="rounded-full bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20"
+          @click="downloadImagePreview"
+        >
+          <i class="fa-solid fa-download"></i>
+        </button>
+        <button
+          type="button"
+          class="rounded-full bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/20"
+          @click="closeImagePreview"
+        >
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="flex max-h-full max-w-full flex-col items-center gap-4">
+        <img
+          :src="imagePreviewUrl"
+          :alt="imagePreviewName"
+          class="max-h-[82vh] max-w-[92vw] rounded-2xl object-contain shadow-2xl"
+        />
+        <a
+          :href="imagePreviewUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="rounded-full bg-white px-4 py-2 text-xs font-bold text-[#123d88] shadow"
+        >
+          새 창에서 열기
+        </a>
+      </div>
     </div>
 
     <div class="p-4 border-t border-gray-100">

@@ -41,6 +41,10 @@ const isGamesModalOpen = ref(false);
 const notifications = ref([]);
 const hasNewNotif = ref(false);
 
+const emitGroupStateChanged = () => {
+  window.dispatchEvent(new CustomEvent("group-state-changed"));
+};
+
 // ─── 캐시 제어 ────────────────────────────────────────────────────────────────
 const lastFetchedAt = ref(0);
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2분
@@ -161,6 +165,10 @@ const getChatNotificationMessage = (item = {}) => {
   const normalizedFileType = String(item.fileType ?? "").toLowerCase();
   if (normalizedFileType.startsWith("image/")) return "사진";
   if (normalizedFileType) return "문서";
+
+  const fileHint = String(item.fileName ?? item.fileUrl ?? "").toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(fileHint)) return "사진";
+  if (fileHint) return "문서";
 
   return "";
 };
@@ -400,6 +408,7 @@ const handleGroupInviteAction = async (notification, type) => {
 
     await applyProcessedState(notification, type === "accept" ? "수락됨" : "거절됨");
     await fetchNotifications();
+    emitGroupStateChanged();
   } catch (error) {
     console.error(type === "accept" ? "그룹 초대 수락 실패:" : "그룹 초대 거절 실패:", error);
     await fetchNotifications();
@@ -419,6 +428,7 @@ const handleRelationshipInviteAction = async (notification, type) => {
 
     await applyProcessedState(notification, type === "accept" ? "수락됨" : "거절됨");
     await fetchNotifications();
+    emitGroupStateChanged();
   } catch (error) {
     console.error(type === "accept" ? "연결 초대 수락 실패:" : "연결 초대 거절 실패:", error);
     await fetchNotifications();
@@ -1349,7 +1359,7 @@ onBeforeUnmount(() => {
 .search-filter-button.has-filters { background: color-mix(in srgb, var(--accent) 18%, var(--bg-elevated) 82%); border-color: color-mix(in srgb, var(--accent) 38%, transparent); color: var(--accent); }
 .search-filter-button:disabled { cursor: not-allowed; opacity: 0.5; }
 .search-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 1.25rem; height: 1.25rem; border-radius: 999px; background: var(--accent); color: var(--text-inverse); font-size: 0.72rem; line-height: 1; }
-.search-dropdown { position: absolute; top: calc(100% + 0.7rem); left: 0; width: min(100%, 42rem); border-radius: 1.3rem; border: 1px solid var(--border-color); background: color-mix(in srgb, var(--bg-elevated) 94%, var(--bg-main) 6%); box-shadow: var(--shadow-lg); padding: 1rem; z-index: 60; backdrop-filter: blur(18px); }
+.search-dropdown { position: absolute; top: calc(100% + 0.7rem); left: 0; width: min(100%, 42rem); border-radius: 1.3rem; border: 1px solid var(--border-color); background: color-mix(in srgb, var(--bg-elevated) 94%, var(--bg-main) 6%); box-shadow: var(--shadow-lg); padding: 1rem; z-index: 12000; backdrop-filter: blur(18px); }
 .search-dropdown__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .search-dropdown__eyebrow { font-size: 0.76rem; font-weight: 800; letter-spacing: 0.08em; color: var(--accent); text-transform: uppercase; }
 .search-dropdown__description { margin-top: 0.35rem; font-size: 0.85rem; color: var(--text-muted); }
@@ -1376,7 +1386,7 @@ onBeforeUnmount(() => {
 .profile-trigger__plan { margin-top: 0.1rem; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; color: var(--accent); text-transform: uppercase; }
 .profile-trigger__avatar { display: inline-flex; align-items: center; justify-content: center; overflow: hidden; width: 2.55rem; height: 2.55rem; border-radius: 0.9rem; background: linear-gradient(135deg, #123d88 0%, #2563eb 100%); color: #fff; font-size: 0.95rem; font-weight: 900; border: 2px solid color-mix(in srgb, var(--accent) 54%, transparent); box-shadow: 0 14px 28px rgba(37, 99, 235, 0.18); }
 .profile-trigger__avatar-image { width: 100%; height: 100%; object-fit: cover; }
-.dropdown-container { position: absolute; top: calc(100% + 10px); right: 0; min-width: 248px; background: color-mix(in srgb, var(--bg-elevated) 95%, var(--bg-main) 5%); border: 1px solid var(--border-color); border-radius: 18px; box-shadow: var(--shadow-lg); z-index: 50; opacity: 0; transform: translateY(-8px); pointer-events: none; transition: all 0.18s ease; backdrop-filter: blur(18px); }
+.dropdown-container { position: absolute; top: calc(100% + 10px); right: 0; min-width: 248px; background: color-mix(in srgb, var(--bg-elevated) 95%, var(--bg-main) 5%); border: 1px solid var(--border-color); border-radius: 18px; box-shadow: var(--shadow-lg); z-index: 12000; opacity: 0; transform: translateY(-8px); pointer-events: none; transition: all 0.18s ease; backdrop-filter: blur(18px); }
 .dropdown-container.active { opacity: 1; transform: translateY(0); pointer-events: auto; }
 .dropdown-header { padding: 1rem 1.1rem; border-bottom: 1px solid var(--border-color); }
 .dropdown-header__label { font-size: 0.82rem; font-weight: 700; color: var(--text-muted); }

@@ -103,6 +103,41 @@ const currentUser = computed(() => ({
   name: authStore.user?.userName || 'Guest',
 }))
 
+const getChatPreviewMessage = (payload = {}, fallback = '메시지가 없습니다.') => {
+  const text = String(
+    payload.lastMsg ??
+    payload.lastMessage ??
+    payload.message ??
+    payload.contents ??
+    ''
+  ).trim()
+  if (text) return text
+
+  const normalizedMessageType = String(
+    payload.messageType ?? payload.lastMessageType ?? ''
+  ).toUpperCase()
+  if (normalizedMessageType === 'IMAGE') return '사진'
+  if (normalizedMessageType === 'FILE') return '문서'
+
+  const normalizedFileType = String(
+    payload.fileType ?? payload.lastFileType ?? ''
+  ).toLowerCase()
+  if (normalizedFileType.startsWith('image/')) return '사진'
+  if (normalizedFileType) return '문서'
+
+  const fileHint = String(
+    payload.fileName ??
+    payload.lastFileName ??
+    payload.fileUrl ??
+    payload.lastFileUrl ??
+    ''
+  ).toLowerCase()
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(fileHint)) return '사진'
+  if (fileHint) return '문서'
+
+  return fallback
+}
+
 const openChatInviteModal = (mode) => {
   chatInviteMode.value = mode
   isChatInviteModalOpen.value = true
@@ -154,7 +189,7 @@ const fetchRooms = async (isFirst = false) => {
       const newRooms = dataWrapper.boardList.map(room => ({
         id: room.idx,
         name: room.title || '이름 없는 채팅방',
-        lastMsg: room.lastMessage || '메시지가 없습니다.',
+        lastMsg: getChatPreviewMessage(room),
         time: room.lastMessageTime || '',
         userCount: room.participantCount || 0, 
         unreadCount: room.unreadCount || 0,
@@ -288,7 +323,7 @@ const applyNewMessageToChatList = (payload) => {
   if (!payload) return
   const roomIdx = payload.roomIdx ?? payload.roomId ?? payload.chatRoomIdx ?? payload.referenceId
   if (roomIdx == null || roomIdx === '') return
-  const lastMsg = payload.lastMsg ?? payload.message ?? payload.contents
+  const lastMsg = getChatPreviewMessage(payload, '')
   const target = chatRooms.value.find((r) => r.id == roomIdx)
   if (target) {
     if (lastMsg != null && lastMsg !== '') target.lastMsg = lastMsg
@@ -306,6 +341,18 @@ const handleSseNewMessage = (e) => {
 
 const handleSseChatPreviewUpdate = (e) => {
   applyNewMessageToChatList(e?.detail)
+}
+
+const handleRoomPreviewUpdate = (payload) => {
+  if (!payload) return
+  const roomId = payload.roomId
+  if (roomId == null || roomId === '') return
+
+  const target = chatRooms.value.find((room) => room.id == roomId)
+  if (!target) return
+
+  if (payload.lastMsg != null && payload.lastMsg !== '') target.lastMsg = payload.lastMsg
+  if (payload.time != null) target.time = payload.time
 }
 
 const handleAppForegroundSync = async () => {
@@ -439,6 +486,7 @@ onUnmounted(() => {
         :room="selectedRoom" 
         :currentUser="currentUser" 
         @back="handleBack" 
+        @room-preview-update="handleRoomPreviewUpdate"
       />
     </div>
   </aside>
