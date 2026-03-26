@@ -8,26 +8,30 @@ const LAYOUT_COLUMNS_KEY = "file-layout-columns";
 const LAYOUT_ROWS_KEY = "file-layout-rows";
 
 const DEFAULT_VIEW_MODE = "table";
-const DEFAULT_LAYOUT_PRESET = "5x10";
+const DEFAULT_LAYOUT_PRESET = "10";
 const DEFAULT_LAYOUT_COLUMNS = 5;
-const DEFAULT_LAYOUT_ROWS = 10;
+const DEFAULT_LAYOUT_ROWS = 2;
 
 const VIEW_MODE_SET = new Set(["table", "grid", "icon"]);
-const LAYOUT_PRESET_SET = new Set(["5x10", "10x10", "15x15", "custom"]);
+const LAYOUT_PRESET_SET = new Set(["10", "20", "30"]);
 const LAYOUT_PRESETS = {
-  "5x10": { columns: 5, rows: 10 },
-  "10x10": { columns: 10, rows: 10 },
-  "15x15": { columns: 15, rows: 15 },
+  "10": { columns: 5, rows: 2 },
+  "20": { columns: 5, rows: 4 },
+  "30": { columns: 5, rows: 6 },
 };
 
 const LEGACY_LAYOUT_PRESET_MAP = {
-  xsmall: "10x10",
-  small: "10x10",
-  medium: "5x10",
-  large: "5x10",
-  "5": "5x10",
-  "10": "10x10",
-  "15": "15x15",
+  xsmall: "10",
+  small: "20",
+  medium: "30",
+  large: "30",
+  custom: "30",
+  "5": "10",
+  "10": "20",
+  "15": "30",
+  "5x10": "30",
+  "10x10": "30",
+  "15x15": "30",
 };
 
 const readStorageValue = (key, fallback) => {
@@ -91,13 +95,6 @@ const customLayoutRows = ref(
 );
 
 const resolvedLayout = computed(() => {
-  if (layoutPreset.value === "custom") {
-    return {
-      columns: customLayoutColumns.value,
-      rows: customLayoutRows.value,
-    };
-  }
-
   return LAYOUT_PRESETS[layoutPreset.value] || LAYOUT_PRESETS[DEFAULT_LAYOUT_PRESET];
 });
 
@@ -105,9 +102,7 @@ const resolvedLayoutColumns = computed(() => resolvedLayout.value.columns);
 const resolvedLayoutRows = computed(() => resolvedLayout.value.rows);
 const resolvedPageSize = computed(() => resolvedLayoutColumns.value * resolvedLayoutRows.value);
 
-const gridSize = computed(() => (
-  layoutPreset.value === "custom" ? "custom" : String(resolvedLayoutColumns.value)
-));
+const gridSize = computed(() => String(resolvedPageSize.value));
 const customGridColumns = computed(() => customLayoutColumns.value);
 const resolvedGridColumns = computed(() => resolvedLayoutColumns.value);
 

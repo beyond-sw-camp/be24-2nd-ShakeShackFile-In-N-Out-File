@@ -718,9 +718,9 @@ onMounted(() => {
           <article class="admin-panel admin-panel--inset admin-visual-card">
             <div class="admin-panel__header">
               <div>
-                <h3 class="admin-panel__title">Capacity usage</h3>
+                <h3 class="admin-panel__title">가용 가능한 총량</h3>
                 <p class="admin-panel__description">
-                  Provider capacity, allocated quota, and remaining capacity are shown in one view.
+                  시스템에서 설정해서 가용가능한 총량을 정리.
                 </p>
               </div>
             </div>
@@ -751,7 +751,7 @@ onMounted(() => {
 
             <div class="admin-visual-meter">
               <div class="admin-visual-meter__meta">
-                <span>Provider usage</span>
+                <span>실제 사용 총량</span>
                 <span>{{ storageVisualSummary.providerUsedLabel }} / {{ storageVisualSummary.providerCapacityLabel }}</span>
               </div>
               <div class="admin-progress admin-progress--thick">
@@ -761,7 +761,7 @@ onMounted(() => {
 
             <div class="admin-visual-meter">
               <div class="admin-visual-meter__meta">
-                <span>Allocated quota</span>
+                <span>할당된 총량</span>
                 <span>{{ formatPercent(storageVisualSummary.allocationPercent) }}</span>
               </div>
               <div class="admin-progress admin-progress--thick admin-progress--teal">
@@ -773,9 +773,9 @@ onMounted(() => {
           <article class="admin-panel admin-panel--inset admin-visual-card">
             <div class="admin-panel__header">
               <div>
-                <h3 class="admin-panel__title">Source mix</h3>
+                <h3 class="admin-panel__title">저장 장소 방식</h3>
                 <p class="admin-panel__description">
-                  Current stored data by source is visualized as relative share.
+                  현재 저장된 데이터의 구분
                 </p>
               </div>
             </div>
@@ -799,9 +799,9 @@ onMounted(() => {
           <article class="admin-panel admin-panel--inset admin-visual-card">
             <div class="admin-panel__header">
               <div>
-                <h3 class="admin-panel__title">Traffic flow</h3>
+                <h3 class="admin-panel__title">데아터 트래픽 흐름</h3>
                 <p class="admin-panel__description">
-                  The selected period's ingress and egress volume can be compared visually.
+                  선택한 기간의 입력 및 출력 볼륨을 시각적으로 비교할 수 있습니다.
                 </p>
               </div>
             </div>
@@ -881,9 +881,9 @@ onMounted(() => {
           <article class="admin-panel admin-panel--inset admin-visual-card">
             <div class="admin-panel__header">
               <div>
-                <h3 class="admin-panel__title">Top users</h3>
+                <h3 class="admin-panel__title">최고 사용 유저</h3>
                 <p class="admin-panel__description">
-                  Users with the largest current stored volume are highlighted here.
+                  가장 큰 사용량을 가진 유저를 확인
                 </p>
               </div>
             </div>

@@ -1,6 +1,6 @@
 import { EventSourcePolyfill } from 'event-source-polyfill'
 
-const BASE_URL = 'http://localhost:8080'
+const BASE_URL = 'https://api.fileinnout.kro.kr'
 
 const SSE_OPTIONS = {
   heartbeatTimeout: 3600000,

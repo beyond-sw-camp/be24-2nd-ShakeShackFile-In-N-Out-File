@@ -35,8 +35,6 @@ const {
   layoutPreset,
   customLayoutColumns,
   customLayoutRows,
-  resolvedLayoutColumns,
-  resolvedLayoutRows,
   resolvedPageSize,
   setViewMode,
   setLayoutPreset,
@@ -44,10 +42,10 @@ const {
   setCustomLayoutRows,
 } = useViewStore();
 
-const effectiveFiles = computed(() => props.files);
-
 const searchScope = computed(() => getFileSearchScope(route.name) || "files");
 const searchState = computed(() => headerSearchStore.getScopeState(searchScope.value));
+const useServerPaging = computed(() => props.showFolderNavigation && !props.sharedLibrary && props.deleteMode !== "permanent");
+const effectiveFiles = computed(() => props.files);
 
 const sortOption = ref("updatedAt-desc");
 const pageSize = computed(() => resolvedPageSize.value);
@@ -88,12 +86,13 @@ const sortOptions = [
   { label: "\uCD5C\uADFC \uACF5\uC720\uC21C", value: "sharedAt-desc" },
 ];
 const layoutPresetOptions = [
-  { value: "5x10", label: "5 x 10" },
-  { value: "10x10", label: "10 x 10" },
-  { value: "15x15", label: "15 x 15" },
+  { value: "10", label: "10개" },
+  { value: "20", label: "20개" },
+  { value: "30", label: "30개" },
   { value: "custom", label: "사용자 설정" },
 ];
 const sizeOptionLabelMap = Object.fromEntries(sizeOptions.map((option) => [option.value, option.label]));
+const visibleLayoutPresetOptions = computed(() => layoutPresetOptions.filter((option) => option.value !== "custom"));
 const statusOptionLabelMap = Object.fromEntries(statusOptions.map((option) => [option.value, option.label]));
 
 const formatBytes = (totalSize) => {
@@ -130,6 +129,10 @@ const triggerDownload = async (file) => {
 };
 
 const extensionOptions = computed(() => {
+  if (useServerPaging.value) {
+    return fileStore.driveAvailableExtensions || [];
+  }
+
   const extensions = effectiveFiles.value
     .map((file) => file?.extension || file?.fileFormat || "")
     .filter(Boolean)
@@ -211,7 +214,7 @@ const hasSearchFilters = computed(() => (
 const hasActiveFilters = computed(() => hasSearchFilters.value || sortOption.value !== "updatedAt-desc");
 const layoutGuideLabel = "배치";
 const layoutGuideSummary = computed(() => (
-  `${resolvedLayoutColumns.value} x ${resolvedLayoutRows.value}`
+  `${pageSize.value}`
 ));
 const layoutGuideHint = computed(() => (
   `현재 한 페이지에 ${pageSize.value}개씩 표시됩니다.`
@@ -251,7 +254,7 @@ const matchesSizeFilter = (file) => {
   return true;
 };
 
-const filteredFiles = computed(() => {
+const localFilteredFiles = computed(() => {
   const keyword = searchState.value.searchQuery.trim().toLowerCase();
   const [sortBy, sortDirection] = sortOption.value.split("-");
   const filtered = effectiveFiles.value.filter((file) => {
@@ -292,7 +295,18 @@ const filteredFiles = computed(() => {
   });
 });
 
+const filteredFiles = computed(() => (
+  useServerPaging.value ? effectiveFiles.value : localFilteredFiles.value
+));
 const totalSizeLabel = computed(() => formatBytes(filteredFiles.value.reduce((sum, file) => sum + Number(file?.sizeBytes || 0), 0)));
+const toolbarMetaLabel = computed(() => {
+  if (useServerPaging.value) {
+    const totalCount = Number(fileStore.drivePageInfo?.totalCount || 0);
+    return `총 ${totalCount}개 항목 · 현재 페이지 ${filteredFiles.value.length}개 · 총 ${totalSizeLabel.value}`;
+  }
+
+  return `${filteredFiles.value.length}개 항목 · 총 ${totalSizeLabel.value}`;
+});
 const selectedFiles = computed(() => {
   const selectedSet = new Set(selectedIds.value.map((id) => String(id)));
   return filteredFiles.value.filter((file) => selectedSet.has(String(file.id)));
@@ -305,8 +319,16 @@ const selectedCancelableSentSharedFiles = computed(() => selectedFiles.value.fil
 const selectedLockableFiles = computed(() => selectedFiles.value.filter((file) => !file?.sharedWithMe && file?.type !== "folder" && !file?.isTrash));
 const selectedLockCandidates = computed(() => selectedLockableFiles.value.filter((file) => !file?.lockedFile));
 const selectedLockedFiles = computed(() => selectedLockableFiles.value.filter((file) => file?.lockedFile));
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredFiles.value.length / pageSize.value)));
-const paginatedFiles = computed(() => filteredFiles.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value));
+const pageCount = computed(() => (
+  useServerPaging.value
+    ? Math.max(1, Number(fileStore.drivePageInfo?.totalPage || 0) || 1)
+    : Math.max(1, Math.ceil(filteredFiles.value.length / pageSize.value))
+));
+const paginatedFiles = computed(() => (
+  useServerPaging.value
+    ? filteredFiles.value
+    : filteredFiles.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value)
+));
 const pageNumbers = computed(() => {
   const pages = [];
   const start = Math.max(1, currentPage.value - 2);
@@ -314,6 +336,32 @@ const pageNumbers = computed(() => {
   for (let page = start; page <= end; page += 1) pages.push(page);
   return pages;
 });
+const serverListQuery = computed(() => {
+  if (!useServerPaging.value) {
+    return null;
+  }
+
+  return {
+    parentId: fileStore.currentFolderId ?? null,
+    page: Math.max(0, currentPage.value - 1),
+    size: pageSize.value,
+    sortOption: sortOption.value,
+    searchQuery: searchState.value.searchQuery.trim(),
+    extensionFilter: searchState.value.extensionFilter,
+    sizeFilter: searchState.value.sizeFilter,
+    customMinSize: searchState.value.customMinSize,
+    customMaxSize: searchState.value.customMaxSize,
+    statusFilter: searchState.value.statusFilter,
+  };
+});
+const isInitialLoading = computed(() => (
+  fileStore.isLoading &&
+  (
+    useServerPaging.value
+      ? filteredFiles.value.length === 0
+      : fileStore.allFiles.length === 0
+  )
+));
 
 watch(effectiveFiles, (files) => {
   const validIds = new Set((files || []).map((file) => String(file?.id)));
@@ -323,6 +371,14 @@ watch(effectiveFiles, (files) => {
 watch(extensionOptions, (extensions) => {
   headerSearchStore.setAvailableExtensions(searchScope.value, extensions);
 }, { immediate: true });
+
+watch(serverListQuery, (query) => {
+  if (!query) {
+    return;
+  }
+
+  fileStore.fetchDrivePage(query).catch(() => {});
+}, { immediate: true, deep: true });
 
 watch(() => [
   searchState.value.searchQuery,
@@ -358,7 +414,17 @@ const clearSelection = () => {
 };
 
 const navigateToFolder = (folderId) => {
+  if (useServerPaging.value) {
+    currentPage.value = 1;
+  }
   fileStore.navigateToFolder(folderId);
+};
+
+const handleGoBack = () => {
+  if (useServerPaging.value) {
+    currentPage.value = 1;
+  }
+  fileStore.goBack();
 };
 
 const handleDelete = (fileId) => {
@@ -759,9 +825,9 @@ const closeFilePreview = () => {
 onMounted(() => {
   if (props.sharedLibrary) {
     fileStore.fetchFiles().catch(() => {});
-    setLayoutPreset("10x10");
+    setLayoutPreset("20");
     sortOption.value = "sharedAt-desc";
-  } else if (!fileStore.hasLoaded && !fileStore.isLoading) {
+  } else if (!useServerPaging.value && !fileStore.hasLoaded && !fileStore.isLoading) {
     fileStore.fetchFiles().catch(() => {});
   }
 });
@@ -776,7 +842,7 @@ onMounted(() => {
             <div class="toolbar-overview__main">
               <div class="toolbar-overview__title-wrap">
                 <h2 class="toolbar-overview__title">{{ title }}</h2>
-                <p class="toolbar-overview__meta">{{ filteredFiles.length }}{{ "\uAC1C \uD56D\uBAA9 \u00B7 \uCD1D " }}{{ totalSizeLabel }}</p>
+                <p class="toolbar-overview__meta">{{ toolbarMetaLabel }}</p>
               </div>
               <div class="toolbar-overview__slots">
                 <slot name="header-left"></slot>
@@ -804,7 +870,7 @@ onMounted(() => {
               </div>
               <div v-if="fileStore.currentFolder" class="toolbar-folder-panel__actions">
                 <button type="button" class="toolbar-inline-button toolbar-inline-button--accent" @click="openFolderProperties(fileStore.currentFolder)">{{ "\uC18D\uC131 \uBCF4\uAE30" }}</button>
-                <button type="button" class="toolbar-inline-button" @click="fileStore.goBack()">{{ "\uC0C1\uC704 \uD3F4\uB354\uB85C" }}</button>
+                <button type="button" class="toolbar-inline-button" @click="handleGoBack">{{ "\uC0C1\uC704 \uD3F4\uB354\uB85C" }}</button>
               </div>
             </div>
             <div v-if="folderSummaryCards.length > 0" class="toolbar-folder-stats">
@@ -825,11 +891,11 @@ onMounted(() => {
             <span class="file-filter__label">{{ layoutGuideLabel }}</span>
             <div class="file-filter__inline-grid file-filter__inline-grid--layout">
               <select :value="layoutPreset" class="file-filter__input" @change="setLayoutPreset($event.target.value)">
-                <option v-for="option in layoutPresetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                <option v-for="option in visibleLayoutPresetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
               <input v-if="layoutPreset === 'custom'" :value="customLayoutColumns" type="number" min="5" max="20" class="file-filter__input" :placeholder="'가로 5~20'" @input="setCustomLayoutColumns($event.target.value)" />
               <input v-if="layoutPreset === 'custom'" :value="customLayoutRows" type="number" min="5" max="20" class="file-filter__input" :placeholder="'세로 5~20'" @input="setCustomLayoutRows($event.target.value)" />
-              <div v-else class="file-filter__input file-filter__input--readonly">{{ layoutGuideSummary }}</div>
+              
             </div>
             <p class="file-filter__hint">{{ layoutGuideHint }}</p>
           </label>
@@ -863,7 +929,7 @@ onMounted(() => {
         <button type="button" class="batch-button bg-transparent text-blue-700 hover:bg-blue-100" @click="clearSelection">{{ "\uC120\uD0DD \uD574\uC81C" }}</button>
       </div>
     </div>
-    <div v-if="fileStore.isLoading && fileStore.allFiles.length === 0" class="rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-14 text-center text-sm text-gray-500">{{ "\uD30C\uC77C \uBAA9\uB85D\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4." }}</div>
+    <div v-if="isInitialLoading" class="rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-14 text-center text-sm text-gray-500">{{ "\uD30C\uC77C \uBAA9\uB85D\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4." }}</div>
     <div v-else-if="fileStore.loadError" class="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-4 text-sm text-rose-600">{{ fileStore.loadError }}</div>
 
     <div v-else-if="paginatedFiles.length > 0">

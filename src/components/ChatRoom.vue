@@ -13,6 +13,10 @@ const chatMessages = ref([])
 const newMessage = ref('')
 const scrollContainer = ref(null)
 let stompClient = null
+let presenceHeartbeatTimer = null
+let activePresenceRoomId = null
+
+const HEARTBEAT_INTERVAL_MS = 60 * 1000
 
 const currentPage = ref(0)
 const isLastPage = ref(false)
@@ -244,7 +248,7 @@ const initObserver = () => {
 const initChat = () => {
   if (stompClient) stompClient.disconnect()
 
-  const socket = new SockJS('http://localhost:8080/ws-stomp')
+  const socket = new SockJS('https://api.fileinnout.kro.kr/ws-stomp')
   stompClient = Stomp.over(socket)
   stompClient.debug = null // 디버그 로그 제거
 
@@ -412,6 +416,58 @@ const formatFileSize = (bytes) => {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
+const stopPresenceHeartbeat = () => {
+  if (presenceHeartbeatTimer) {
+    window.clearInterval(presenceHeartbeatTimer)
+    presenceHeartbeatTimer = null
+  }
+}
+
+const sendPresenceHeartbeat = async (roomId = activePresenceRoomId) => {
+  if (!roomId) return
+
+  try {
+    await api.post(`/chatRoom/${roomId}/heartbeat`)
+  } catch (error) {
+    console.error('채팅방 heartbeat 실패:', error)
+  }
+}
+
+const startPresenceHeartbeat = (roomId) => {
+  stopPresenceHeartbeat()
+  if (!roomId) return
+
+  activePresenceRoomId = roomId
+  presenceHeartbeatTimer = window.setInterval(() => {
+    sendPresenceHeartbeat(roomId)
+  }, HEARTBEAT_INTERVAL_MS)
+}
+
+const enterRoomPresence = async (roomId) => {
+  if (!roomId) return
+
+  await api.post(`/chatRoom/${roomId}/enter`)
+  activePresenceRoomId = roomId
+  startPresenceHeartbeat(roomId)
+}
+
+const leaveRoomPresence = async (roomId = activePresenceRoomId) => {
+  stopPresenceHeartbeat()
+
+  if (!roomId) {
+    activePresenceRoomId = null
+    return
+  }
+
+  activePresenceRoomId = null
+
+  try {
+    await api.post(`/chatRoom/${roomId}/leave`)
+  } catch (error) {
+    console.error('채팅방 leave 실패:', error)
+  }
+}
+
 const scrollToBottom = () => {
   if (scrollContainer.value) {
     scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
@@ -452,7 +508,7 @@ const deleteMessage = async () => {
 onMounted(async () => {
   window.addEventListener('click', closeMessageMenu)
   window.addEventListener('keydown', handleWindowKeydown)
-  await api.post(`/chatRoom/${props.room.id}/enter`)
+  await enterRoomPresence(props.room.id)
   requestNotificationPermission()
   await fetchHistory(true)
   initObserver()
@@ -463,13 +519,17 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('click', closeMessageMenu)
   window.removeEventListener('keydown', handleWindowKeydown)
-  api.post(`/chatRoom/${props.room.id}/leave`).catch(() => {})
+  leaveRoomPresence().catch(() => {})
   if (scrollObserver.value) scrollObserver.value.disconnect()
   if (stompClient) stompClient.disconnect()
 })
 
-watch(() => props.room.id, async () => {
+watch(() => props.room.id, async (newRoomId, oldRoomId) => {
   closeMessageMenu()
+  if (oldRoomId && oldRoomId !== newRoomId) {
+    await leaveRoomPresence(oldRoomId)
+  }
+  await enterRoomPresence(newRoomId)
   markAsRead()
   await fetchHistory(true)
   initObserver()

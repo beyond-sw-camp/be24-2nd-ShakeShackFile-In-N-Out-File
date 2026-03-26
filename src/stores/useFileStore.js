@@ -8,6 +8,7 @@ import {
   createFolder as createFolderApi,
   deleteFilePermanently as deleteFilePermanentlyApi,
   fetchFileList as fetchFileListApi,
+  fetchFileListPage as fetchFileListPageApi,
   fetchFileShareInfo as fetchFileShareInfoApi,
   fetchFolderProperties as fetchFolderPropertiesApi,
   fetchSentSharedFileList as fetchSentSharedFileListApi,
@@ -33,6 +34,9 @@ const DEFAULT_MAX_UPLOAD_FILE_BYTES = 5 * 1024 * 1024 * 1024;
 const DEFAULT_MAX_UPLOAD_COUNT = 30;
 const ADMIN_MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024 * 1024;
 const ADMIN_MAX_UPLOAD_COUNT = 500;
+const PRESIGNED_URL_SAFETY_MARGIN_MS = 30 * 1000;
+const DEFAULT_DRIVE_PAGE_SIZE = 10;
+const MAX_DRIVE_PAGE_SIZE = 30;
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic", "avif", "apng", "jfif", "tif", "tiff"]);
 const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp"]);
@@ -88,6 +92,25 @@ const normalizeIdList = (ids) => {
   );
 };
 
+const areDriveQueriesEqual = (left, right) => {
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    (left.parentId ?? null) === (right.parentId ?? null) &&
+    Number(left.page ?? 0) === Number(right.page ?? 0) &&
+    Number(left.size ?? 0) === Number(right.size ?? 0) &&
+    String(left.sortOption || "") === String(right.sortOption || "") &&
+    String(left.searchQuery || "") === String(right.searchQuery || "") &&
+    String(left.extensionFilter || "") === String(right.extensionFilter || "") &&
+    String(left.sizeFilter || "") === String(right.sizeFilter || "") &&
+    String(left.customMinSize || "") === String(right.customMinSize || "") &&
+    String(left.customMaxSize || "") === String(right.customMaxSize || "") &&
+    String(left.statusFilter || "") === String(right.statusFilter || "")
+  );
+};
+
 const normalizeFileRecord = (rawFile, options = {}) => {
   const name = rawFile?.fileOriginName || rawFile?.name || "이름 없는 파일";
   const nodeType = String(rawFile?.nodeType || rawFile?.type || "FILE").toUpperCase();
@@ -122,6 +145,10 @@ const normalizeFileRecord = (rawFile, options = {}) => {
       : `공유 대상: ${recipientNames.slice(0, 2).join(", ")} 외 ${recipientCount - 2}명`;
   const downloadUrl = rawFile?.presignedDownloadUrl || rawFile?.downloadUrl || "";
   const thumbnailUrl = rawFile?.thumbnailPresignedUrl || rawFile?.thumbnailUrl || "";
+  const presignedUrlExpiresIn = Number(rawFile?.presignedUrlExpiresIn ?? 0) || 0;
+  const assetUrlExpiresAt = presignedUrlExpiresIn > 0
+    ? Date.now() + (presignedUrlExpiresIn * 1000)
+    : 0;
 
   return {
     id: rawFile?.idx ?? rawFile?.id ?? `${name}-${uploadDate || Date.now()}`,
@@ -163,6 +190,8 @@ const normalizeFileRecord = (rawFile, options = {}) => {
     contentType: rawFile?.contentType || rawFile?.mimeType || rawFile?.fileContentType || "",
     fileSaveName: rawFile?.fileSaveName || "",
     fileSavePath: rawFile?.fileSavePath || rawFile?.objectKey || "",
+    presignedUrlExpiresIn,
+    assetUrlExpiresAt,
     sharedWithMe,
     sharedAt,
     sharedAtLabel: formatDateLabel(sharedAt),
@@ -187,15 +216,82 @@ const decorateLocations = (files) => {
   }));
 };
 
+const normalizeBreadcrumbRecord = (rawFolder) => normalizeFileRecord({
+  idx: rawFolder?.idx ?? rawFolder?.id ?? null,
+  fileOriginName: rawFolder?.fileOriginName || rawFolder?.name || "폴더",
+  fileFormat: "folder",
+  fileSize: 0,
+  nodeType: "FOLDER",
+  parentId: rawFolder?.parentId ?? null,
+  trashed: false,
+});
+
+const rememberFolderRecords = (currentRecords, nextRecords) => {
+  const folderMap = new Map(
+    (currentRecords || [])
+      .filter((record) => record?.id != null && record?.type === "folder")
+      .map((record) => [String(record.id), record]),
+  );
+
+  (nextRecords || [])
+    .filter((record) => record?.id != null && record?.type === "folder")
+    .forEach((record) => {
+      folderMap.set(String(record.id), record);
+    });
+
+  return [...folderMap.values()];
+};
+
+const reuseCachedAssetUrls = (previousRecords, nextRecords) => {
+  const previousById = new Map(
+    (previousRecords || [])
+      .filter((record) => record?.id != null)
+      .map((record) => [String(record.id), record]),
+  );
+
+  return (nextRecords || []).map((record) => {
+    const previous = previousById.get(String(record?.id));
+    const notExpired = Number(previous?.assetUrlExpiresAt || 0) > (Date.now() + PRESIGNED_URL_SAFETY_MARGIN_MS);
+    const sameObject = String(previous?.fileSavePath || "") === String(record?.fileSavePath || "");
+    const sameRevision = String(previous?.updatedAt || "") === String(record?.updatedAt || "");
+
+    if (!previous || !notExpired || !sameObject || !sameRevision) {
+      return record;
+    }
+
+    return {
+      ...record,
+      downloadUrl: previous.downloadUrl || record.downloadUrl,
+      presignedDownloadUrl: previous.presignedDownloadUrl || record.presignedDownloadUrl,
+      thumbnailUrl: previous.thumbnailUrl || record.thumbnailUrl,
+      thumbnailPresignedUrl: previous.thumbnailPresignedUrl || record.thumbnailPresignedUrl,
+      presignedUrlExpiresIn: previous.presignedUrlExpiresIn || record.presignedUrlExpiresIn,
+      assetUrlExpiresAt: previous.assetUrlExpiresAt || record.assetUrlExpiresAt,
+    };
+  });
+};
+
 export const useFileStore = defineStore("file", () => {
   const authStore = useAuthStore();
   const allFiles = ref([]);
+  const drivePageFiles = ref([]);
+  const driveBreadcrumbs = ref([]);
+  const driveAvailableExtensions = ref([]);
+  const drivePageInfo = ref({
+    totalPage: 0,
+    totalCount: 0,
+    currentPage: 0,
+    currentSize: 0,
+  });
+  const knownFolders = ref([]);
   const sharedLibraryFiles = ref([]);
   const sentSharedLibraryFiles = ref([]);
   const currentFolderId = ref(null);
   const isLoading = ref(false);
   const loadError = ref("");
   const hasLoaded = ref(false);
+  const driveHasLoaded = ref(false);
+  const lastDriveQuery = ref(null);
   const storageSummary = ref(null);
   const storageLoading = ref(false);
   const storageError = ref("");
@@ -233,11 +329,25 @@ export const useFileStore = defineStore("file", () => {
     ),
   }));
 
-  const fileById = computed(() => new Map(allFiles.value.map((file) => [String(file.id), file])));
+  const fileById = computed(() => {
+    const map = new Map();
+    [...allFiles.value, ...knownFolders.value, ...drivePageFiles.value].forEach((file) => {
+      if (file?.id == null) {
+        return;
+      }
+      map.set(String(file.id), file);
+    });
+    return map;
+  });
 
   const currentFolder = computed(() => {
     if (currentFolderId.value == null) {
       return null;
+    }
+
+    const breadcrumbFolder = driveBreadcrumbs.value[driveBreadcrumbs.value.length - 1];
+    if (breadcrumbFolder?.id != null && String(breadcrumbFolder.id) === String(currentFolderId.value)) {
+      return breadcrumbFolder;
     }
 
     return fileById.value.get(String(currentFolderId.value)) || null;
@@ -248,10 +358,20 @@ export const useFileStore = defineStore("file", () => {
       return [];
     }
 
+    if (
+      currentFolderId.value != null &&
+      String(folderId) === String(currentFolderId.value) &&
+      driveBreadcrumbs.value.length > 0
+    ) {
+      return driveBreadcrumbs.value;
+    }
+
     const path = [];
     let cursor = fileById.value.get(String(folderId)) || null;
+    const visited = new Set();
 
-    while (cursor) {
+    while (cursor && !visited.has(String(cursor.id))) {
+      visited.add(String(cursor.id));
       path.unshift(cursor);
       if (cursor.parentId == null) {
         break;
@@ -273,6 +393,10 @@ export const useFileStore = defineStore("file", () => {
     if (!folder || folder.type !== "folder" || folder.isTrash) {
       currentFolderId.value = null;
     }
+  };
+
+  const rememberFolders = (records) => {
+    knownFolders.value = rememberFolderRecords(knownFolders.value, records);
   };
 
   const fetchSharedFiles = async () => {
@@ -317,7 +441,9 @@ export const useFileStore = defineStore("file", () => {
         fetchSentSharedFileListApi().catch(() => []),
       ]);
 
-      allFiles.value = decorateLocations(fileList.map((file) => normalizeFileRecord(file)));
+      const normalizedFiles = decorateLocations(fileList.map((file) => normalizeFileRecord(file)));
+      allFiles.value = reuseCachedAssetUrls(allFiles.value, normalizedFiles);
+      rememberFolders(allFiles.value);
       sharedLibraryFiles.value = sharedList.map((file) => normalizeFileRecord(file, { shared: true }));
       sentSharedLibraryFiles.value = sentSharedList.map((file) => normalizeFileRecord(file, { sentShared: true }));
       hasLoaded.value = true;
@@ -335,11 +461,92 @@ export const useFileStore = defineStore("file", () => {
     }
   };
 
-  const driveFiles = computed(() =>
-    allFiles.value.filter(
-      (file) => !file.isTrash && (file.parentId ?? null) === currentFolderId.value,
-    ),
-  );
+  const fetchDrivePage = async (query = {}) => {
+    isLoading.value = true;
+    loadError.value = "";
+
+    const nextQuery = {
+      parentId: query.parentId ?? currentFolderId.value ?? null,
+      page: Math.max(0, Number(query.page ?? lastDriveQuery.value?.page ?? 0) || 0),
+      size: Math.min(
+        MAX_DRIVE_PAGE_SIZE,
+        Math.max(1, Number(query.size ?? lastDriveQuery.value?.size ?? DEFAULT_DRIVE_PAGE_SIZE) || DEFAULT_DRIVE_PAGE_SIZE),
+      ),
+      sortOption: query.sortOption ?? lastDriveQuery.value?.sortOption ?? "updatedAt-desc",
+      searchQuery: query.searchQuery ?? lastDriveQuery.value?.searchQuery ?? "",
+      extensionFilter: query.extensionFilter ?? lastDriveQuery.value?.extensionFilter ?? "all",
+      sizeFilter: query.sizeFilter ?? lastDriveQuery.value?.sizeFilter ?? "all",
+      customMinSize: query.customMinSize ?? lastDriveQuery.value?.customMinSize ?? "",
+      customMaxSize: query.customMaxSize ?? lastDriveQuery.value?.customMaxSize ?? "",
+      statusFilter: query.statusFilter ?? lastDriveQuery.value?.statusFilter ?? "all",
+    };
+
+    if (!query.forceRefresh && driveHasLoaded.value && areDriveQueriesEqual(lastDriveQuery.value, nextQuery)) {
+      isLoading.value = false;
+      return drivePageFiles.value;
+    }
+
+    try {
+      const result = await fetchFileListPageApi(nextQuery);
+      const breadcrumbs = Array.isArray(result?.breadcrumbs)
+        ? result.breadcrumbs.map((folder) => normalizeBreadcrumbRecord(folder))
+        : [];
+      const currentLocationLabel = breadcrumbs[breadcrumbs.length - 1]?.name || ROOT_LOCATION_LABEL;
+      const pageFiles = Array.isArray(result?.fileList)
+        ? result.fileList
+          .map((file) => normalizeFileRecord(file))
+          .map((file) => ({
+            ...file,
+            location: currentLocationLabel,
+          }))
+        : [];
+
+      drivePageFiles.value = reuseCachedAssetUrls(drivePageFiles.value, pageFiles);
+      driveBreadcrumbs.value = breadcrumbs;
+      driveAvailableExtensions.value = Array.isArray(result?.availableExtensions)
+        ? [...new Set(result.availableExtensions.map((extension) => String(extension || "").trim().toLowerCase()).filter(Boolean))]
+          .sort((left, right) => left.localeCompare(right))
+        : [];
+      drivePageInfo.value = {
+        totalPage: Number(result?.totalPage ?? 0) || 0,
+        totalCount: Number(result?.totalCount ?? 0) || 0,
+        currentPage: Number(result?.currentPage ?? nextQuery.page) || 0,
+        currentSize: Number(result?.currentSize ?? nextQuery.size) || nextQuery.size,
+      };
+      driveHasLoaded.value = true;
+      lastDriveQuery.value = nextQuery;
+      rememberFolders([
+        ...breadcrumbs,
+        ...pageFiles.filter((file) => file?.type === "folder"),
+      ]);
+      syncCurrentFolder();
+      if (!storageSummary.value && !storageLoading.value) {
+        fetchStorageSummary().catch(() => {});
+      }
+      return drivePageFiles.value;
+    } catch (error) {
+      loadError.value =
+        error?.response?.data?.message ||
+        error?.message ||
+        "파일 목록을 불러오지 못했습니다.";
+      throw error;
+    } finally {
+      isLoading.value = false;
+    }
+  };
+
+  const refreshDrivePage = async () => {
+    if (!lastDriveQuery.value) {
+      return drivePageFiles.value;
+    }
+
+    return fetchDrivePage({
+      ...lastDriveQuery.value,
+      forceRefresh: true,
+    });
+  };
+
+  const driveFiles = computed(() => drivePageFiles.value);
 
   const sharedFiles = computed(() =>
     [...sharedLibraryFiles.value]
@@ -378,7 +585,20 @@ export const useFileStore = defineStore("file", () => {
   );
 
   const refreshAll = async () => {
-    await fetchFiles();
+    if (driveHasLoaded.value && lastDriveQuery.value) {
+      await refreshDrivePage();
+    }
+
+    if (hasLoaded.value) {
+      await fetchFiles();
+    } else if (!driveHasLoaded.value) {
+      await fetchFiles();
+    }
+
+    if (storageSummary.value) {
+      fetchStorageSummary().catch(() => {});
+    }
+
     return true;
   };
 
@@ -553,6 +773,10 @@ export const useFileStore = defineStore("file", () => {
 
   return {
     allFiles,
+    drivePageFiles,
+    driveBreadcrumbs,
+    driveAvailableExtensions,
+    drivePageInfo,
     sharedLibraryFiles,
     sentSharedLibraryFiles,
     currentFolderId,
@@ -561,6 +785,7 @@ export const useFileStore = defineStore("file", () => {
     isLoading,
     loadError,
     hasLoaded,
+    driveHasLoaded,
     storageSummary,
     planCapabilities,
     storageLoading,
@@ -572,6 +797,8 @@ export const useFileStore = defineStore("file", () => {
     trashFiles,
     allOnlyFiles,
     fetchFiles,
+    fetchDrivePage,
+    refreshDrivePage,
     fetchSharedFiles,
     fetchSentSharedFiles,
     refreshAll,

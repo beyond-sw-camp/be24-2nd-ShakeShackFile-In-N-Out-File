@@ -1,4 +1,3 @@
-import axios from "axios";
 import { api } from "@/plugins/axiosinterceptor";
 
 const normalizeFileFormat = (file) => {
@@ -62,14 +61,36 @@ const resolveDownloadFileName = (fileOrUrl, fallbackFileName = "file") => {
   return fileOrUrl?.name || fileOrUrl?.fileOriginName || fallbackFileName;
 };
 
-const triggerBlobDownload = (blobUrl, fileName) => {
+const triggerDirectDownload = (downloadUrl, fileName) => {
   const anchor = document.createElement("a");
-  anchor.href = blobUrl;
+  anchor.href = downloadUrl;
   anchor.download = fileName || "file";
   anchor.rel = "noopener noreferrer";
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+};
+
+const resolveDownloadLinkPath = (fileOrUrl) => {
+  if (!fileOrUrl || typeof fileOrUrl === "string") return "";
+
+  const fileId = fileOrUrl?.idx ?? fileOrUrl?.id ?? null;
+  if (fileId == null) return "";
+
+  if (fileOrUrl?.workspaceId != null) {
+    return `/workspace/${fileOrUrl.workspaceId}/assets/${fileId}/download-link`;
+  }
+
+  if (fileOrUrl?.sharedWithMe) {
+    return `/file/share/shared/${fileId}/download-link`;
+  }
+
+  return `/file/${fileId}/download-link`;
+};
+
+const extractDownloadLink = (responseData) => {
+  const objectResult = extractObjectResult(responseData);
+  return objectResult?.downloadUrl || responseData?.downloadUrl || responseData?.result?.downloadUrl || "";
 };
 
 export async function downloadFileAsset(fileOrUrl, fallbackFileName = "file") {
@@ -79,16 +100,22 @@ export async function downloadFileAsset(fileOrUrl, fallbackFileName = "file") {
   }
 
   const fileName = resolveDownloadFileName(fileOrUrl, fallbackFileName);
-  const response = await axios.get(downloadUrl, {
-    responseType: "blob",
-  });
+  const downloadLinkPath = resolveDownloadLinkPath(fileOrUrl);
 
-  const objectUrl = window.URL.createObjectURL(response.data);
-  try {
-    triggerBlobDownload(objectUrl, fileName);
-  } finally {
-    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+  if (!downloadLinkPath) {
+    triggerDirectDownload(downloadUrl, fileName);
+    return;
   }
+
+  const response = await api.get(downloadLinkPath, {
+    timeout: 15000,
+  });
+  const attachmentDownloadUrl = extractDownloadLink(response?.data);
+  if (!attachmentDownloadUrl) {
+    throw new Error("\uB2E4\uC6B4\uB85C\uB4DC \uB9C1\uD06C\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
+  }
+
+  triggerDirectDownload(attachmentDownloadUrl, fileName);
 }
 
 export function initUploadFiles(files, parentId = null) {
@@ -115,6 +142,13 @@ export function abortUpload(payload) {
 export async function fetchFileList() {
   const response = await api.get("/file/list");
   return extractArrayResult(response?.data);
+}
+
+export async function fetchFileListPage(params = {}) {
+  const response = await api.get("/file/list/page", {
+    params,
+  });
+  return extractObjectResult(response?.data);
 }
 
 export async function fetchSharedFileList() {
@@ -245,4 +279,34 @@ export async function fetchTextPreview(fileId) {
 export async function fetchSharedTextPreview(fileId) {
   const response = await api.get(`/file/share/shared/${fileId}/text-preview`);
   return extractObjectResult(response?.data);
+}
+
+export async function fetchFileThumbnailBlob(fileId, version = "") {
+  const response = await api.get(`/file/${fileId}/thumbnail`, {
+    params: version ? { v: version } : undefined,
+    responseType: "blob",
+  });
+
+  if (response?.status === 204) {
+    return null;
+  }
+
+  return response?.data instanceof Blob && response.data.size > 0
+    ? response.data
+    : null;
+}
+
+export async function fetchSharedFileThumbnailBlob(fileId, version = "") {
+  const response = await api.get(`/file/share/shared/${fileId}/thumbnail`, {
+    params: version ? { v: version } : undefined,
+    responseType: "blob",
+  });
+
+  if (response?.status === 204) {
+    return null;
+  }
+
+  return response?.data instanceof Blob && response.data.size > 0
+    ? response.data
+    : null;
 }

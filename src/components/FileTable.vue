@@ -38,6 +38,7 @@ const { viewMode, gridSize } = useViewStore();
 const dragTargetId = ref(null);
 const draggingFileIds = ref([]);
 const selectedIds = ref([]);
+const downloadingIds = ref([]);
 
 const visibleFileIds = computed(() =>
   props.files
@@ -51,6 +52,7 @@ watch(visibleFileIds, (ids) => {
 });
 
 const selectedIdSet = computed(() => new Set(selectedIds.value.map((id) => String(id))));
+const downloadingIdSet = computed(() => new Set(downloadingIds.value.map((id) => String(id))));
 const selectedCount = computed(() => selectedIds.value.length);
 const hasSelection = computed(() => selectedCount.value > 0);
 const allVisibleSelected = computed(() =>
@@ -126,13 +128,27 @@ const canDownload = (file) => {
   return file?.type !== "folder" && Boolean(file?.downloadUrl || file?.presignedDownloadUrl);
 };
 
+const isDownloading = (file) => downloadingIdSet.value.has(String(file?.id));
+
 const handleDownload = async (file, event) => {
   event?.stopPropagation?.();
+  if (isDownloading(file)) {
+    return;
+  }
+
+  const fileId = String(file?.id || "");
 
   try {
+    if (fileId) {
+      downloadingIds.value = [...downloadingIds.value, fileId];
+    }
     await downloadFileAsset(file);
   } catch (error) {
     window.alert(error?.message || "\uD30C\uC77C\uC744 \uB2E4\uC6B4\uB85C\uB4DC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+  } finally {
+    if (fileId) {
+      downloadingIds.value = downloadingIds.value.filter((id) => id !== fileId);
+    }
   }
 };
 
@@ -591,9 +607,11 @@ const gridClassName = computed(() => {
                   v-if="canDownload(file)"
                   type="button"
                   class="action-button text-blue-600 hover:bg-blue-50"
+                  :class="{ 'cursor-wait opacity-70': isDownloading(file) }"
+                  :disabled="isDownloading(file)"
                   @click="handleDownload(file, $event)"
                 >
-                  {{ "\uB2E4\uC6B4\uB85C\uB4DC" }}
+                  {{ isDownloading(file) ? "\uC900\uBE44 \uC911..." : "\uB2E4\uC6B4\uB85C\uB4DC" }}
                 </button>
                 <button
                   v-if="canManageFolder(file)"
@@ -805,9 +823,11 @@ const gridClassName = computed(() => {
             v-if="canDownload(file)"
             type="button"
             class="w-full rounded-xl bg-blue-50 px-3 py-2 text-center text-sm font-semibold text-blue-600 transition hover:bg-blue-100"
+            :class="{ 'cursor-wait opacity-70': isDownloading(file) }"
+            :disabled="isDownloading(file)"
             @click="handleDownload(file, $event)"
           >
-            {{ "\uB2E4\uC6B4\uB85C\uB4DC" }}
+            {{ isDownloading(file) ? "\uC900\uBE44 \uC911..." : "\uB2E4\uC6B4\uB85C\uB4DC" }}
           </button>
           <button
             type="button"

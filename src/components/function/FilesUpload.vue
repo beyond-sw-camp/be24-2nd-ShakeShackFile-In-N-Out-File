@@ -1226,7 +1226,11 @@ const handleUpload = async (event, uploadTypeLabel) => {
     }
 
     uploadedFiles.value = successList
-    await fileStore.fetchFiles().catch(() => {})
+    if (fileStore.driveHasLoaded && !fileStore.hasLoaded) {
+      await fileStore.refreshDrivePage().catch(() => {})
+    } else {
+      await fileStore.fetchFiles().catch(() => {})
+    }
     emit("upload-complete", uploadedFiles.value)
     console.log(`[${uploadTypeLabel}] 업로드 완료:`, uploadedFiles.value)
   } catch (error) {

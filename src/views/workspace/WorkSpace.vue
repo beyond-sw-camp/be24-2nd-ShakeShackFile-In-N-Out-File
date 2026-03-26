@@ -173,7 +173,7 @@ const connectWorkspaceAssetRealtime = (targetWorkspaceId = workspaceId.value) =>
 
   disconnectWorkspaceAssetRealtime()
 
-  const socket      = new SockJS('http://localhost:8080/ws-stomp')
+  const socket      = new SockJS('https://api.fileinnout.kro.kr/ws-stomp')
   const stompClient = Stomp.over(socket)
   stompClient.debug = null
 
@@ -414,10 +414,7 @@ const saveWorkspaceAssetToDrive = async (asset) => {
 const downloadWorkspaceAsset = async (asset) => {
   if (!asset?.downloadUrl) return
   try {
-    await downloadFileAsset(
-      { presignedDownloadUrl: asset.downloadUrl, fileOriginName: asset.originalName },
-      asset.originalName,
-    )
+    await downloadFileAsset(asset, asset.originalName)
   } catch {
     workspaceAssetError.value = '파일 다운로드에 실패했습니다.'
   }

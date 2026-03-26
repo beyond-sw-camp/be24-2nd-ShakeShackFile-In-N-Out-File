@@ -193,10 +193,7 @@ const loadAssets = async (wsId) => {
 const downloadAsset = async (asset) => {
   if (!asset?.downloadUrl) return
   try {
-    await downloadFileAsset(
-      { presignedDownloadUrl: asset.downloadUrl, fileOriginName: asset.originalName },
-      asset.originalName,
-    )
+    await downloadFileAsset(asset, asset.originalName)
   } catch {
     workspaceAssetError.value = '파일 다운로드에 실패했습니다.'
   }

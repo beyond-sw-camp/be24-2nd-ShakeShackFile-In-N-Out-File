@@ -47,7 +47,7 @@ export function useRockPaperScissorsSocket(authStore) {
     connectionState.value = "connecting";
     socketError.value = "";
 
-    const socket = new SockJS("http://localhost:8080/ws-stomp");
+    const socket = new SockJS("https://api.fileinnout.kro.kr/ws-stomp");
     stompClient = Stomp.over(socket);
     stompClient.debug = () => {};
 

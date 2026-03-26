@@ -3,6 +3,11 @@ import { computed, ref, watch } from "vue";
 import { useFileStore } from "@/stores/useFileStore";
 import { useViewStore } from "@/stores/viewStore";
 import { downloadFileAsset } from "@/api/filesApi.js";
+import {
+  getCachedFileThumbnailUrl,
+  getFileThumbnailCacheKey,
+  loadFileThumbnailUrl,
+} from "@/utils/fileThumbnailCache.js";
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "heic", "avif", "apng", "jfif", "tif", "tiff"]);
 const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp"]);
@@ -50,14 +55,18 @@ const fileStore = useFileStore();
 const { viewMode, resolvedLayoutColumns } = useViewStore();
 const brokenPreviewIds = ref([]);
 const brokenThumbnailIds = ref([]);
+const thumbnailSourceByKey = ref({});
+const thumbnailStateByKey = ref({});
 const dragTargetId = ref(null);
 const draggingFileIds = ref([]);
+const downloadingIds = ref([]);
 let refreshListTimerId = null;
 const planCapabilities = computed(() => fileStore.planCapabilities);
 const canCreateShares = computed(() => Boolean(planCapabilities.value?.shareEnabled));
 const canCreateLocks = computed(() => Boolean(planCapabilities.value?.fileLockEnabled));
 
 const selectedIdSet = computed(() => new Set(props.selectedIds.map((id) => String(id))));
+const downloadingIdSet = computed(() => new Set(downloadingIds.value.map((id) => String(id))));
 const visibleFileIds = computed(() => props.files.map((file) => String(file?.id)).filter(Boolean));
 const allVisibleSelected = computed(() =>
   visibleFileIds.value.length > 0 &&
@@ -187,6 +196,106 @@ const getThumbnailUrl = (file) => file?.thumbnailUrl || file?.thumbnailPresigned
 const getContentType = (file) => String(file?.contentType || file?.raw?.contentType || "").toLowerCase();
 const hasBrokenPreview = (file) => brokenPreviewIds.value.includes(String(file?.id));
 const hasBrokenThumbnail = (file) => brokenThumbnailIds.value.includes(String(file?.id));
+const getManagedThumbnailKey = (file) => getFileThumbnailCacheKey(file);
+const getManagedThumbnailState = (file) => {
+  const key = getManagedThumbnailKey(file);
+  return key ? (thumbnailStateByKey.value[key] || "idle") : "idle";
+};
+const getManagedThumbnailUrl = (file) => {
+  const key = getManagedThumbnailKey(file);
+  return key ? (thumbnailSourceByKey.value[key] || "") : "";
+};
+
+const setManagedThumbnailState = (cacheKey, state) => {
+  if (!cacheKey) {
+    return;
+  }
+
+  thumbnailStateByKey.value = {
+    ...thumbnailStateByKey.value,
+    [cacheKey]: state,
+  };
+};
+
+const setManagedThumbnailSource = (cacheKey, sourceUrl) => {
+  if (!cacheKey) {
+    return;
+  }
+
+  thumbnailSourceByKey.value = {
+    ...thumbnailSourceByKey.value,
+    [cacheKey]: sourceUrl,
+  };
+};
+
+const clearManagedThumbnailSource = (file) => {
+  const cacheKey = getManagedThumbnailKey(file);
+  if (!cacheKey || !thumbnailSourceByKey.value[cacheKey]) {
+    return false;
+  }
+
+  const nextSources = { ...thumbnailSourceByKey.value };
+  delete nextSources[cacheKey];
+  thumbnailSourceByKey.value = nextSources;
+  setManagedThumbnailState(cacheKey, "failed");
+  return true;
+};
+
+const shouldUseManagedThumbnail = (file) => {
+  if (!file || file?.type === "folder" || isLocked(file)) {
+    return false;
+  }
+
+  const extension = getFileExtension(file);
+  const contentType = getContentType(file);
+  return (
+    contentType.startsWith("image/") ||
+    contentType.startsWith("video/") ||
+    IMAGE_EXTENSIONS.has(extension) ||
+    VIDEO_EXTENSIONS.has(extension)
+  );
+};
+
+const primeManagedThumbnails = async (files = []) => {
+  const nextSourceMap = {};
+  const nextStateMap = {};
+  const candidates = [];
+
+  for (const file of files) {
+    if (!shouldUseManagedThumbnail(file)) {
+      continue;
+    }
+
+    const cacheKey = getManagedThumbnailKey(file);
+    if (!cacheKey) {
+      continue;
+    }
+
+    const cachedUrl = getCachedFileThumbnailUrl(file);
+    if (cachedUrl) {
+      nextSourceMap[cacheKey] = cachedUrl;
+      nextStateMap[cacheKey] = "ready";
+      continue;
+    }
+
+    nextStateMap[cacheKey] = thumbnailStateByKey.value[cacheKey] === "failed" ? "failed" : "loading";
+    candidates.push({ file, cacheKey });
+  }
+
+  thumbnailSourceByKey.value = nextSourceMap;
+  thumbnailStateByKey.value = nextStateMap;
+
+  await Promise.allSettled(candidates.map(async ({ file, cacheKey }) => {
+    const objectUrl = await loadFileThumbnailUrl(file);
+    if (objectUrl) {
+      setManagedThumbnailSource(cacheKey, objectUrl);
+      setManagedThumbnailState(cacheKey, "ready");
+      return;
+    }
+
+    setManagedThumbnailState(cacheKey, "failed");
+  }));
+};
 
 const markBrokenAsset = (stateRef, file) => {
   const fileId = String(file?.id || "");
@@ -205,18 +314,28 @@ const scheduleAssetRefresh = () => {
   refreshListTimerId = window.setTimeout(async () => {
     refreshListTimerId = null;
     try {
-      await fileStore.fetchFiles();
+      if (fileStore.driveHasLoaded && !fileStore.hasLoaded) {
+        await fileStore.refreshDrivePage();
+      } else {
+        await fileStore.fetchFiles();
+      }
     } catch {
     }
   }, 900);
 };
 
 const handlePreviewAssetError = (file) => {
+  if (clearManagedThumbnailSource(file)) {
+    return;
+  }
   markBrokenAsset(brokenPreviewIds, file);
   scheduleAssetRefresh();
 };
 
 const handleThumbnailAssetError = (file) => {
+  if (clearManagedThumbnailSource(file)) {
+    return;
+  }
   markBrokenAsset(brokenThumbnailIds, file);
   scheduleAssetRefresh();
 };
@@ -224,7 +343,7 @@ const handleThumbnailAssetError = (file) => {
 const isLocked = (file) => Boolean(file?.lockedFile);
 const isImage = (file) => {
   const contentType = getContentType(file);
-  return file?.type !== "folder" && !hasBrokenPreview(file) && Boolean(getPreviewUrl(file)) && (
+  return file?.type !== "folder" && !hasBrokenPreview(file) && (
     contentType.startsWith("image/") || IMAGE_EXTENSIONS.has(getFileExtension(file))
   );
 };
@@ -234,16 +353,60 @@ const isVideo = (file) => {
     contentType.startsWith("video/") || VIDEO_EXTENSIONS.has(getFileExtension(file))
   );
 };
-const hasVideoThumbnail = (file) => isVideo(file) && !hasBrokenThumbnail(file) && Boolean(getThumbnailUrl(file));
+const hasVideoThumbnail = (file) => {
+  if (!isVideo(file) || hasBrokenThumbnail(file)) {
+    return false;
+  }
+
+  const managedThumbnailUrl = getManagedThumbnailUrl(file);
+  if (managedThumbnailUrl) {
+    return true;
+  }
+
+  return getManagedThumbnailState(file) === "failed" && Boolean(getThumbnailUrl(file));
+};
+const getImageCardUrl = (file) => {
+  const managedThumbnailUrl = getManagedThumbnailUrl(file);
+  if (managedThumbnailUrl) {
+    return managedThumbnailUrl;
+  }
+
+  return getManagedThumbnailState(file) === "failed"
+    ? getPreviewUrl(file)
+    : "";
+};
+const getVideoCardUrl = (file) => {
+  const managedThumbnailUrl = getManagedThumbnailUrl(file);
+  if (managedThumbnailUrl) {
+    return managedThumbnailUrl;
+  }
+
+  return getManagedThumbnailState(file) === "failed"
+    ? getThumbnailUrl(file)
+    : "";
+};
 const canDownload = (file) => file?.type !== "folder" && !isLocked(file) && Boolean(getPreviewUrl(file));
+const isDownloading = (file) => downloadingIdSet.value.has(String(file?.id));
 
 const handleDownload = async (file, event) => {
   event?.stopPropagation?.();
+  if (isDownloading(file)) {
+    return;
+  }
+
+  const fileId = String(file?.id || "");
 
   try {
+    if (fileId) {
+      downloadingIds.value = [...downloadingIds.value, fileId];
+    }
     await downloadFileAsset(file);
   } catch (error) {
     window.alert(error?.message || "\uD30C\uC77C\uC744 \uB2E4\uC6B4\uB85C\uB4DC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+  } finally {
+    if (fileId) {
+      downloadingIds.value = downloadingIds.value.filter((id) => id !== fileId);
+    }
   }
 };
 const canDelete = (file) => !props.sharedLibrary && !file?.sharedWithMe && !isLocked(file);
@@ -254,6 +417,14 @@ const canToggleLock = (file) => !props.sharedLibrary && !file?.sharedWithMe && f
 const canSaveShared = (file) => Boolean(file?.sharedWithMe) && file?.type !== "folder" && !isLocked(file);
 const canManageSentShare = (file) => Boolean(props.sharedLibrary && file?.sharedFile && !file?.sharedWithMe && file?.type !== "folder");
 const isMovable = (file) => !props.sharedLibrary && props.deleteMode !== "permanent" && !file?.sharedWithMe && !file?.isTrash && !isLocked(file);
+
+watch(
+  () => props.files,
+  (files) => {
+    void primeManagedThumbnails(files || []);
+  },
+  { immediate: true },
+);
 const isFolderDropTarget = (file) => canManageFolder(file);
 const getDeleteConfirmMessage = (file) => {
   if (file?.sharedFile && !file?.sharedWithMe) {
@@ -672,16 +843,21 @@ const onDropToParentNavigator = async (event) => {
                 </svg>
               </div>
               <img
-                v-else-if="isImage(file)"
-                :src="getPreviewUrl(file)"
+                v-else-if="isImage(file) && Boolean(getImageCardUrl(file))"
+                :src="getImageCardUrl(file)"
                 :alt="getFileName(file)"
                 class="thumb-shell object-cover"
                 loading="lazy"
                 @error="handlePreviewAssetError(file)"
               />
+              <div v-else-if="isImage(file)" class="thumb-shell bg-emerald-50 text-emerald-600">
+                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M4 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm2 2v8l2.5-2.5 2 2L14 9v7H6V6Zm2 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+                </svg>
+              </div>
               <div v-else-if="hasVideoThumbnail(file)" class="thumb-shell overflow-hidden bg-black">
                 <img
-                  :src="getThumbnailUrl(file)"
+                  :src="getVideoCardUrl(file)"
                   :alt="`${getFileName(file)} thumbnail`"
                   class="h-full w-full object-cover"
                   loading="lazy"
@@ -732,9 +908,11 @@ const onDropToParentNavigator = async (event) => {
                   v-if="canDownload(file)"
                   type="button"
                   class="action-button text-blue-600 hover:bg-blue-50"
+                  :class="{ 'cursor-wait opacity-70': isDownloading(file) }"
+                  :disabled="isDownloading(file)"
                   @click="handleDownload(file, $event)"
                 >
-                  {{ "\uB2E4\uC6B4\uB85C\uB4DC" }}
+                  {{ isDownloading(file) ? "\uC900\uBE44 \uC911..." : "\uB2E4\uC6B4\uB85C\uB4DC" }}
                 </button>
                 <button
                   v-if="canSaveShared(file)"
@@ -883,18 +1061,23 @@ const onDropToParentNavigator = async (event) => {
             <path d="M2 6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6Z" />
           </svg>
         </div>
-        <div v-else-if="isImage(file)" class="preview-box file-entry__preview overflow-hidden bg-slate-100" :class="viewMode === 'icon' ? 'file-entry__preview--icon' : 'file-entry__preview--card'">
+        <div v-else-if="isImage(file) && Boolean(getImageCardUrl(file))" class="preview-box file-entry__preview overflow-hidden bg-slate-100" :class="viewMode === 'icon' ? 'file-entry__preview--icon' : 'file-entry__preview--card'">
           <img
-            :src="getPreviewUrl(file)"
+            :src="getImageCardUrl(file)"
             :alt="getFileName(file)"
             class="h-full w-full object-cover"
             loading="lazy"
             @error="handlePreviewAssetError(file)"
           />
         </div>
+        <div v-else-if="isImage(file)" class="preview-box file-entry__preview flex items-center justify-center bg-emerald-50 text-emerald-600" :class="viewMode === 'icon' ? 'file-entry__preview--icon' : 'file-entry__preview--card'">
+          <svg :class="viewMode === 'icon' ? 'h-8 w-8' : 'h-10 w-10'" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M4 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Zm2 2v8l2.5-2.5 2 2L14 9v7H6V6Zm2 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+          </svg>
+        </div>
         <div v-else-if="hasVideoThumbnail(file)" class="preview-box file-entry__preview overflow-hidden bg-black" :class="viewMode === 'icon' ? 'file-entry__preview--icon' : 'file-entry__preview--card'">
           <img
-            :src="getThumbnailUrl(file)"
+            :src="getVideoCardUrl(file)"
             :alt="`${getFileName(file)} thumbnail`"
             class="h-full w-full object-cover"
             loading="lazy"
@@ -948,9 +1131,11 @@ const onDropToParentNavigator = async (event) => {
               v-if="canDownload(file)"
               type="button"
               class="chip-button bg-blue-50 text-blue-600 hover:bg-blue-100"
+              :class="{ 'cursor-wait opacity-70': isDownloading(file) }"
+              :disabled="isDownloading(file)"
               @click="handleDownload(file, $event)"
             >
-              {{ "\uB2E4\uC6B4\uB85C\uB4DC" }}
+              {{ isDownloading(file) ? "\uC900\uBE44 \uC911..." : "\uB2E4\uC6B4\uB85C\uB4DC" }}
             </button>
             <button
               v-if="canSaveShared(file)"
@@ -1287,5 +1472,3 @@ const onDropToParentNavigator = async (event) => {
   }
 }
 </style>
-
-

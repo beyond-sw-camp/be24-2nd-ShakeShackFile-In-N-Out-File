@@ -30,7 +30,7 @@ export async function initEditor(holderElement, room, initialData, idx, initialT
   let currentIdx = idx ?? null
 
   if (!isCollaborative) {
-    provider = new WebsocketProvider('ws://localhost:1234', room, ydoc)
+    provider = new WebsocketProvider('wss://www.fileinnout.kro.kr/wss', room, ydoc)
   }
 
   const yMap         = ydoc.getMap('workspace_data')

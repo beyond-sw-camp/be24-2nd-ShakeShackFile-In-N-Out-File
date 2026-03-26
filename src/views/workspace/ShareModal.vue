@@ -27,7 +27,7 @@ const isSharing = ref(false);
 const isSavingStatus = ref(false);
 
 const inviteUrl = computed(() => (
-  `http://localhost:5173/workspace/invite?uuid=${props.uuid || ""}`
+  `https://www.fileinnout.kro.kr/workspace/invite?uuid=${props.uuid || ""}`
 ));
 
 const resetShareState = () => {

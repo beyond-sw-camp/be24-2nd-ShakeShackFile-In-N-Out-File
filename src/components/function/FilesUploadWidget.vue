@@ -875,7 +875,11 @@ async function handleUpload(event, uploadTypeLabel) {
     }
 
     if (successList.length > 0) {
-      await fileStore.fetchFiles().catch(() => {});
+      if (fileStore.driveHasLoaded && !fileStore.hasLoaded) {
+        await fileStore.refreshDrivePage().catch(() => {});
+      } else {
+        await fileStore.fetchFiles().catch(() => {});
+      }
       emit("upload-complete", successList);
     }
 
