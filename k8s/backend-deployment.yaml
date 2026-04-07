@@ -23,7 +23,7 @@ spec:
       nodeName: worker03
       containers:
       - name: backend
-        image: lumisia/waffle-app:v3
+        image: lumisia/backend:v3
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080

@@ -31,8 +31,38 @@ const BACKEND_PROTOCOL = String(process.env.BACKEND_PROTOCOL || 'http')
   .startsWith('https')
   ? 'https:'
   : 'http:'
-const BACKEND_HOST = process.env.BACKEND_HOST || 'backend-app'
-const BACKEND_PORT = Number.parseInt(process.env.BACKEND_PORT || '8080', 10)
+
+const findKubernetesServiceEnv = (suffix) =>
+  Object.entries(process.env).find(
+    ([name, value]) => name.endsWith(suffix) && String(value || '').trim(),
+  )?.[1]
+
+const resolveBackendHost = () =>
+  String(
+    process.env.BACKEND_HOST ||
+    findKubernetesServiceEnv('_BACKEND_SERVICE_HOST') ||
+    'backend-app',
+  ).trim()
+
+const resolveBackendPort = () => {
+  const explicitPort = Number.parseInt(String(process.env.BACKEND_PORT || '').trim(), 10)
+  if (Number.isFinite(explicitPort) && explicitPort > 0) {
+    return explicitPort
+  }
+
+  const servicePort = Number.parseInt(
+    String(findKubernetesServiceEnv('_BACKEND_SERVICE_PORT') || '').trim(),
+    10,
+  )
+  if (Number.isFinite(servicePort) && servicePort > 0) {
+    return servicePort
+  }
+
+  return 8080
+}
+
+const BACKEND_HOST = resolveBackendHost()
+const BACKEND_PORT = resolveBackendPort()
 const BACKEND_UPSTREAM = `${BACKEND_HOST}:${BACKEND_PORT}`
 const BACKEND_CLIENT = BACKEND_PROTOCOL === 'https:' ? https : http
 
@@ -586,6 +616,7 @@ server.on('upgrade', (request, socket, head) => {
 
 void subscribeToRedisChannels()
 
+console.log(`[REALTIME] backend upstream ${BACKEND_UPSTREAM}`)
 server.listen(PORT, HOST, () => {
   console.log(`WaffleBear realtime gateway listening on ${HOST}:${PORT}`)
 })

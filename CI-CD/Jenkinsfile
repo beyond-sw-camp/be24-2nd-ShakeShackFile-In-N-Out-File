@@ -60,6 +60,7 @@ spec:
     DOCKERFILE_PATH = "${env.WORKSPACE}/CI-CD/Dockerfile"
     FRONTEND_IMAGE_NAME = 'lumisia/frontend'
     WEBSOCKET_IMAGE_NAME = 'lumisia/websocket-server'
+    BACKEND_IMAGE_NAME = 'lumisia/backend'
     IMAGE_TAG = "v${env.BUILD_NUMBER}"
   }
 

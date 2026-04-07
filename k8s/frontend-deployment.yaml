@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: lumisia/waffle-frontend:v2
+        image: lumisia/frontend:v2
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 80

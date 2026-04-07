@@ -29,6 +29,10 @@ spec:
           value: redis-service
         - name: REDIS_PORT
           value: "6379"
+        - name: BACKEND_HOST
+          value: backend-service
+        - name: BACKEND_PORT
+          value: "8080"
         - name: YJS_REDIS_PREFIX
           value: "wafflebear:yjs"
         - name: YJS_SNAPSHOT_SAVE_DELAY_MS
