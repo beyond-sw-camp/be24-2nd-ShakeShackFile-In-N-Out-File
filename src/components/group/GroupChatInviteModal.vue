@@ -3,7 +3,6 @@ import { computed, ref, watch } from "vue";
 import api from "@/plugins/axiosinterceptor.js";
 import { fetchChatShareOverview, shareChatsWithTargets } from "@/api/groupApi";
 import GroupRecipientSelector from "@/components/group/GroupRecipientSelector.vue";
-import { useAuthStore } from "@/stores/useAuthStore";
 
 const props = defineProps({
   isOpen: {
@@ -25,7 +24,6 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close", "completed"]);
-const authStore = useAuthStore();
 
 const overview = ref(null);
 const isOverviewLoading = ref(false);
@@ -37,33 +35,6 @@ const emailInput = ref("");
 const pendingInvites = ref([]);
 const errorMessage = ref("");
 const successMessage = ref("");
-
-const getRequestErrorMessage = (error, fallbackMessage) => (
-  error?.response?.data?.message ||
-  error?.response?.data?.error ||
-  error?.message ||
-  fallbackMessage
-);
-
-const extractCreatedRoomId = (response) => {
-  const candidates = [
-    response?.data?.result?.roomId,
-    response?.data?.result?.id,
-    response?.data?.result,
-    response?.data?.roomId,
-    response?.data?.id,
-    response?.data,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = Number(candidate);
-    if (Number.isFinite(normalized) && normalized > 0) {
-      return normalized;
-    }
-  }
-
-  return null;
-};
 
 const isCreateMode = computed(() => props.mode === "create");
 const modalTitle = computed(() => (
@@ -90,20 +61,12 @@ const loadOverview = async () => {
   isOverviewLoading.value = true;
   errorMessage.value = "";
 
-  if (!authStore.token) {
-    overview.value = null;
-    errorMessage.value = "Login information is unavailable. Please sign in again.";
-    isOverviewLoading.value = false;
-    return;
-  }
-
   try {
     overview.value = await fetchChatShareOverview();
   } catch (error) {
     overview.value = null;
     errorMessage.value =
       error?.response?.data?.message ||
-      error?.response?.data?.error ||
       error?.message ||
       "공유 가능한 사용자와 그룹을 불러오지 못했습니다.";
   } finally {
@@ -159,10 +122,7 @@ const submitInvite = async () => {
         title,
         participantsEmail: [],
       });
-      targetRoomId = extractCreatedRoomId(createResponse);
-      if (!Number.isFinite(targetRoomId)) {
-        throw new Error("Unable to resolve the created chat room ID.");
-      }
+      targetRoomId = Number(createResponse?.data);
     }
 
     const result = await shareChatsWithTargets({
@@ -191,7 +151,6 @@ const submitInvite = async () => {
   } catch (error) {
     errorMessage.value =
       error?.response?.data?.message ||
-      error?.response?.data?.error ||
       error?.message ||
       (isCreateMode.value
         ? "채팅방을 만들지 못했습니다."

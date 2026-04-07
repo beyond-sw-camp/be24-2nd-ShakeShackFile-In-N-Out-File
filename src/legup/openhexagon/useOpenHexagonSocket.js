@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import SockJS from 'sockjs-client'
 import Stomp from 'stompjs'
 import { api } from '@/plugins/axiosinterceptor'
+import { apiPath } from '@/utils/backendUrl'
 
 const createEmptyLobby = () => ({
   onlineCount: 0,
@@ -90,7 +91,7 @@ export function useOpenHexagonSocket(authStore) {
     connectionState.value = 'connecting'
     socketError.value = ''
 
-    const socket = new SockJS('https://api.fileinnout.kro.kr/ws-stomp')
+    const socket = new SockJS(apiPath('/ws-stomp'))
     stompClient = Stomp.over(socket)
     stompClient.debug = () => {}
 

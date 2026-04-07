@@ -4,6 +4,7 @@ import api from '@/plugins/axiosinterceptor.js'
 import { useAuthStore } from '@/stores/useAuthStore'
 import SockJS from 'sockjs-client'
 import Stomp from 'stompjs'
+import { apiPath } from '@/utils/backendUrl'
 
 const props = defineProps({ room: Object, currentUser: Object })
 const emit = defineEmits(['back', 'open-invite', 'room-preview-update'])
@@ -248,7 +249,7 @@ const initObserver = () => {
 const initChat = () => {
   if (stompClient) stompClient.disconnect()
 
-  const socket = new SockJS('https://api.fileinnout.kro.kr/ws-stomp')
+  const socket = new SockJS(apiPath('/ws-stomp'))
   stompClient = Stomp.over(socket)
   stompClient.debug = null // 디버그 로그 제거
 

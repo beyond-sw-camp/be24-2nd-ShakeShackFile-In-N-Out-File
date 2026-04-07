@@ -1,12 +1,13 @@
 <script setup>
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { downloadFileAsset } from '@/api/filesApi'
 import postApi from '@/api/postApi'
 import { initEditor } from '@/components/workspace/editor'
 import { useAuthStore } from '@/stores/useAuthStore'
 import SockJS from 'sockjs-client'
 import Stomp from 'stompjs'
+import { apiPath } from '@/utils/backendUrl'
 
 const route     = useRoute()
 const router    = useRouter()
@@ -17,6 +18,11 @@ const editorApi       = ref(null)
 const title           = ref('')
 const isEditorLoading = ref(false)
 const showUserList    = ref(false)
+const titleDirty      = ref(false)
+const allowRouteLeaveOnce  = ref(false)
+const allowWindowUnloadOnce = ref(false)
+
+const LEAVE_WARNING_MESSAGE = '현재 페이지를 나가시겠습니까? 저장하지 않은 페이지는 모두 사라집니다.'
 
 const workspaceId             = ref(null)
 const workspaceAccessRole     = ref('ADMIN')
@@ -35,6 +41,9 @@ const openRoleDropdownId = ref(null)
 
 // ─── 계산 속성 ────────────────────────────────────────────────────────────────
 const isValid = computed(() => title.value.trim().length > 0)
+const hasUnsavedChanges = computed(() =>
+  titleDirty.value || Boolean(editorApi.value?.isDirtyRef?.value),
+)
 
 const remoteCursors = computed(() => editorApi.value?.remoteCursorsRef?.value || {})
 const activeUsers   = computed(() => editorApi.value?.activeUsersRef?.value   || [])
@@ -173,7 +182,7 @@ const connectWorkspaceAssetRealtime = (targetWorkspaceId = workspaceId.value) =>
 
   disconnectWorkspaceAssetRealtime()
 
-  const socket      = new SockJS('https://api.fileinnout.kro.kr/ws-stomp')
+  const socket      = new SockJS(apiPath('/ws-stomp'))
   const stompClient = Stomp.over(socket)
   stompClient.debug = null
 
@@ -233,9 +242,18 @@ const handleSave = async () => {
   const response         = await editorApi.value.savePost()
   const savedWorkspaceId = response?.result?.body?.idx ?? response?.data?.idx ?? response?.idx ?? null
   if (!savedWorkspaceId) return
+  titleDirty.value = false
+  editorApi.value?.markSaved?.()
   workspaceId.value         = Number(savedWorkspaceId)
   workspaceAccessRole.value = 'ADMIN'
   router.push(`/workspace/read/${savedWorkspaceId}`)
+}
+
+const handleTitleInput = (event) => {
+  const nextTitle = event?.target?.value ?? ''
+  title.value = nextTitle
+  titleDirty.value = true
+  editorApi.value?.updateTitleFromLocal?.(nextTitle)
 }
 
 // ─── 권한 변경 (드롭다운) ────────────────────────────────────────────────────
@@ -266,9 +284,11 @@ const handleSseRoleChanged = (evt) => {
 
   if (newRole === 'KICKED') {
     alert('해당 워크스페이스에서 추방되었습니다.')
+    allowRouteLeaveOnce.value = true
     router.push('/workspace')
   } else {
     // 권한이 변경되면 페이지 새로고침으로 최신 권한 반영
+    allowWindowUnloadOnce.value = true
     window.location.reload()
   }
 }
@@ -279,10 +299,39 @@ const closeRoleDropdown = () => {
 }
 
 // ─── 워처 ─────────────────────────────────────────────────────────────────────
-watch(title, (newVal) => {
-  if (editorApi.value?.updateTitleFromLocal) {
-    editorApi.value.updateTitleFromLocal(newVal)
+const handleBeforeUnload = (event) => {
+  if (allowWindowUnloadOnce.value) {
+    allowWindowUnloadOnce.value = false
+    return
   }
+
+  if (!hasUnsavedChanges.value) return
+
+  event.preventDefault()
+  event.returnValue = LEAVE_WARNING_MESSAGE
+  return LEAVE_WARNING_MESSAGE
+}
+
+onBeforeRouteLeave(() => {
+  if (allowRouteLeaveOnce.value) {
+    allowRouteLeaveOnce.value = false
+    return true
+  }
+
+  if (!hasUnsavedChanges.value) return true
+
+  return window.confirm(LEAVE_WARNING_MESSAGE)
+})
+
+onBeforeRouteUpdate(() => {
+  if (allowRouteLeaveOnce.value) {
+    allowRouteLeaveOnce.value = false
+    return true
+  }
+
+  if (!hasUnsavedChanges.value) return true
+
+  return window.confirm(LEAVE_WARNING_MESSAGE)
 })
 
 watch(workspaceAssets, (assets) => {
@@ -304,7 +353,24 @@ const prepareData = async () => {
     const data = await postApi.getPost(id)
     return data
   } catch (error) {
-    return { idx: Number(id), title: '', contents: '', type: false, status: 'Private', uuid: '', accessRole: 'READ' }
+    const normalizedId = Number(id)
+    const isReadonlyRoute =
+      route.name === 'workspace_readonly' ||
+      String(route.path || '').startsWith('/workspace/readonly/')
+    const isCollaborativeRoute =
+      isReadonlyRoute ||
+      route.name === 'workspace_read' ||
+      String(route.path || '').startsWith('/workspace/read/')
+
+    return {
+      idx: Number.isFinite(normalizedId) ? normalizedId : null,
+      title: '',
+      contents: '',
+      type: isCollaborativeRoute,
+      status: isCollaborativeRoute ? 'Public' : 'Private',
+      uuid: '',
+      accessRole: isReadonlyRoute ? 'READ' : isCollaborativeRoute ? 'WRITE' : 'ADMIN',
+    }
   }
 }
 
@@ -428,10 +494,12 @@ const setupEditor = async () => {
   if (!editorHolder.value) return
 
   isEditorLoading.value = true
+  allowRouteLeaveOnce.value = false
+  allowWindowUnloadOnce.value = false
   const data = await prepareData()
   if (setupId !== currentSetupId) return
 
-  // ✅ 기존 에디터 먼저 destroy → title watch가 updateTitleFromLocal 호출 방지
+  // 기존 에디터를 먼저 정리하고 새 editor를 준비한다.
   if (editorApi.value) {
     try {
       if (editorApi.value.editor?.isReady) await editorApi.value.editor.isReady
@@ -443,6 +511,7 @@ const setupEditor = async () => {
   }
 
   title.value               = data.title || ''
+  titleDirty.value          = false
   workspaceId.value         = data.idx ? Number(data.idx) : null
   workspaceAccessRole.value = data.accessRole || data.level || 'ADMIN'
 
@@ -480,6 +549,7 @@ const setupEditor = async () => {
 
     editorApi.value = markRaw(newEditorApi)
     editorApi.value?.bindTitleRef?.(title)
+    editorApi.value?.markSaved?.()
   } catch (error) {
     console.error('에디터 초기화 실패:', error)
   } finally {
@@ -513,6 +583,7 @@ onMounted(async () => {
 
   // ✅ SSE role-changed 리스너 등록
   window.addEventListener('sse-role-changed', handleSseRoleChanged)
+  window.addEventListener('beforeunload', handleBeforeUnload)
   // 드롭다운 외부 클릭 닫기
   window.addEventListener('click', closeRoleDropdown)
 })
@@ -534,6 +605,7 @@ onBeforeUnmount(async () => {
 
   // ✅ SSE role-changed 리스너 해제
   window.removeEventListener('sse-role-changed', handleSseRoleChanged)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('click', closeRoleDropdown)
 
   if (editorApi.value?.destroy) {
@@ -547,7 +619,7 @@ onBeforeUnmount(async () => {
   <div class="workspace-layout">
     <div class="editor-shell">
       <div class="editor-header">
-        <input v-model="title" placeholder="제목 없음" class="title-input" />
+        <input :value="title" placeholder="제목 없음" class="title-input" @input="handleTitleInput" />
 
         <div class="user-presence-wrapper">
           <button class="presence-toggle-btn" @click.stop="showUserList = !showUserList">

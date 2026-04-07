@@ -1,6 +1,5 @@
 import { EventSourcePolyfill } from 'event-source-polyfill'
-
-const BASE_URL = 'https://api.fileinnout.kro.kr'
+import { apiPath } from '@/utils/backendUrl'
 
 const SSE_OPTIONS = {
   heartbeatTimeout: 3600000,
@@ -13,12 +12,8 @@ const getAuthHeaders = () => {
 
 const isFatalError = (eventSource) => eventSource.readyState === EventSourcePolyfill.CLOSED
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 헤더 알림용 SSE
-// ─────────────────────────────────────────────────────────────────────────────
-
 const connectNotificationSse = ({ onNotification, onNewMessage, onError } = {}) => {
-  const eventSource = new EventSourcePolyfill(`${BASE_URL}/api/sse/connect`, {
+  const eventSource = new EventSourcePolyfill(apiPath('/sse/connect'), {
     headers: getAuthHeaders(),
     withCredentials: true,
     ...SSE_OPTIONS,
@@ -29,7 +24,7 @@ const connectNotificationSse = ({ onNotification, onNewMessage, onError } = {}) 
       const payload = JSON.parse(e.data)
       if (onNotification) onNotification(payload)
     } catch (err) {
-      console.error('[SSE:notification] 데이터 파싱 오류:', err)
+      console.error('[SSE:notification] 이벤트 파싱 오류:', err)
     }
   })
 
@@ -38,7 +33,7 @@ const connectNotificationSse = ({ onNotification, onNewMessage, onError } = {}) 
       const payload = JSON.parse(e.data)
       if (onNewMessage) onNewMessage(payload)
     } catch (err) {
-      console.error('[SSE:new-message] 데이터 파싱 오류:', err)
+      console.error('[SSE:new-message] 이벤트 파싱 오류:', err)
     }
   })
 
@@ -47,24 +42,22 @@ const connectNotificationSse = ({ onNotification, onNewMessage, onError } = {}) 
       const payload = JSON.parse(e.data)
       window.dispatchEvent(new CustomEvent('sse-title-updated', { detail: payload }))
     } catch (err) {
-      console.error('[SSE:title-updated] 데이터 파싱 오류:', err)
+      console.error('[SSE:title-updated] 이벤트 파싱 오류:', err)
     }
   })
 
-  // ✅ 역할 변경 / 추방 이벤트
   eventSource.addEventListener('role-changed', (e) => {
     try {
-      const payload = JSON.parse(e.data) // { postIdx, newRole }
-      console.log('[SSE] role-changed 수신:', payload)
+      const payload = JSON.parse(e.data)
       window.dispatchEvent(new CustomEvent('sse-role-changed', { detail: payload }))
     } catch (err) {
-      console.error('[SSE:role-changed] 데이터 파싱 오류:', err)
+      console.error('[SSE:role-changed] 이벤트 파싱 오류:', err)
     }
   })
 
   eventSource.onerror = (error) => {
     if (!isFatalError(eventSource)) return
-    console.error('[SSE] 알림 연결 끊김 (fatal):', error)
+    console.error('[SSE] 연결 오류 (fatal):', error)
     eventSource.close()
     if (onError) onError(error)
   }
@@ -72,12 +65,8 @@ const connectNotificationSse = ({ onNotification, onNewMessage, onError } = {}) 
   return eventSource
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 워크스페이스용 SSE
-// ─────────────────────────────────────────────────────────────────────────────
-
 const connectWorkspaceSse = ({ userId, onConnect, onTitleUpdated, onError } = {}) => {
-  const eventSource = new EventSourcePolyfill(`${BASE_URL}/api/sse/connect`, {
+  const eventSource = new EventSourcePolyfill(apiPath('/sse/connect'), {
     headers: getAuthHeaders(),
     withCredentials: true,
     ...SSE_OPTIONS,
@@ -91,28 +80,25 @@ const connectWorkspaceSse = ({ userId, onConnect, onTitleUpdated, onError } = {}
   eventSource.addEventListener('title-updated', (event) => {
     try {
       const updatedData = JSON.parse(event.data)
-      console.log('[SSE] 타이틀 업데이트 수신:', updatedData)
       window.dispatchEvent(new CustomEvent('sse-title-updated', { detail: updatedData }))
       if (onTitleUpdated) onTitleUpdated(updatedData)
     } catch (e) {
-      console.error('[SSE:title-updated] 데이터 파싱 오류:', e)
+      console.error('[SSE:title-updated] 이벤트 파싱 오류:', e)
     }
   })
 
-  // ✅ 역할 변경 / 추방 이벤트
   eventSource.addEventListener('role-changed', (e) => {
     try {
       const payload = JSON.parse(e.data)
-      console.log('[SSE] role-changed 수신:', payload)
       window.dispatchEvent(new CustomEvent('sse-role-changed', { detail: payload }))
     } catch (err) {
-      console.error('[SSE:role-changed] 데이터 파싱 오류:', err)
+      console.error('[SSE:role-changed] 이벤트 파싱 오류:', err)
     }
   })
 
   eventSource.onerror = (error) => {
     if (!isFatalError(eventSource)) return
-    console.error('[SSE] 워크스페이스 연결 끊김 (fatal):', error)
+    console.error('[SSE] 워크스페이스 연결 오류 (fatal):', error)
     eventSource.close()
     if (onError) onError(error)
   }
@@ -120,12 +106,10 @@ const connectWorkspaceSse = ({ userId, onConnect, onTitleUpdated, onError } = {}
   return eventSource
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 const closeSse = (eventSource) => {
   if (eventSource && typeof eventSource.close === 'function') {
     eventSource.close()
-    console.log('[SSE] 연결이 정상적으로 종료되었습니다.')
+    console.log('[SSE] 연결을 정상적으로 종료했습니다.')
   }
 }
 

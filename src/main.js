@@ -6,16 +6,10 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import router from './router'
-import { useAuthStore } from './stores/useAuthStore'
 
 const app = createApp(App)
-const pinia = createPinia()
 
-app.use(pinia)
-
-// Restore persisted auth state before mount to reduce early 401 requests.
-useAuthStore(pinia).checkLogin()
-
+app.use(createPinia())
 app.use(router)
 
 // 서비스 워커 등록

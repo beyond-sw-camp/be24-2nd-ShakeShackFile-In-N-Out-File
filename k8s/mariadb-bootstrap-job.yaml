@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mariadb-bootstrap
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: mariadb-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: mariadb-bootstrap
+        image: mariadb:11.4
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: backend-config
+        env:
+        - name: MARIADB_DATABASE
+          value: web
+        command:
+        - sh
+        - -ec
+        - |
+          until mariadb-admin ping -h mariadb -uroot -p"$DB_PASS" --silent; do
+            echo "waiting for mariadb"
+            sleep 3
+          done
+
+          mariadb -h mariadb -uroot -p"$DB_PASS" -e "CREATE DATABASE IF NOT EXISTS ${MARIADB_DATABASE};"
+          mariadb -h mariadb -uroot -p"$DB_PASS" -e "CREATE USER IF NOT EXISTS '${DB_ID}'@'%' IDENTIFIED BY '${DB_PASS}';"
+          mariadb -h mariadb -uroot -p"$DB_PASS" -e "ALTER USER '${DB_ID}'@'%' IDENTIFIED BY '${DB_PASS}';"
+          mariadb -h mariadb -uroot -p"$DB_PASS" -e "GRANT ALL PRIVILEGES ON ${MARIADB_DATABASE}.* TO '${DB_ID}'@'%';"
+          mariadb -h mariadb -uroot -p"$DB_PASS" -e "FLUSH PRIVILEGES;"
