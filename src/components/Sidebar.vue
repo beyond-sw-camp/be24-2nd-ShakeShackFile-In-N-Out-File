@@ -409,7 +409,7 @@ const handleAction = async (action, idx) => {
               active-class="!bg-blue-500/10 !text-blue-600 !font-bold dark:!bg-blue-400/20 dark:!text-blue-400"
             >
               <i class="fa-solid fa-user-shield w-5 text-center flex-shrink-0 text-lg"></i>
-              <span>판리자 페이지</span>
+              <span>판리자 페이s지</span>
             </RouterLink>
             <p class="text-xs text-[var(--text-muted)] mb-1">{{ storageUsageText }}</p>
             <p v-if="storageSummary" class="text-[11px] text-[var(--text-muted)] mb-4">{{ storageSummary.planLabel }} 플랜 · 휴지통 포함 {{ storageSummary.usagePercent }}%</p>
