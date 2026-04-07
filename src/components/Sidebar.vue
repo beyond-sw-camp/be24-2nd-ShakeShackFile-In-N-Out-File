@@ -394,7 +394,7 @@ const handleAction = async (action, idx) => {
           <div class="p-3 pt-2">
             <RouterLink :to="{ name: 'storage' }" class="flex items-center gap-3.5 text-[var(--text-secondary)] mb-3 transition-all duration-200 hover:text-[var(--text-main)] no-underline">
               <i class="fa-solid fa-cloud w-5 text-center flex-shrink-0 text-lg"></i>
-              <span class="text-sm">저장용량</span>
+              <span class="text-sm">저장용 량</span>
             </RouterLink>
             <div class="w-full bg-[var(--bg-input)] rounded-full h-1.5 mb-2 overflow-hidden">
               <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300" :style="{ width: storageUsageWidth }"></div>
