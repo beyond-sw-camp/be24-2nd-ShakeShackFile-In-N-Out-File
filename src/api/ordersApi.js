@@ -9,14 +9,14 @@ const extractObjectResult = (responseData) => {
 };
 
 export async function createOrder(productCode) {
-  const response = await api.post("/api/orders", {
+  const response = await api.post("/orders", {
     productCode,
   });
   return extractObjectResult(response?.data);
 }
 
 export async function verifyOrder(paymentId, orderId) {
-  const response = await api.post("/api/orders/verify", {
+  const response = await api.post("/orders/verify", {
     paymentId,
     orderId,
   });

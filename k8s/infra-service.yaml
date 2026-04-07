@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-deployment
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.4-alpine
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 6379
+        args:
+        - --appendonly
+        - "yes"
+        - --save
+        - "60"
+        - "1"
+        - --maxmemory
+        - "768mb"
+        - --maxmemory-policy
+        - allkeys-lru
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli -h 127.0.0.1 ping
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli -h 127.0.0.1 ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli -h 127.0.0.1 ping
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 5
+        resources:
+          requests:
+            cpu: "300m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+  - name: redis
+    protocol: TCP
+    port: 6379
+    targetPort: 6379

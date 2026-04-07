@@ -1,0 +1,64 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: websocket-server-deployment
+  labels:
+    app: websocket-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: websocket-server
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: websocket-server
+    spec:
+      containers:
+      - name: websocket-server
+        image: lumisia/websocket-server:v2
+        imagePullPolicy: Always
+        env:
+        - name: PORT
+          value: "1234"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: REDIS_HOST
+          value: redis-service
+        - name: REDIS_PORT
+          value: "6379"
+        - name: YJS_REDIS_PREFIX
+          value: "wafflebear:yjs"
+        - name: YJS_SNAPSHOT_SAVE_DELAY_MS
+          value: "150"
+        ports:
+        - name: ws
+          containerPort: 1234
+        startupProbe:
+          tcpSocket:
+            port: 1234
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 30
+        readinessProbe:
+          tcpSocket:
+            port: 1234
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: 1234
+          initialDelaySeconds: 20
+          periodSeconds: 20
+          timeoutSeconds: 2
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
