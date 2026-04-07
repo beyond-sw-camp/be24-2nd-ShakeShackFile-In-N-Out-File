@@ -7,7 +7,7 @@ const fileStore = useFileStore();
 
 <template>
   <BaseFileView
-    title="홈"
+    title="12홈"
     :files="fileStore.driveFiles"
     :show-folder-navigation="true"
     @delete="fileStore.moveToTrash"
