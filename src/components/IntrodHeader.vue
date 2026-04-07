@@ -22,7 +22,7 @@ const toggleProfileMenu = () => {
 };
 
 const handleLogout = async () => {
-  if (confirm("로그아웃 하시겠습니까?")) {
+  if (confirm("로그아웃 안하시겠습니까?")) {
     await authStore.logout();
     router.push('/login');
   }

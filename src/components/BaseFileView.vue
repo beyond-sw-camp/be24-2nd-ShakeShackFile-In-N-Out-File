@@ -14,7 +14,7 @@ import {
   useHeaderSearchStore,
 } from "@/stores/useHeaderSearchStore";
 
-const FILE_ROOT_LABEL = "홈";
+const FILE_ROOT_LABEL = "홈브루";
 
 const props = defineProps({
   title: { type: String, default: "" },

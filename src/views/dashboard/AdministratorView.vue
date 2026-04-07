@@ -551,7 +551,7 @@ onMounted(() => {
         :disabled="isLoading || isStorageLoading || isUpdating || isCapacitySaving"
         @click="loadAll"
       >
-        새로고침
+        새로안고침
       </button>
     </div>
 
