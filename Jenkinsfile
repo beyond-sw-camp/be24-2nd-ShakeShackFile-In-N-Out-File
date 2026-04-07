@@ -89,10 +89,10 @@ spec:
 
             TARGET_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
             CURRENT_NAMESPACE="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || true)"
-            TARGET_NS="${K8S_NAMESPACE:-${CURRENT_NAMESPACE}}"
-            TARGET_KIND="${K8S_RESOURCE_KIND}"
-            TARGET_NAME="${K8S_RESOURCE_NAME}"
-            TARGET_CONTAINER="${K8S_CONTAINER}"
+            TARGET_NS="${K8S_NAMESPACE:-${CURRENT_NAMESPACE:-helm-service}}"
+            TARGET_KIND="${K8S_RESOURCE_KIND:-rollout}"
+            TARGET_NAME="${K8S_RESOURCE_NAME:-waffle-release-wafflebear-frontend}"
+            TARGET_CONTAINER="${K8S_CONTAINER:-frontend}"
 
             if [ -z "${TARGET_NS}" ] || [ -z "${TARGET_NAME}" ] || [ -z "${TARGET_CONTAINER}" ]; then
               echo "K8S_NAMESPACE, K8S_RESOURCE_NAME, and K8S_CONTAINER must be set."
