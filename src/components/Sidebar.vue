@@ -424,7 +424,7 @@ const handleAction = async (action, idx) => {
       @click="toggleSidebar"
       class="sidebar-toggle absolute top-4 z-50 flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--bg-elevated)] text-[var(--text-main)] shadow-lg transition-all duration-300 hover:bg-[var(--bg-input)]"
       :style="sidebarToggleStyle"
-      :title="isSidebarOpen ? '사이드바 숨기기' : '사이드바 보이기'"
+      :title="isSidebarOpen ? '사이드바 숨기키키기' : '사이드바 보이기'"
     >
       <i class="fas transition-transform duration-300" :class="isSidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
     </button>

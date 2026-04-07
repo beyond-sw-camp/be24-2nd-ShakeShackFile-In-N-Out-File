@@ -42,9 +42,10 @@ spec:
   }
 
   parameters {
-    string(name: 'K8S_NAMESPACE', defaultValue: '', description: 'Target namespace. Leave blank to auto-detect.')
-    string(name: 'K8S_DEPLOYMENT', defaultValue: '', description: 'Target deployment name. Leave blank to auto-detect.')
-    string(name: 'K8S_CONTAINER', defaultValue: '', description: 'Target container name inside the deployment. Leave blank to auto-detect.')
+    string(name: 'K8S_NAMESPACE', defaultValue: 'helm-service', description: 'Target namespace.')
+    choice(name: 'K8S_RESOURCE_KIND', choices: ['rollout', 'deployment'], description: 'Workload kind to update.')
+    string(name: 'K8S_RESOURCE_NAME', defaultValue: 'waffle-release-wafflebear-frontend', description: 'Target workload name.')
+    string(name: 'K8S_CONTAINER', defaultValue: 'frontend', description: 'Target container name inside the workload.')
   }
 
   environment {
@@ -88,83 +89,50 @@ spec:
 
             TARGET_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
             CURRENT_NAMESPACE="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || true)"
+            TARGET_NS="${K8S_NAMESPACE:-${CURRENT_NAMESPACE}}"
+            TARGET_KIND="${K8S_RESOURCE_KIND}"
+            TARGET_NAME="${K8S_RESOURCE_NAME}"
+            TARGET_CONTAINER="${K8S_CONTAINER}"
 
-            matches_image() {
-              case "$1" in
-                "${IMAGE_NAME}"|"${IMAGE_NAME}:"*|"docker.io/${IMAGE_NAME}"|"docker.io/${IMAGE_NAME}:"*|"index.docker.io/${IMAGE_NAME}"|"index.docker.io/${IMAGE_NAME}:"*)
-                  return 0
-                  ;;
-                *)
-                  return 1
-                  ;;
-              esac
-            }
-
-            find_target() {
-              SCOPE_ARGS="$1"
-
-              kubectl get deployment ${SCOPE_ARGS} -o jsonpath='{range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{","}{end}{"\\n"}{end}' \
-              | while IFS='|' read -r ns deploy containers; do
-                  [ -n "$ns" ] || continue
-                  OLDIFS="$IFS"
-                  IFS=','
-                  for pair in $containers; do
-                    [ -n "$pair" ] || continue
-                    cname="${pair%%=*}"
-                    cimage="${pair#*=}"
-                    if matches_image "$cimage"; then
-                      printf '%s|%s|%s\\n' "$ns" "$deploy" "$cname"
-                    fi
-                  done
-                  IFS="$OLDIFS"
-                done
-            }
-
-            if [ -n "${K8S_DEPLOYMENT}" ] && [ -n "${K8S_CONTAINER}" ]; then
-              TARGET_NS="${K8S_NAMESPACE:-${CURRENT_NAMESPACE}}"
-              TARGET_DEPLOY="${K8S_DEPLOYMENT}"
-              TARGET_CONTAINER="${K8S_CONTAINER}"
-            else
-              TARGET_SCAN_NAMESPACE="${K8S_NAMESPACE:-${CURRENT_NAMESPACE}}"
-
-              if [ -z "${TARGET_SCAN_NAMESPACE}" ]; then
-                echo "Could not determine the namespace for deployment lookup."
-                echo "Set K8S_NAMESPACE, or run Jenkins inside the target namespace."
-                exit 1
-              fi
-
-              if ! MATCHES_RAW="$(find_target "-n ${TARGET_SCAN_NAMESPACE}" 2>&1)"; then
-                echo "Jenkins service account cannot inspect deployments in namespace ${TARGET_SCAN_NAMESPACE}."
-                echo "Grant deployment permissions or set K8S_DEPLOYMENT and K8S_CONTAINER after RBAC is configured."
-                echo "${MATCHES_RAW}"
-                exit 1
-              fi
-
-              MATCHES="$(printf '%s\\n' "${MATCHES_RAW}" | sed '/^$/d')"
-              MATCH_COUNT="$(printf '%s\\n' "$MATCHES" | sed '/^$/d' | wc -l | tr -d ' ')"
-
-              if [ "$MATCH_COUNT" -eq 0 ]; then
-                echo "No deployment found using image ${IMAGE_NAME} in namespace ${TARGET_SCAN_NAMESPACE}."
-                echo "Set K8S_DEPLOYMENT and K8S_CONTAINER in Jenkins parameters if auto-discovery cannot find it."
-                exit 1
-              fi
-
-              if [ "$MATCH_COUNT" -gt 1 ]; then
-                echo "Multiple deployments found using image ${IMAGE_NAME}:"
-                printf '%s\\n' "$MATCHES"
-                echo "Set K8S_DEPLOYMENT and K8S_CONTAINER in Jenkins parameters to pick the exact target."
-                exit 1
-              fi
-
-              TARGET_NS="$(printf '%s' "$MATCHES" | cut -d'|' -f1)"
-              TARGET_DEPLOY="$(printf '%s' "$MATCHES" | cut -d'|' -f2)"
-              TARGET_CONTAINER="$(printf '%s' "$MATCHES" | cut -d'|' -f3)"
+            if [ -z "${TARGET_NS}" ] || [ -z "${TARGET_NAME}" ] || [ -z "${TARGET_CONTAINER}" ]; then
+              echo "K8S_NAMESPACE, K8S_RESOURCE_NAME, and K8S_CONTAINER must be set."
+              exit 1
             fi
 
-            echo "Deploying ${TARGET_IMAGE} to deployment/${TARGET_DEPLOY} in namespace ${TARGET_NS} (container: ${TARGET_CONTAINER})"
-            kubectl set image "deployment/${TARGET_DEPLOY}" "${TARGET_CONTAINER}=${TARGET_IMAGE}" -n "${TARGET_NS}"
-            kubectl rollout status "deployment/${TARGET_DEPLOY}" -n "${TARGET_NS}" --timeout=180s
-            kubectl get deployment "${TARGET_DEPLOY}" -n "${TARGET_NS}" -o wide
+            if [ "${TARGET_KIND}" = "rollout" ]; then
+              RESOURCE_REF="rollout.argoproj.io/${TARGET_NAME}"
+              echo "Patching ${RESOURCE_REF} in namespace ${TARGET_NS} with image ${TARGET_IMAGE}"
+
+              kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}"
+              kubectl patch "${RESOURCE_REF}" -n "${TARGET_NS}" --type='merge' -p "{
+                \\"spec\\": {
+                  \\"template\\": {
+                    \\"spec\\": {
+                      \\"containers\\": [
+                        {
+                          \\"name\\": \\"${TARGET_CONTAINER}\\",
+                          \\"image\\": \\"${TARGET_IMAGE}\\"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }"
+
+              UPDATED_IMAGE="$(kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o jsonpath="{range .spec.template.spec.containers[?(@.name=='${TARGET_CONTAINER}')]}{.image}{end}")"
+              if [ "${UPDATED_IMAGE}" != "${TARGET_IMAGE}" ]; then
+                echo "Rollout image update did not stick. Current image: ${UPDATED_IMAGE}"
+                exit 1
+              fi
+
+              kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o wide || kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o yaml
+            else
+              RESOURCE_REF="deployment/${TARGET_NAME}"
+              echo "Updating ${RESOURCE_REF} in namespace ${TARGET_NS} with image ${TARGET_IMAGE}"
+              kubectl set image "${RESOURCE_REF}" "${TARGET_CONTAINER}=${TARGET_IMAGE}" -n "${TARGET_NS}"
+              kubectl rollout status "${RESOURCE_REF}" -n "${TARGET_NS}" --timeout=180s
+              kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o wide
+            fi
           '''
         }
       }
