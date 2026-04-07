@@ -539,7 +539,7 @@ onMounted(() => {
     <div class="admin-page__header">
       <div>
         <p class="admin-page__eyebrow">Administrator</p>
-        <h1 class="admin-page__title">관리자 페이지</h1>
+        <h1 class="admin-page__title">판리자 페이지</h1>
         <p class="admin-page__description">
           사용자 관리, 스토리지 통계 및 분석, 플랜 및 결제 비중 통계를 각각 선택해서 확인할 수 있습니다.
         </p>

@@ -77,7 +77,7 @@ const router = createRouter({
           path: 'administrator',
           name: 'administrator',
           component: () => import('../views/dashboard/AdministratorView.vue'),
-          meta: { title: '관리자 페이지', requiresAuth: true, requiresAdmin: true },
+          meta: { title: '판리자 페이지', requiresAuth: true, requiresAdmin: true },
         },
         {
           path: '/workspace', 
