@@ -4,8 +4,8 @@ import BaseFileView from "@/components/BaseFileView.vue";
 import { useFileStore } from "@/stores/useFileStore";
 
 const SHARE_FILTERS = [
-  { value: "received", label: "공유받음" },
-  { value: "sent", label: "내가  공유함" },
+  { value: "received", label: "공유 받음" },
+  { value: "sent", label: "내가공유함" },
   { value: "all", label: "전체" },
 ];
 
