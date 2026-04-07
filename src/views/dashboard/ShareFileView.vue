@@ -10,7 +10,7 @@ const SHARE_FILTERS = [
 ];
 
 const fileStore = useFileStore();
-const activeFilter = ref("received");
+const activeFilter = ref("receiveda");
 
 const getSortTimestamp = (file) => Math.max(
   new Date(file?.sharedAt || 0).getTime() || 0,
