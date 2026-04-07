@@ -23,7 +23,7 @@ spec:
         - name: workspace
           mountPath: /workspace
     - name: kubectl
-      image: bitnami/kubectl:1.34.1
+      image: bitnami/kubectl@sha256:f6dd048d1c14d89ede9636cd6bee0ff0238579c33ea1e51b2fb1a1cfd62ea246
       command: ['/bin/sh','-c','sleep infinity']
       tty: true
   volumes:
@@ -39,12 +39,15 @@ spec:
     }
   }
 
+  parameters {
+    string(name: 'K8S_NAMESPACE', defaultValue: '', description: 'Target namespace. Leave blank to auto-detect.')
+    string(name: 'K8S_DEPLOYMENT', defaultValue: '', description: 'Target deployment name. Leave blank to auto-detect.')
+    string(name: 'K8S_CONTAINER', defaultValue: '', description: 'Target container name inside the deployment. Leave blank to auto-detect.')
+  }
+
   environment {
     IMAGE_NAME = 'lumisia/waffle-frontend'   
     IMAGE_TAG  = "${env.BUILD_NUMBER}"
-    K8S_NAMESPACE = ''
-    K8S_DEPLOYMENT = ''
-    K8S_CONTAINER = ''
   }
   stages {
     stage('Frontend Build') {
@@ -95,11 +98,7 @@ spec:
             }
 
             find_target() {
-              if [ -n "${K8S_NAMESPACE}" ]; then
-                SCOPE_ARGS="-n ${K8S_NAMESPACE}"
-              else
-                SCOPE_ARGS="-A"
-              fi
+              SCOPE_ARGS="$1"
 
               kubectl get deployment ${SCOPE_ARGS} -o jsonpath='{range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}{range .spec.template.spec.containers[*]}{.name}{"="}{.image}{","}{end}{"\\n"}{end}' \
               | while IFS='|' read -r ns deploy containers; do
@@ -123,19 +122,31 @@ spec:
               TARGET_DEPLOY="${K8S_DEPLOYMENT}"
               TARGET_CONTAINER="${K8S_CONTAINER}"
             else
-              MATCHES="$(find_target | sed '/^$/d')"
+              CURRENT_NAMESPACE="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || true)"
+
+              if [ -n "${K8S_NAMESPACE}" ]; then
+                MATCHES="$(find_target "-n ${K8S_NAMESPACE}" | sed '/^$/d')"
+              elif [ -n "${CURRENT_NAMESPACE}" ]; then
+                MATCHES="$(find_target "-n ${CURRENT_NAMESPACE}" | sed '/^$/d')"
+                if [ -z "$MATCHES" ]; then
+                  MATCHES="$(find_target "-A" | sed '/^$/d')"
+                fi
+              else
+                MATCHES="$(find_target "-A" | sed '/^$/d')"
+              fi
+
               MATCH_COUNT="$(printf '%s\\n' "$MATCHES" | sed '/^$/d' | wc -l | tr -d ' ')"
 
               if [ "$MATCH_COUNT" -eq 0 ]; then
                 echo "No deployment found using image ${IMAGE_NAME}."
-                echo "Set K8S_NAMESPACE, K8S_DEPLOYMENT, and K8S_CONTAINER in Jenkins if auto-discovery cannot find it."
+                echo "Set K8S_NAMESPACE, K8S_DEPLOYMENT, and K8S_CONTAINER in Jenkins parameters if auto-discovery cannot find it."
                 exit 1
               fi
 
               if [ "$MATCH_COUNT" -gt 1 ]; then
                 echo "Multiple deployments found using image ${IMAGE_NAME}:"
                 printf '%s\\n' "$MATCHES"
-                echo "Set K8S_NAMESPACE, K8S_DEPLOYMENT, and K8S_CONTAINER in Jenkins to pick the exact target."
+                echo "Set K8S_NAMESPACE, K8S_DEPLOYMENT, and K8S_CONTAINER in Jenkins parameters to pick the exact target."
                 exit 1
               fi
 
