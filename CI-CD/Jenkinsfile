@@ -131,6 +131,12 @@ spec:
 
             CURRENT_NAMESPACE="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || true)"
             TARGET_NS="${K8S_NAMESPACE:-${CURRENT_NAMESPACE:-helm-service}}"
+            FRONTEND_KIND="${FRONTEND_RESOURCE_KIND:-rollout}"
+            FRONTEND_NAME="${FRONTEND_RESOURCE_NAME:-waffle-release-wafflebear-frontend}"
+            FRONTEND_TARGET_CONTAINER="${FRONTEND_CONTAINER:-frontend}"
+            WEBSOCKET_KIND="${WEBSOCKET_RESOURCE_KIND:-rollout}"
+            WEBSOCKET_NAME="${WEBSOCKET_RESOURCE_NAME:-waffle-release-wafflebear-websocket}"
+            WEBSOCKET_TARGET_CONTAINER="${WEBSOCKET_CONTAINER:-websocket-server}"
 
             update_workload() {
               TARGET_KIND="$1"
@@ -179,8 +185,8 @@ spec:
               fi
             }
 
-            update_workload "${FRONTEND_RESOURCE_KIND}" "${FRONTEND_RESOURCE_NAME}" "${FRONTEND_CONTAINER}" "${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}"
-            update_workload "${WEBSOCKET_RESOURCE_KIND}" "${WEBSOCKET_RESOURCE_NAME}" "${WEBSOCKET_CONTAINER}" "${WEBSOCKET_IMAGE_NAME}:${IMAGE_TAG}"
+            update_workload "${FRONTEND_KIND}" "${FRONTEND_NAME}" "${FRONTEND_TARGET_CONTAINER}" "${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}"
+            update_workload "${WEBSOCKET_KIND}" "${WEBSOCKET_NAME}" "${WEBSOCKET_TARGET_CONTAINER}" "${WEBSOCKET_IMAGE_NAME}:${IMAGE_TAG}"
           '''
         }
       }
