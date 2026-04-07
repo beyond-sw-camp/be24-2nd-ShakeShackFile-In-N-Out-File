@@ -87,6 +87,7 @@ spec:
             set -eu
 
             TARGET_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
+            CURRENT_NAMESPACE="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || true)"
 
             matches_image() {
               case "$1" in
@@ -119,36 +120,39 @@ spec:
                 done
             }
 
-            if [ -n "${K8S_NAMESPACE}" ] && [ -n "${K8S_DEPLOYMENT}" ] && [ -n "${K8S_CONTAINER}" ]; then
-              TARGET_NS="${K8S_NAMESPACE}"
+            if [ -n "${K8S_DEPLOYMENT}" ] && [ -n "${K8S_CONTAINER}" ]; then
+              TARGET_NS="${K8S_NAMESPACE:-${CURRENT_NAMESPACE}}"
               TARGET_DEPLOY="${K8S_DEPLOYMENT}"
               TARGET_CONTAINER="${K8S_CONTAINER}"
             else
-              CURRENT_NAMESPACE="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || true)"
+              TARGET_SCAN_NAMESPACE="${K8S_NAMESPACE:-${CURRENT_NAMESPACE}}"
 
-              if [ -n "${K8S_NAMESPACE}" ]; then
-                MATCHES="$(find_target "-n ${K8S_NAMESPACE}" | sed '/^$/d')"
-              elif [ -n "${CURRENT_NAMESPACE}" ]; then
-                MATCHES="$(find_target "-n ${CURRENT_NAMESPACE}" | sed '/^$/d')"
-                if [ -z "$MATCHES" ]; then
-                  MATCHES="$(find_target "-A" | sed '/^$/d')"
-                fi
-              else
-                MATCHES="$(find_target "-A" | sed '/^$/d')"
+              if [ -z "${TARGET_SCAN_NAMESPACE}" ]; then
+                echo "Could not determine the namespace for deployment lookup."
+                echo "Set K8S_NAMESPACE, or run Jenkins inside the target namespace."
+                exit 1
               fi
 
+              if ! MATCHES_RAW="$(find_target "-n ${TARGET_SCAN_NAMESPACE}" 2>&1)"; then
+                echo "Jenkins service account cannot inspect deployments in namespace ${TARGET_SCAN_NAMESPACE}."
+                echo "Grant deployment permissions or set K8S_DEPLOYMENT and K8S_CONTAINER after RBAC is configured."
+                echo "${MATCHES_RAW}"
+                exit 1
+              fi
+
+              MATCHES="$(printf '%s\\n' "${MATCHES_RAW}" | sed '/^$/d')"
               MATCH_COUNT="$(printf '%s\\n' "$MATCHES" | sed '/^$/d' | wc -l | tr -d ' ')"
 
               if [ "$MATCH_COUNT" -eq 0 ]; then
-                echo "No deployment found using image ${IMAGE_NAME}."
-                echo "Set K8S_NAMESPACE, K8S_DEPLOYMENT, and K8S_CONTAINER in Jenkins parameters if auto-discovery cannot find it."
+                echo "No deployment found using image ${IMAGE_NAME} in namespace ${TARGET_SCAN_NAMESPACE}."
+                echo "Set K8S_DEPLOYMENT and K8S_CONTAINER in Jenkins parameters if auto-discovery cannot find it."
                 exit 1
               fi
 
               if [ "$MATCH_COUNT" -gt 1 ]; then
                 echo "Multiple deployments found using image ${IMAGE_NAME}:"
                 printf '%s\\n' "$MATCHES"
-                echo "Set K8S_NAMESPACE, K8S_DEPLOYMENT, and K8S_CONTAINER in Jenkins parameters to pick the exact target."
+                echo "Set K8S_DEPLOYMENT and K8S_CONTAINER in Jenkins parameters to pick the exact target."
                 exit 1
               fi
 
