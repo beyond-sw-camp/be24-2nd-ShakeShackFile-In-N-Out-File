@@ -26,6 +26,8 @@ spec:
       image: bitnami/kubectl@sha256:f6dd048d1c14d89ede9636cd6bee0ff0238579c33ea1e51b2fb1a1cfd62ea246
       command: ['/bin/sh','-c','sleep infinity']
       tty: true
+      securityContext:
+        runAsUser: 1000
   volumes:
     - name: workspace
       emptyDir: {}
