@@ -17,93 +17,18 @@ RUN npm run build
 # --- 2단계: 실행 (Nginx) ---
 FROM nginx:1.29-alpine AS frontend-runtime
 
-ARG BACKEND_UPSTREAM=backend-service:8080
-ARG REALTIME_UPSTREAM=websocket-server-service:1234
+ARG BACKEND_UPSTREAM=waffle-release-wafflebear-backend.helm-service.svc.cluster.local:8080
+ARG REALTIME_UPSTREAM=waffle-release-wafflebear-websocket.helm-service.svc.cluster.local:1234
+
+ENV BACKEND_UPSTREAM=${BACKEND_UPSTREAM}
+ENV REALTIME_UPSTREAM=${REALTIME_UPSTREAM}
 
 # 빌드된 정적 파일 복사 (보통 빌드 결과물은 dist 또는 build 폴더에 생깁니다)
 # Vite/Vue라면 dist, React라면 build일 확률이 높으니 확인해 보세요.
 COPY --from=frontend-build /app/dist /usr/share/nginx/html
 
 # Nginx 설정 (기존과 동일)
-RUN printf "server {\n\
-    listen 80;\n\
-    charset utf-8;\n\
-    underscores_in_headers on;\n\
-    root /usr/share/nginx/html;\n\
-    index index.html index.htm;\n\
-\n\
-    location ^~ /assets/ {\n\
-        try_files \$uri =404;\n\
-    }\n\
-\n\
-    location ^~ /src/ {\n\
-        return 404;\n\
-    }\n\
-\n\
-    location = /favicon.ico {\n\
-        try_files \$uri =404;\n\
-    }\n\
-\n\
-    location = /sw.js {\n\
-        try_files \$uri =404;\n\
-    }\n\
-\n\
-    location / {\n\
-        try_files \$uri \$uri/ /index.html;\n\
-    }\n\
-\n\
-    location ^~ /api/ws-stomp {\n\
-        proxy_pass http://$REALTIME_UPSTREAM;\n\
-        proxy_http_version 1.1;\n\
-        proxy_set_header Upgrade \$http_upgrade;\n\
-        proxy_set_header Connection \"upgrade\";\n\
-        proxy_set_header Host \$host;\n\
-        proxy_set_header X-Real-IP \$remote_addr;\n\
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n\
-        proxy_set_header X-Forwarded-Proto \$scheme;\n\
-    }\n\
-\n\
-    location ^~ /api/sse {\n\
-        proxy_pass http://$REALTIME_UPSTREAM;\n\
-        proxy_http_version 1.1;\n\
-        proxy_buffering off;\n\
-        proxy_cache off;\n\
-        proxy_read_timeout 3600s;\n\
-        proxy_set_header Host \$host;\n\
-        proxy_set_header X-Real-IP \$remote_addr;\n\
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n\
-        proxy_set_header X-Forwarded-Proto \$scheme;\n\
-    }\n\
-\n\
-    location ^~ /wss {\n\
-        proxy_pass http://$REALTIME_UPSTREAM;\n\
-        proxy_http_version 1.1;\n\
-        proxy_set_header Upgrade \$http_upgrade;\n\
-        proxy_set_header Connection \"upgrade\";\n\
-        proxy_set_header Host \$host;\n\
-        proxy_set_header X-Real-IP \$remote_addr;\n\
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n\
-        proxy_set_header X-Forwarded-Proto \$scheme;\n\
-    }\n\
-\n\
-    location = /api {\n\
-        proxy_pass http://$BACKEND_UPSTREAM;\n\
-        proxy_http_version 1.1;\n\
-        proxy_set_header Host \$host;\n\
-        proxy_set_header X-Real-IP \$remote_addr;\n\
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n\
-        proxy_set_header X-Forwarded-Proto \$scheme;\n\
-    }\n\
-\n\
-    location ^~ /api/ {\n\
-        proxy_pass http://$BACKEND_UPSTREAM;\n\
-        proxy_http_version 1.1;\n\
-        proxy_set_header Host \$host;\n\
-        proxy_set_header X-Real-IP \$remote_addr;\n\
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n\
-        proxy_set_header X-Forwarded-Proto \$scheme;\n\
-    }\n\
-}\n" > /etc/nginx/conf.d/default.conf
+COPY CI-CD/frontend-default.conf.template /etc/nginx/templates/default.conf.template
 
 EXPOSE 80
 

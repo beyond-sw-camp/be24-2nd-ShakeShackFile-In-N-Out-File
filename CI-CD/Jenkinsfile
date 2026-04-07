@@ -47,6 +47,7 @@ spec:
 
   parameters {
     string(name: 'K8S_NAMESPACE', defaultValue: 'helm-service', description: 'Target namespace.')
+    string(name: 'HELM_RELEASE_NAME', defaultValue: 'waffle-release', description: 'Helm release name used to derive service and rollout names.')
     choice(name: 'FRONTEND_RESOURCE_KIND', choices: ['rollout', 'deployment'], description: 'Frontend workload kind to update.')
     string(name: 'FRONTEND_RESOURCE_NAME', defaultValue: 'waffle-release-wafflebear-frontend', description: 'Frontend workload name.')
     string(name: 'FRONTEND_CONTAINER', defaultValue: 'frontend', description: 'Frontend container name inside the workload.')
@@ -57,7 +58,7 @@ spec:
 
   environment {
     DOCKERFILE_PATH = "${env.WORKSPACE}/CI-CD/Dockerfile"
-    FRONTEND_IMAGE_NAME = 'lumisia/waffle-frontend'
+    FRONTEND_IMAGE_NAME = 'lumisia/frontend'
     WEBSOCKET_IMAGE_NAME = 'lumisia/websocket-server'
     IMAGE_TAG = "v${env.BUILD_NUMBER}"
   }
@@ -90,29 +91,36 @@ spec:
       }
       steps {
         container('kaniko') {
-          sh """
-            /kaniko/executor \
-              --context=${WORKSPACE} \
-              --dockerfile=${DOCKERFILE_PATH} \
-              --target=frontend-runtime \
-              --destination=${FRONTEND_IMAGE_NAME}:${IMAGE_TAG} \
-              --destination=${FRONTEND_IMAGE_NAME}:latest \
-              --single-snapshot \
-              --use-new-run \
-              --snapshot-mode=redo
-          """
+          sh '''
+            set -eu
 
-          sh """
+            TARGET_NS="${K8S_NAMESPACE:-helm-service}"
+            HELM_RELEASE="${HELM_RELEASE_NAME:-waffle-release}"
+            BACKEND_UPSTREAM="${HELM_RELEASE}-wafflebear-backend.${TARGET_NS}.svc.cluster.local:8080"
+            REALTIME_UPSTREAM="${HELM_RELEASE}-wafflebear-websocket.${TARGET_NS}.svc.cluster.local:1234"
+
             /kaniko/executor \
-              --context=${WORKSPACE} \
-              --dockerfile=${DOCKERFILE_PATH} \
-              --target=websocket-runtime \
-              --destination=${WEBSOCKET_IMAGE_NAME}:${IMAGE_TAG} \
-              --destination=${WEBSOCKET_IMAGE_NAME}:latest \
+              --context="${WORKSPACE}" \
+              --dockerfile="${DOCKERFILE_PATH}" \
+              --target=frontend-runtime \
+              --build-arg BACKEND_UPSTREAM="${BACKEND_UPSTREAM}" \
+              --build-arg REALTIME_UPSTREAM="${REALTIME_UPSTREAM}" \
+              --destination="${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}" \
+              --destination="${FRONTEND_IMAGE_NAME}:latest" \
               --single-snapshot \
               --use-new-run \
               --snapshot-mode=redo
-          """
+
+            /kaniko/executor \
+              --context="${WORKSPACE}" \
+              --dockerfile="${DOCKERFILE_PATH}" \
+              --target=websocket-runtime \
+              --destination="${WEBSOCKET_IMAGE_NAME}:${IMAGE_TAG}" \
+              --destination="${WEBSOCKET_IMAGE_NAME}:latest" \
+              --single-snapshot \
+              --use-new-run \
+              --snapshot-mode=redo
+          '''
         }
       }
     }
@@ -131,12 +139,66 @@ spec:
 
             CURRENT_NAMESPACE="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || true)"
             TARGET_NS="${K8S_NAMESPACE:-${CURRENT_NAMESPACE:-helm-service}}"
+            HELM_RELEASE="${HELM_RELEASE_NAME:-waffle-release}"
+            LEGACY_FRONTEND_NAME="waffle-release-wafflebear-frontend"
+            LEGACY_WEBSOCKET_NAME="waffle-release-wafflebear-websocket"
             FRONTEND_KIND="${FRONTEND_RESOURCE_KIND:-rollout}"
-            FRONTEND_NAME="${FRONTEND_RESOURCE_NAME:-waffle-release-wafflebear-frontend}"
+            if [ -z "${FRONTEND_RESOURCE_NAME:-}" ] || [ "${FRONTEND_RESOURCE_NAME}" = "${LEGACY_FRONTEND_NAME}" ]; then
+              FRONTEND_NAME="${HELM_RELEASE}-wafflebear-frontend"
+            else
+              FRONTEND_NAME="${FRONTEND_RESOURCE_NAME}"
+            fi
             FRONTEND_TARGET_CONTAINER="${FRONTEND_CONTAINER:-frontend}"
             WEBSOCKET_KIND="${WEBSOCKET_RESOURCE_KIND:-rollout}"
-            WEBSOCKET_NAME="${WEBSOCKET_RESOURCE_NAME:-waffle-release-wafflebear-websocket}"
+            if [ -z "${WEBSOCKET_RESOURCE_NAME:-}" ] || [ "${WEBSOCKET_RESOURCE_NAME}" = "${LEGACY_WEBSOCKET_NAME}" ]; then
+              WEBSOCKET_NAME="${HELM_RELEASE}-wafflebear-websocket"
+            else
+              WEBSOCKET_NAME="${WEBSOCKET_RESOURCE_NAME}"
+            fi
             WEBSOCKET_TARGET_CONTAINER="${WEBSOCKET_CONTAINER:-websocket-server}"
+
+            wait_for_rollout() {
+              RESOURCE_REF="$1"
+              TIMEOUT_SECONDS="${2:-900}"
+              START_TIME="$(date +%s)"
+
+              while true; do
+                NOW="$(date +%s)"
+                ELAPSED="$((NOW - START_TIME))"
+
+                PHASE="$(kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+                MESSAGE="$(kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o jsonpath='{.status.message}' 2>/dev/null || true)"
+                CURRENT_HASH="$(kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o jsonpath='{.status.currentPodHash}' 2>/dev/null || true)"
+                STABLE_HASH="$(kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o jsonpath='{.status.stableRS}' 2>/dev/null || true)"
+                UPDATED_REPLICAS="$(kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o jsonpath='{.status.updatedReplicas}' 2>/dev/null || true)"
+                READY_REPLICAS="$(kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+                AVAILABLE_REPLICAS="$(kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)"
+
+                echo "Rollout ${RESOURCE_REF}: phase=${PHASE:-unknown}, updated=${UPDATED_REPLICAS:-0}, ready=${READY_REPLICAS:-0}, available=${AVAILABLE_REPLICAS:-0}, current=${CURRENT_HASH:-n/a}, stable=${STABLE_HASH:-n/a}"
+                if [ -n "${MESSAGE}" ]; then
+                  echo "Rollout message: ${MESSAGE}"
+                fi
+
+                case "${PHASE}" in
+                  Healthy)
+                    return 0
+                    ;;
+                  Degraded|Aborted)
+                    echo "Rollout ${RESOURCE_REF} entered ${PHASE}."
+                    kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o yaml
+                    exit 1
+                    ;;
+                esac
+
+                if [ "${ELAPSED}" -ge "${TIMEOUT_SECONDS}" ]; then
+                  echo "Timed out waiting for ${RESOURCE_REF} to become healthy."
+                  kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o yaml
+                  exit 1
+                fi
+
+                sleep 10
+              done
+            }
 
             update_workload() {
               TARGET_KIND="$1"
@@ -175,6 +237,7 @@ spec:
                   exit 1
                 fi
 
+                wait_for_rollout "${RESOURCE_REF}" 900
                 kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o wide || kubectl get "${RESOURCE_REF}" -n "${TARGET_NS}" -o yaml
               else
                 RESOURCE_REF="deployment/${TARGET_NAME}"
