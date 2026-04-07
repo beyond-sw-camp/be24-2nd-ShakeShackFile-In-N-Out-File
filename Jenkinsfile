@@ -51,11 +51,11 @@ spec:
       }
     }
 
-    stage('Gradle Build') {
+    stage('Frontend Build') {
       steps {
         container('node') {
           sh '''
-            npm i
+            npm ci
             npm run build
           '''
         }
